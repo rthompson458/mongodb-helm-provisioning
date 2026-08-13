@@ -1,0 +1,6 @@
+apiVersion: v2
+name: spacelift-helm-test
+description: Minimal Helm chart used to validate Spacelift Terraform-to-Helm deployment.
+type: application
+version: 0.1.0
+appVersion: "1.0"
