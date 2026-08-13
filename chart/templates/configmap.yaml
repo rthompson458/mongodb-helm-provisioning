@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spacelift-helm-test
+  namespace: default
+data:
+  message: "Spacelift Terraform Helm connectivity test succeeded"
