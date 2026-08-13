@@ -2,7 +2,7 @@ apiVersion: mongodb.com/v1
 kind: MongoDB
 
 metadata:
-  name: mongodb-poc
+  name: mongodb-development
   namespace: mongodb
 
 spec:
