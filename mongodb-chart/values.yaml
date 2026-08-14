@@ -4,3 +4,14 @@ mongodb:
   version: "8.0.0"
   opsManagerConfigMap: my-project
   credentialsSecret: organization-secret
+
+mongodbUser:
+  resourceName: mongodb-admin
+  username: mongodb-admin
+  authDatabase: admin
+  passwordSecret: mongodb-admin-password
+  passwordKey: password
+  connectionStringSecret: mongodb-admin-connection
+  roles:
+    - db: admin
+      name: root
