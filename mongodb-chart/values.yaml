@@ -25,3 +25,10 @@ mongodbUsers:
     roles:
       - db: admin
         name: readWriteAnyDatabase
+
+mongodbDatabases:
+  - name: Cars
+    collections:
+      - make
+      - model
+      - year
