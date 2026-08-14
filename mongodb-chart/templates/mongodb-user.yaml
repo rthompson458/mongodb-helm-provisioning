@@ -1,25 +1,28 @@
+{{ range $user := .Values.mongodbUsers }}
+---
 apiVersion: mongodb.com/v1
 kind: MongoDBUser
 
 metadata:
-  name: {{ .Values.mongodbUser.resourceName }}
-  namespace: {{ .Release.Namespace }}
+  name: {{ $user.resourceName }}
+  namespace: {{ $.Release.Namespace }}
 
 spec:
-  username: {{ .Values.mongodbUser.username | quote }}
-  db: {{ .Values.mongodbUser.authDatabase | quote }}
+  username: {{ $user.username | quote }}
+  db: {{ $user.authDatabase | quote }}
 
   mongodbResourceRef:
-    name: {{ .Values.mongodb.name }}
+    name: {{ $.Values.mongodb.name }}
 
   passwordSecretKeyRef:
-    name: {{ .Values.mongodbUser.passwordSecret }}
-    key: {{ .Values.mongodbUser.passwordKey }}
+    name: {{ $user.passwordSecret }}
+    key: {{ $user.passwordKey }}
 
-  connectionStringSecretName: {{ .Values.mongodbUser.connectionStringSecret }}
+  connectionStringSecretName: {{ $user.connectionStringSecret }}
 
   roles:
-{{- range .Values.mongodbUser.roles }}
-    - db: {{ .db | quote }}
-      name: {{ .name | quote }}
-{{- end }}
+{{ range $role := $user.roles }}
+    - db: {{ $role.db | quote }}
+      name: {{ $role.name | quote }}
+{{ end }}
+{{ end }}
