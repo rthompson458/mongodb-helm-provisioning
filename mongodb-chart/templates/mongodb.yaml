@@ -2,7 +2,7 @@ apiVersion: mongodb.com/v1
 kind: MongoDB
 
 metadata:
-  name: mongodb-development
+  name: {{ .Values.mongodb.name }}
   namespace: mongodb
 
 spec:
