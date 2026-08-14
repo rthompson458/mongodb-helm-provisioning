@@ -3,3 +3,4 @@ mongodb:
   members: 3
   version: "8.0.0"
   opsManagerConfigMap: my-project
+  credentialsSecret: organization-secret
