@@ -1,0 +1,25 @@
+apiVersion: mongodb.com/v1
+kind: MongoDBUser
+
+metadata:
+  name: {{ .Values.mongodbUser.resourceName }}
+  namespace: {{ .Release.Namespace }}
+
+spec:
+  username: {{ .Values.mongodbUser.username | quote }}
+  db: {{ .Values.mongodbUser.authDatabase | quote }}
+
+  mongodbResourceRef:
+    name: {{ .Values.mongodb.name }}
+
+  passwordSecretKeyRef:
+    name: {{ .Values.mongodbUser.passwordSecret }}
+    key: {{ .Values.mongodbUser.passwordKey }}
+
+  connectionStringSecretName: {{ .Values.mongodbUser.connectionStringSecret }}
+
+  roles:
+{{- range .Values.mongodbUser.roles }}
+    - db: {{ .db | quote }}
+      name: {{ .name | quote }}
+{{- end }}
