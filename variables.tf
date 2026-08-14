@@ -25,3 +25,23 @@ variable "mongodb_databases" {
     }
   ]
 }
+
+variable "mongodb_request_users" {
+  description = "Request-driven MongoDB users to provision"
+
+  type = list(object({
+    resourceName           = string
+    username               = string
+    authDatabase           = string
+    passwordSecret         = string
+    passwordKey            = string
+    connectionStringSecret = string
+
+    roles = list(object({
+      db   = string
+      name = string
+    }))
+  }))
+
+  default = []
+}
