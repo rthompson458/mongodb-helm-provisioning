@@ -24,4 +24,4 @@ mongodbUsers:
     connectionStringSecret: app-user-connection
     roles:
       - db: application
-        name: readWrite
+        name: read
