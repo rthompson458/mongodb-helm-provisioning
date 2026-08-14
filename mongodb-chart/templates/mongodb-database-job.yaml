@@ -1,0 +1,57 @@
+apiVersion: batch/v1
+kind: Job
+
+metadata:
+  name: mongodb-database-provisioner
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation
+
+spec:
+  backoffLimit: 3
+
+  template:
+    metadata:
+      name: mongodb-database-provisioner
+
+    spec:
+      restartPolicy: Never
+
+      containers:
+        - name: mongodb-database-provisioner
+          image: mongo:8.0
+
+          env:
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-provisioner-connection
+                  key: connectionString.standard
+
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+
+              echo "Starting MongoDB database provisioning"
+
+              mongosh "$MONGODB_URI" --quiet <<'EOF'
+{{- range $database := .Values.mongodbDatabases }}
+              {
+                const database = db.getSiblingDB({{ $database.name | quote }});
+
+{{- range $collection := $database.collections }}
+                if (!database.getCollectionNames().includes({{ $collection | quote }})) {
+                  database.createCollection({{ $collection | quote }});
+                  print("Created {{ $database.name }}.{{ $collection }}");
+                } else {
+                  print("Exists {{ $database.name }}.{{ $collection }}");
+                }
+{{- end }}
+              }
+{{- end }}
+              EOF
+
+              echo "MongoDB database provisioning completed"
