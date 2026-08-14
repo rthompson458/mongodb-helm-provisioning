@@ -10,8 +10,8 @@ spec:
   members: {{ .Values.mongodb.members }}
   version: {{ .Values.mongodb.version | quote }}
 
-opsManager:
-  configMapRef:
-    name: {{ .Values.mongodb.opsManagerConfigMap }}
+  opsManager:
+    configMapRef:
+      name: {{ .Values.mongodb.opsManagerConfigMap }}
 
-credentials: organization-secret
+  credentials: organization-secret
