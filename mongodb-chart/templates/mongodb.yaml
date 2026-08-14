@@ -8,7 +8,7 @@ metadata:
 spec:
   type: ReplicaSet
   members: {{ .Values.mongodb.members }}
-  version: "8.0.0"
+  version: {{ .Values.mongodb.version | quote }}
 
   opsManager:
     configMapRef:
