@@ -15,3 +15,13 @@ mongodbUsers:
     roles:
       - db: admin
         name: root
+        
+  - resourceName: mongodb-provisioner
+    username: mongodb-provisioner
+    authDatabase: admin
+    passwordSecret: mongodb-provisioner-password
+    passwordKey: password
+    connectionStringSecret: mongodb-provisioner-connection
+    roles:
+      - db: admin
+        name: readWriteAnyDatabase
