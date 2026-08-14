@@ -14,4 +14,4 @@ opsManager:
   configMapRef:
     name: {{ .Values.mongodb.opsManagerConfigMap }}
 
-  credentials: organization-secret
+credentials: organization-secret
