@@ -15,3 +15,12 @@ mongodbUsers:
     roles:
       - db: admin
         name: root
+  - resourceName: app-user
+    username: app-user
+    authDatabase: admin
+    passwordSecret: app-user-password
+    passwordKey: password
+    connectionStringSecret: app-user-connection
+    roles:
+      - db: application
+        name: readWrite
