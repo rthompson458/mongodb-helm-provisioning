@@ -3,9 +3,9 @@ resource "helm_release" "spacelift_helm_test" {
   chart     = "./chart"
   namespace = "default"
 }
+
 resource "helm_release" "mongodb_provisioning" {
-  name           = "mongodb-provisioning"
-  chart          = "./mongodb-chart"
-  namespace      = "mongodb"
-  take_ownership = true
+  name      = "mongodb-provisioning"
+  chart     = "./mongodb-chart"
+  namespace = "mongodb"
 }
