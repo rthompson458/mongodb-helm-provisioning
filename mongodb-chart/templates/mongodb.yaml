@@ -10,6 +10,11 @@ spec:
   members: {{ .Values.mongodb.members }}
   version: {{ .Values.mongodb.version | quote }}
 
+  security:
+    authentication:
+      enabled: true
+      modes: ["SCRAM"]
+
   opsManager:
     configMapRef:
       name: {{ .Values.mongodb.opsManagerConfigMap }}
