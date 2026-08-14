@@ -15,6 +15,7 @@ mongodbUsers:
     roles:
       - db: admin
         name: root
+        
   - resourceName: app-user
     username: app-user
     authDatabase: admin
