@@ -32,3 +32,4 @@ mongodbDatabases:
       - make
       - model
       - year
+      - color
