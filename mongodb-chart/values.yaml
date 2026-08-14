@@ -33,3 +33,8 @@ mongodbDatabases:
       - model
       - year
       - color
+  - name: Inventory
+    collections:
+      - products
+      - warehouses
+      
