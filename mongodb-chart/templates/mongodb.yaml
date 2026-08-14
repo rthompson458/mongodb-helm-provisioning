@@ -3,7 +3,7 @@ kind: MongoDB
 
 metadata:
   name: {{ .Values.mongodb.name }}
-  namespace: mongodb
+  namespace: {{ .Release.Namespace }}
 
 spec:
   type: ReplicaSet
