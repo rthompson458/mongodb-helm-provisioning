@@ -1,4 +1,4 @@
-{{ range $user := .Values.mongodbUsers }}
+{{ range $user := concat (.Values.mongodbUsers | default (list)) (.Values.mongodbRequestUsers | default (list)) }}
 ---
 apiVersion: mongodb.com/v1
 kind: MongoDBUser
