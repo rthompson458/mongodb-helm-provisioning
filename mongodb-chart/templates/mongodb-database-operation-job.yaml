@@ -1,4 +1,6 @@
 {{- if gt (len (.Values.mongodbDatabaseOperations | default (list))) 0 }}
+{{- $firstOperation := index .Values.mongodbDatabaseOperations 0 }}
+{{- $isAudit := eq $firstOperation.action "auditState" }}
 apiVersion: batch/v1
 kind: Job
 
@@ -19,6 +21,11 @@ spec:
 
     spec:
       restartPolicy: Never
+      serviceAccountName: mongodb-runtime-audit
+
+      volumes:
+        - name: audit-output
+          emptyDir: {}
 
       containers:
         - name: mongodb-database-operation
@@ -30,6 +37,10 @@ spec:
                   name: mongodb-admin-connection
                   key: connectionString.standard
 
+          volumeMounts:
+            - name: audit-output
+              mountPath: /audit-output
+
           command:
             - /bin/bash
             - -c
@@ -37,7 +48,10 @@ spec:
               set -euo pipefail
 
               echo "Starting controlled MongoDB management operation"
-              mongosh "$MONGODB_URI" --quiet <<'EOF_MONGO'
+
+              # tee keeps the normal Job log while also giving the audit path a
+              # local copy that the publisher sidecar can pass to Terraform.
+              if mongosh "$MONGODB_URI" --quiet <<'EOF_MONGO' | tee /audit-output/mongosh.log
               const operations = {{ .Values.mongodbDatabaseOperations | default (list) | toJson }};
 
               function fail(message) {
@@ -165,5 +179,85 @@ spec:
                 fail(`Unsupported management action '${op.action}'.`);
               }
               EOF_MONGO
+              then
+                :
+              else
+                status=$?
+                {{- if $isAudit }}
+                touch /audit-output/failed
+                {{- end }}
+                exit "$status"
+              fi
+
+              {{- if $isAudit }}
+              marker="$(grep 'MONGOCONTROL_RUNTIME_STATE_JSON=' /audit-output/mongosh.log | tail -1 || true)"
+              if [[ -z "$marker" ]]; then
+                echo "ERROR: Audit completed but no runtime-state marker was produced."
+                exit 43
+              fi
+
+              printf '%s' "${marker#*MONGOCONTROL_RUNTIME_STATE_JSON=}" > /audit-output/runtime-state.json
+              touch /audit-output/ready
+              {{- end }}
+
               echo "Controlled MongoDB management operation completed"
+
+        {{- if $isAudit }}
+        # Helm captures hook completion but does not copy successful hook pod
+        # stdout into Terraform logs. Publish the JSON to a ConfigMap so the
+        # Kubernetes provider can read it after the Helm release finishes.
+        - name: mongodb-runtime-audit-publisher
+          image: curlimages/curl:8.10.1
+          volumeMounts:
+            - name: audit-output
+              mountPath: /audit-output
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+
+              while [ ! -f /audit-output/ready ] && [ ! -f /audit-output/failed ]; do
+                sleep 1
+              done
+
+              if [ -f /audit-output/failed ]; then
+                echo "Audit container failed before a runtime snapshot was available."
+                exit 0
+              fi
+
+              snapshot_b64="$(base64 /audit-output/runtime-state.json | tr -d '\n')"
+              token="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+              ca_file="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+              namespace="{{ .Release.Namespace }}"
+              name="mongodb-runtime-audit"
+              api="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS}"
+              endpoint="${api}/api/v1/namespaces/${namespace}/configmaps"
+              object="${endpoint}/${name}"
+
+              status="$(curl -sS -o /dev/null -w '%{http_code}' --cacert "$ca_file" \
+                -H "Authorization: Bearer $token" "$object")"
+
+              if [ "$status" = "200" ]; then
+                body="$(printf '{"binaryData":{"runtime-state.json":"%s"}}' "$snapshot_b64")"
+                curl -sS --fail-with-body --cacert "$ca_file" \
+                  -H "Authorization: Bearer $token" \
+                  -H "Content-Type: application/merge-patch+json" \
+                  -X PATCH "$object" \
+                  --data "$body" >/dev/null
+              elif [ "$status" = "404" ]; then
+                body="$(printf '{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"%s","namespace":"%s"},"binaryData":{"runtime-state.json":"%s"}}' \
+                  "$name" "$namespace" "$snapshot_b64")"
+                curl -sS --fail-with-body --cacert "$ca_file" \
+                  -H "Authorization: Bearer $token" \
+                  -H "Content-Type: application/json" \
+                  -X POST "$endpoint" \
+                  --data "$body" >/dev/null
+              else
+                echo "ERROR: Kubernetes API returned HTTP $status while reading the audit ConfigMap."
+                exit 44
+              fi
+
+              echo "Published MongoControl runtime audit snapshot"
+        {{- end }}
 {{- end }}
