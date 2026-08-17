@@ -13,15 +13,19 @@ resource "helm_release" "mongodb_provisioning" {
 }
 
 locals {
+  # AuditState is represented as a temporary database operation.
+  # Most normal Terraform runs do not contain an audit operation.
   mongodb_runtime_audit_requested = anytrue([
     for operation in var.mongodb_database_operations :
     try(operation.action, "") == "auditState"
   ])
 }
 
-# The audit Job writes its result to a short-lived ConfigMap. Reading that
-# ConfigMap through Terraform avoids depending on kubectl being installed in
-# the Spacelift runner container.
+# During an AuditState run, the Kubernetes Job publishes the MongoDB runtime
+# inventory to a ConfigMap named mongodb-runtime-audit.
+#
+# count is zero during normal non-audit runs. This prevents Terraform from
+# trying to read the ConfigMap when an audit was not requested.
 data "kubernetes_resources" "mongodb_runtime_audit" {
   count = local.mongodb_runtime_audit_requested ? 1 : 0
 
@@ -33,10 +37,19 @@ data "kubernetes_resources" "mongodb_runtime_audit" {
   depends_on = [helm_release.mongodb_provisioning]
 }
 
-# Terraform prints root outputs at the end of apply. MongoControl.py reads this
-# marker from the normal Spacelift Terraform logs and decodes the base64 JSON.
+# MongoControl.py reads this output from the normal Spacelift Terraform logs.
+#
+# IMPORTANT:
+# On a normal non-audit run, the data source above has zero instances.
+# Therefore, directly referencing [0] would cause Terraform's
+# "Invalid index on empty tuple" error.
+#
+# try() safely returns an empty string when no audit result exists.
+# During an actual AuditState run, the ConfigMap exists and the base64
+# runtime-state payload is returned instead.
 output "mongodb_runtime_audit_result" {
-  value = local.mongodb_runtime_audit_requested && length(data.kubernetes_resources.mongodb_runtime_audit[0].objects) > 0 ? (
-    "MONGOCONTROL_RUNTIME_STATE_B64=${try(data.kubernetes_resources.mongodb_runtime_audit[0].objects[0].binaryData["runtime-state.json"], "")}"
-  ) : ""
+  value = try(
+    "MONGOCONTROL_RUNTIME_STATE_B64=${data.kubernetes_resources.mongodb_runtime_audit[0].objects[0].binaryData["runtime-state.json"]}",
+    ""
+  )
 }
