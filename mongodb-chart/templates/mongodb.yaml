@@ -14,7 +14,9 @@ spec:
     authentication:
       enabled: true
       modes: ["SCRAM"]
-      ignoreUnknownUsers: true
+      # DBaaS is authoritative for MongoDB users. Unknown users created outside
+      # the MongoDBUser/Operator path must not become persistent managed state.
+      ignoreUnknownUsers: false
 
   opsManager:
     configMapRef:
