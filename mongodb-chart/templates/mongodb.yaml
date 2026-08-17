@@ -14,6 +14,7 @@ spec:
     authentication:
       enabled: true
       modes: ["SCRAM"]
+      ignoreUnknownUsers: true
 
   opsManager:
     configMapRef:
