@@ -45,3 +45,17 @@ variable "mongodb_request_users" {
 
   default = []
 }
+
+variable "mongodb_database_operations" {
+  description = "One-shot controlled MongoDB database and collection management operations"
+
+  type = list(object({
+    id         = string
+    action     = string
+    database   = string
+    collection = string
+    newName    = string
+  }))
+
+  default = []
+}

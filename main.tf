@@ -5,8 +5,9 @@ resource "helm_release" "mongodb_provisioning" {
 
   values = [
     yamlencode({
-      mongodbDatabases    = var.mongodb_databases
-      mongodbRequestUsers = var.mongodb_request_users
+      mongodbDatabases          = var.mongodb_databases
+      mongodbRequestUsers       = var.mongodb_request_users
+      mongodbDatabaseOperations = var.mongodb_database_operations
     })
   ]
 }

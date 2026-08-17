@@ -19,10 +19,15 @@ spec:
     key: {{ $user.passwordKey }}
 
   connectionStringSecretName: {{ $user.connectionStringSecret }}
+{{- if $user.roles }}
 
   roles:
 {{ range $role := $user.roles }}
     - db: {{ $role.db | quote }}
       name: {{ $role.name | quote }}
 {{ end }}
+{{- else }}
+
+  roles: []
+{{- end }}
 {{ end }}

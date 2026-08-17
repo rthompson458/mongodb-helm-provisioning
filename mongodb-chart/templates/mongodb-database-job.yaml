@@ -6,6 +6,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   annotations:
     "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
     "helm.sh/hook-delete-policy": before-hook-creation
 
 spec:
@@ -21,7 +22,6 @@ spec:
       containers:
         - name: mongodb-database-provisioner
           image: mongo:8.0
-
           env:
             - name: MONGODB_URI
               valueFrom:
@@ -36,22 +36,60 @@ spec:
               set -e
 
               echo "Starting MongoDB database provisioning"
+              mongosh "$MONGODB_URI" --quiet <<'EOF_MONGO'
+              const desiredDatabases = {{ .Values.mongodbDatabases | default (list) | toJson }};
+              const operations = {{ .Values.mongodbDatabaseOperations | default (list) | toJson }};
 
-              mongosh "$MONGODB_URI" --quiet <<'EOF'
-{{- range $database := .Values.mongodbDatabases }}
-              {
-                const database = db.getSiblingDB({{ $database.name | quote }});
+              let effectiveDatabases = desiredDatabases.map(database => ({
+                name: database.name,
+                collections: [...database.collections]
+              }));
 
-{{- range $collection := $database.collections }}
-                if (!database.getCollectionNames().includes({{ $collection | quote }})) {
-                  database.createCollection({{ $collection | quote }});
-                  print("Created {{ $database.name }}.{{ $collection }}");
-                } else {
-                  print("Exists {{ $database.name }}.{{ $collection }}");
+              // During the same Helm upgrade, destructive/rename operations run
+              // before this Job. Apply those transformations to the desired list
+              // so the additive provisioner does not recreate deleted/renamed data.
+              for (const op of operations) {
+                if (op.action === "deleteDatabase") {
+                  effectiveDatabases = effectiveDatabases.filter(
+                    database => database.name !== op.database
+                  );
+                  continue;
                 }
-{{- end }}
-              }
-{{- end }}
-              EOF
 
+                const database = effectiveDatabases.find(
+                  item => item.name === op.database
+                );
+                if (!database) {
+                  continue;
+                }
+
+                if (op.action === "deleteCollection") {
+                  database.collections = database.collections.filter(
+                    collection => collection !== op.collection
+                  );
+                  continue;
+                }
+
+                if (op.action === "renameCollection") {
+                  database.collections = database.collections.map(
+                    collection => collection === op.collection ? op.newName : collection
+                  );
+                  database.collections = [...new Set(database.collections)];
+                }
+              }
+
+              for (const databaseDefinition of effectiveDatabases) {
+                const database = db.getSiblingDB(databaseDefinition.name);
+                const existingCollections = database.getCollectionNames();
+
+                for (const collection of databaseDefinition.collections) {
+                  if (!existingCollections.includes(collection)) {
+                    database.createCollection(collection);
+                    print(`Created ${databaseDefinition.name}.${collection}`);
+                  } else {
+                    print(`Exists ${databaseDefinition.name}.${collection}`);
+                  }
+                }
+              }
+              EOF_MONGO
               echo "MongoDB database provisioning completed"

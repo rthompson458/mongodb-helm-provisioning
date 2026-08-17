@@ -1,0 +1,123 @@
+{{- if gt (len (.Values.mongodbDatabaseOperations | default (list))) 0 }}
+apiVersion: batch/v1
+kind: Job
+
+metadata:
+  name: mongodb-database-operation
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+
+spec:
+  backoffLimit: 0
+
+  template:
+    metadata:
+      name: mongodb-database-operation
+
+    spec:
+      restartPolicy: Never
+
+      containers:
+        - name: mongodb-database-operation
+          image: mongo:8.0
+          env:
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: mongodb-admin-connection
+                  key: connectionString.standard
+
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+
+              echo "Starting controlled MongoDB management operation"
+              mongosh "$MONGODB_URI" --quiet <<'EOF_MONGO'
+              const operations = {{ .Values.mongodbDatabaseOperations | default (list) | toJson }};
+
+              function fail(message) {
+                print("ERROR: " + message);
+                quit(42);
+              }
+
+              for (const op of operations) {
+                print(`Operation ${op.id}: ${op.action}`);
+
+                if (["admin", "config", "local"].includes(op.database)) {
+                  fail(`Protected database '${op.database}' cannot be managed by this operation job.`);
+                }
+
+                const targetDb = db.getSiblingDB(op.database);
+
+                if (op.action === "renameCollection") {
+                  const collections = targetDb.getCollectionNames();
+                  const sourceExists = collections.includes(op.collection);
+                  const targetExists = collections.includes(op.newName);
+
+                  if (sourceExists && targetExists) {
+                    fail(`Cannot rename ${op.database}.${op.collection} to ${op.newName}: target collection already exists.`);
+                  }
+
+                  if (!sourceExists && targetExists) {
+                    print(`Already renamed ${op.database}.${op.collection} to ${op.newName}`);
+                    continue;
+                  }
+
+                  if (!sourceExists && !targetExists) {
+                    fail(`Cannot rename ${op.database}.${op.collection}: source collection does not exist.`);
+                  }
+
+                  targetDb.getCollection(op.collection).renameCollection(op.newName, false);
+                  print(`Renamed ${op.database}.${op.collection} to ${op.newName}`);
+                  continue;
+                }
+
+                if (op.action === "deleteCollection") {
+                  const collections = targetDb.getCollectionNames();
+                  if (!collections.includes(op.collection)) {
+                    print(`Already absent ${op.database}.${op.collection}`);
+                    continue;
+                  }
+
+                  const firstDocument = targetDb.getCollection(op.collection).findOne({}, { _id: 1 });
+                  if (firstDocument !== null) {
+                    fail(
+                      `Cannot delete collection '${op.collection}' from database '${op.database}': ` +
+                      `the collection is not empty. No collection was deleted.`
+                    );
+                  }
+
+                  const dropped = targetDb.getCollection(op.collection).drop();
+                  if (!dropped) {
+                    fail(`MongoDB did not confirm deletion of ${op.database}.${op.collection}.`);
+                  }
+                  print(`Deleted empty collection ${op.database}.${op.collection}`);
+                  continue;
+                }
+
+                if (op.action === "deleteDatabase") {
+                  const databaseNames = db.adminCommand({ listDatabases: 1, nameOnly: true })
+                    .databases.map(item => item.name);
+                  if (!databaseNames.includes(op.database)) {
+                    print(`Already absent database ${op.database}`);
+                    continue;
+                  }
+
+                  const result = targetDb.dropDatabase();
+                  if (!result || result.ok !== 1) {
+                    fail(`MongoDB did not confirm deletion of database '${op.database}'.`);
+                  }
+                  print(`Deleted database ${op.database}`);
+                  continue;
+                }
+
+                fail(`Unsupported management action '${op.action}'.`);
+              }
+              EOF_MONGO
+              echo "Controlled MongoDB management operation completed"
+{{- end }}

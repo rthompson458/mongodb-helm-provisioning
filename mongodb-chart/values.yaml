@@ -38,3 +38,9 @@ mongodbDatabases:
       - products
       - warehouses
       
+
+mongodbRequestUsers: []
+
+# Controlled one-shot operations submitted by MongoControl.py.
+# Supported actions: renameCollection, deleteCollection, deleteDatabase.
+mongodbDatabaseOperations: []
