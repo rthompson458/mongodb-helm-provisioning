@@ -42,5 +42,5 @@ mongodbDatabases:
 mongodbRequestUsers: []
 
 # Controlled one-shot operations submitted by MongoControl.py.
-# Supported actions: renameCollection, deleteCollection, deleteDatabase.
+# Supported actions: auditState, renameCollection, deleteCollection, deleteDatabase.
 mongodbDatabaseOperations: []

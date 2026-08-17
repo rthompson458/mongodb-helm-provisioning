@@ -48,6 +48,52 @@ spec:
               for (const op of operations) {
                 print(`Operation ${op.id}: ${op.action}`);
 
+                if (op.action === "auditState") {
+                  const protectedDatabases = new Set(["admin", "config", "local"]);
+                  const databaseNames = db.adminCommand({ listDatabases: 1, nameOnly: true })
+                    .databases.map(item => item.name)
+                    .filter(name => !protectedDatabases.has(name))
+                    .sort((a, b) => a.localeCompare(b));
+
+                  const databases = databaseNames.map(name => {
+                    const target = db.getSiblingDB(name);
+                    const collections = target
+                      .getCollectionInfos({}, { nameOnly: true })
+                      .filter(info => info.type !== "view" && !info.name.startsWith("system."))
+                      .map(info => info.name)
+                      .sort((a, b) => a.localeCompare(b));
+                    return { name, collections };
+                  });
+
+                  const usersResult = db.getSiblingDB("admin").runCommand({
+                    usersInfo: { forAllDBs: true },
+                    showCredentials: false,
+                    showCustomData: false
+                  });
+                  if (!usersResult || usersResult.ok !== 1) {
+                    fail("MongoDB did not return the runtime user inventory.");
+                  }
+
+                  const users = usersResult.users
+                    .map(user => ({
+                      username: user.user,
+                      authDatabase: user.db,
+                      roles: (user.roles || []).map(role => ({
+                        db: role.db,
+                        name: role.role
+                      })).sort((a, b) =>
+                        a.db.localeCompare(b.db) || a.name.localeCompare(b.name)
+                      )
+                    }))
+                    .sort((a, b) =>
+                      a.username.localeCompare(b.username) ||
+                      a.authDatabase.localeCompare(b.authDatabase)
+                    );
+
+                  print("MONGOCONTROL_RUNTIME_STATE_JSON=" + JSON.stringify({ databases, users }));
+                  continue;
+                }
+
                 if (["admin", "config", "local"].includes(op.database)) {
                   fail(`Protected database '${op.database}' cannot be managed by this operation job.`);
                 }

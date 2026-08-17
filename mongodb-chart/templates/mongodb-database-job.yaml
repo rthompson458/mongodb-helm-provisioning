@@ -45,6 +45,15 @@ spec:
                 collections: [...database.collections]
               }));
 
+              // auditState is read-only. It captures MongoDB runtime before this
+              // post-upgrade Job executes. Do not recreate a database or collection
+              // that the audit intentionally observed as absent. MongoControl.py
+              // will adopt the snapshot into Spacelift after the run finishes.
+              if (operations.some(op => op.action === "auditState")) {
+                print("Runtime audit detected; additive database provisioning skipped.");
+                quit(0);
+              }
+
               // During the same Helm upgrade, destructive/rename operations run
               // before this Job. Apply those transformations to the desired list
               // so the additive provisioner does not recreate deleted/renamed data.
