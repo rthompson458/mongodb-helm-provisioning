@@ -11,7 +11,7 @@ from terraform_controller.config import load_config
 from terraform_controller.controller import (
     add_database, add_replica_set, delete_database, delete_replica_set,
     disable_owner, list_database, list_databases, list_replica_set,
-    list_replica_sets, recover_password, reset_vault, rotate_password,
+    list_replica_sets, reconcile, recover_password, reset_vault, rotate_password,
 )
 from terraform_controller.vault import VaultClient
 
@@ -119,6 +119,10 @@ Use '<command> --help' for command-specific help.
     db_args(x)
     x.add_argument("account_type", metavar="ACCOUNT_TYPE", help="Owner, Read, or ReadWrite")
 
+    sub(sp, "Reconcile", "Reapply and repair managed controller resources.",
+        "Refreshes Terraform from GitHub, reapplies the Vault-backed desired inventory, and waits for every managed ReplicaSet and internal controller account to converge.",
+        "terraformController.py Reconcile")
+
     x = sub(sp, "ResetVault", "Delete all managed databases and their accounts.",
             "Destructive demo reset. Drops all non-system databases on controller-managed ReplicaSets and removes their database accounts and Vault records. Managed ReplicaSets remain running and empty.",
             "terraformController.py ResetVault --confirm")
@@ -143,6 +147,7 @@ def main() -> int:
             "ListDatabases": lambda: list_databases(config, vault),
             "ListDatabase": lambda: list_database(config, vault, args.replica_set, args.database),
             "RecoverPassword": lambda: recover_password(config, vault, args.replica_set, args.database, args.account_type),
+            "Reconcile": lambda: reconcile(config, vault),
             "ResetVault": lambda: reset_vault(config, vault, args.confirm),
         }
         actions[args.command]()
