@@ -35,6 +35,7 @@ DisableOwner REPLICASET DATABASE
 ListDatabases
 ListDatabase REPLICASET DATABASE
 RecoverPassword REPLICASET DATABASE ACCOUNT_TYPE
+Reconcile
 
 ResetVault --confirm
 ```
@@ -61,6 +62,37 @@ python3 terraformController.py AddDatabase --help
 python3 terraformController.py RecoverPassword --help
 python3 terraformController.py ResetVault --help
 ```
+
+## Ops Manager project isolation
+
+MongoDB permits only one MongoDB resource per Ops Manager project. terraformController therefore does **not** point managed ReplicaSets directly at the existing `my-project` ConfigMap because that ConfigMap hard-codes:
+
+```text
+projectName: mongodb-development
+```
+
+Instead, Terraform reads the working `baseUrl` and `orgId` from `my-project` and creates a controller-owned ConfigMap:
+
+```text
+tc-ops-manager-projects
+```
+
+That ConfigMap intentionally omits `projectName`. MongoDB Operator behavior then creates/uses a unique Ops Manager project matching each MongoDB resource name:
+
+```text
+rs1 -> Ops Manager project rs1
+rs2 -> Ops Manager project rs2
+```
+
+The existing `organization-secret` is reused for Ops Manager API authentication.
+
+## Reconcile
+
+```bash
+python3 terraformController.py Reconcile
+```
+
+`Reconcile` refreshes the Terraform module from GitHub, reapplies the complete desired inventory reconstructed from Vault, and waits for all managed ReplicaSets and internal controller accounts to converge. It is useful after controller/Terraform upgrades or after repairing a Pending deployment.
 
 ## ReplicaSet rules
 
