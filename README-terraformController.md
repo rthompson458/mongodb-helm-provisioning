@@ -164,13 +164,15 @@ python3 terraformController.py ResetVault --confirm
 
 This is intentionally destructive.
 
-For every ReplicaSet created by terraformController, it drops all non-system MongoDB databases and then removes:
+For every ReplicaSet created by terraformController, it drops all non-system MongoDB databases and removes:
 
 - managed database role accounts,
-- internal controller accounts,
-- managed Kubernetes Secrets,
-- managed Vault records,
-- managed MongoDB ReplicaSet resources.
+- database Kubernetes password Secrets,
+- database Vault records.
+
+The managed ReplicaSets remain running and empty. Their internal controller accounts remain available.
+
+Use DeleteReplicaSet separately when you want to remove an empty ReplicaSet.
 
 ReplicaSets not created by terraformController, such as existing resources already in the cluster, are not touched.
 
