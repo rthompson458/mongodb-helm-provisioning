@@ -47,7 +47,7 @@ variable "mongodb_namespace" {
 }
 
 variable "ops_manager_config_map" {
-  description = "Ops Manager project ConfigMap used by MongoDB resources"
+  description = "Existing working Ops Manager ConfigMap used as the source for baseUrl and orgId"
   type        = string
   default     = "my-project"
 }
