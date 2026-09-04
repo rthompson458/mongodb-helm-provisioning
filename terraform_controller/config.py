@@ -25,6 +25,7 @@ def load_config(path: Path) -> dict[str, Any]:
         "Terraform": ["repository_url", "branch", "subdirectory", "cache_directory", "backend_namespace", "backend_secret_suffix"],
         "Kubernetes": ["kubeconfig", "context", "namespace"],
         "MongoDB": ["ops_manager_config_map", "ops_manager_credentials_secret", "auth_database", "default_version", "default_members", "persistent", "storage_class", "storage_size"],
+        "Storage": ["base_path", "node_name"],
         "Rotation": ["days"],
         "Runtime": ["mongo_image", "placeholder_collection", "job_timeout_seconds", "replica_set_ready_timeout_seconds"],
     }
@@ -64,6 +65,8 @@ def load_config(path: Path) -> dict[str, Any]:
         "persistent": _bool(p.get("MongoDB", "persistent"), "persistent"),
         "storage_class": p.get("MongoDB", "storage_class").strip(),
         "storage_size": p.get("MongoDB", "storage_size").strip(),
+        "storage_base_path": expand(p.get("Storage", "base_path")),
+        "storage_node_name": p.get("Storage", "node_name").strip(),
         "rotation_days": rotation,
         "mongo_image": p.get("Runtime", "mongo_image").strip(),
         "placeholder_collection": p.get("Runtime", "placeholder_collection").strip(),
