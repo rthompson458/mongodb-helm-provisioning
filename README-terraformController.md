@@ -85,6 +85,30 @@ Change those defaults in `terraformController.config` when needed.
 
 The controller ignores MongoDB's built-in `admin`, `config`, and `local` databases for this check.
 
+## Static local storage
+
+The nix-k3d cluster uses a no-provisioner StorageClass, so terraformController creates the required local storage before it creates a ReplicaSet.
+
+Default configuration:
+
+```text
+StorageClass: mongodb-data-local
+Node:         k3d-nix-dev-server-0
+Base path:    /home/rich/mongodb-dbaas-dev/storage
+```
+
+For `AddReplicaSet RS1`, the controller creates three local directories and PersistentVolumes:
+
+```text
+/home/rich/mongodb-dbaas-dev/storage/rs1-0
+/home/rich/mongodb-dbaas-dev/storage/rs1-1
+/home/rich/mongodb-dbaas-dev/storage/rs1-2
+```
+
+The PVs are labeled with `dbaas.replica-set=rs1`. The MongoDB resource uses that label selector so its PVCs cannot bind to another ReplicaSet's local PVs.
+
+After an empty ReplicaSet is deleted, the controller removes its retained PVCs, static PVs, and local storage directories.
+
 ## Database rules
 
 `AddDatabase RS1 Tank` creates an empty MongoDB database and these accounts:
