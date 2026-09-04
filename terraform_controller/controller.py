@@ -38,6 +38,11 @@ def add_replica_set(config: dict[str, Any], vault: VaultClient, name: str) -> No
         "storage_size": config["storage_size"], "controller_password_version": 1,
         "databases": {},
     }
+    if config["persistent"]:
+        print(f"Creating {config['default_members']} static local PVs for ReplicaSet '{display}' ...")
+        kube.ensure_replica_set_storage(
+            config, key, config["default_members"], config["storage_size"], config["storage_class"]
+        )
     apply_inventory(config, inventory)
     print(f"Waiting for ReplicaSet '{display}' to become Running ...")
     kube.wait_phase(config, "mongodb", key, "Running", config["rs_ready_timeout"])
@@ -60,7 +65,12 @@ def delete_replica_set(config: dict[str, Any], vault: VaultClient, name: str) ->
         )
     del inventory[key]
     apply_inventory(config, inventory)
+    kube.wait_absent(config, "mongodb", key, config["rs_ready_timeout"])
+    if rs["persistent"]:
+        kube.cleanup_replica_set_storage(config, key, int(rs["members"]))
     print(f"\nReplicaSet '{rs['display_name']}' was deleted.")
+    if rs["persistent"]:
+        print("Its retained PVCs, static PVs, and local storage directories were also removed.")
 
 
 def list_replica_sets(config: dict[str, Any], vault: VaultClient) -> None:
