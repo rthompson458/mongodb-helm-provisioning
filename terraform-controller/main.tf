@@ -105,6 +105,11 @@ resource "kubernetes_manifest" "replica_set" {
             single = {
               storage      = each.value.storage_size
               storageClass = each.value.storage_class
+              labelSelector = {
+                matchLabels = {
+                  "dbaas.replica-set" = each.key
+                }
+              }
             }
           }
         }
