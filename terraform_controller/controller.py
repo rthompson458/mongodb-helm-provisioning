@@ -213,3 +213,28 @@ def reset_vault(config: dict[str, Any], vault: VaultClient, confirmed: bool) -> 
     print("Managed ReplicaSets remain running and are now empty.")
     if count:
         print(f"MongoDB databases dropped: {count}")
+
+
+def reconcile(config: dict[str, Any], vault: VaultClient) -> None:
+    """Reapply the complete Vault-backed desired inventory and wait for convergence."""
+    inventory = vault.load_inventory()
+    if not inventory:
+        print("No terraformController-managed ReplicaSets exist. Nothing to reconcile.")
+        return
+
+    apply_inventory(config, inventory)
+
+    print("\nWaiting for managed ReplicaSets to converge ...")
+    for key in sorted(inventory):
+        rs = inventory[key]
+        kube.wait_phase(config, "mongodb", key, "Running", config["rs_ready_timeout"])
+        kube.wait_phase(
+            config,
+            "mongodbuser",
+            kube.controller_user(key),
+            "Updated",
+            config["rs_ready_timeout"],
+        )
+        print(f"  {rs['display_name']}: Running")
+
+    print("\nReconcile complete.")
