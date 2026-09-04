@@ -51,6 +51,77 @@ def wait_absent(config: dict[str, Any], resource: str, name: str, timeout: int =
     raise ControllerError(f"Timed out waiting for {resource}/{name} to be deleted.")
 
 
+def ensure_replica_set_storage(config: dict[str, Any], rs_key: str, members: int, storage_size: str, storage_class: str) -> None:
+    """Create the static local directories and PVs required by one ReplicaSet."""
+    base_path = config["storage_base_path"].rstrip("/")
+    node_name = config["storage_node_name"]
+
+    # The K3D node name is also the Docker container name in this nix-k3d environment.
+    # Creating the directory from inside the node guarantees the local-volume path exists
+    # where kubelet will mount it; the parent path is bind-mounted from the WSL host.
+    for ordinal in range(members):
+        pv_name = f"{rs_key}-{ordinal}"
+        local_path = f"{base_path}/{pv_name}"
+
+        run_process(["docker", "exec", node_name, "mkdir", "-p", local_path], capture=True)
+
+        manifest = {
+            "apiVersion": "v1",
+            "kind": "PersistentVolume",
+            "metadata": {
+                "name": pv_name,
+                "labels": {
+                    "app.kubernetes.io/managed-by": "terraformController",
+                    "dbaas.replica-set": rs_key,
+                    "dbaas.member": str(ordinal),
+                },
+            },
+            "spec": {
+                "accessModes": ["ReadWriteOnce"],
+                "capacity": {"storage": storage_size},
+                "persistentVolumeReclaimPolicy": "Retain",
+                "storageClassName": storage_class,
+                "volumeMode": "Filesystem",
+                "local": {"path": local_path},
+                "nodeAffinity": {
+                    "required": {
+                        "nodeSelectorTerms": [{
+                            "matchExpressions": [{
+                                "key": "kubernetes.io/hostname",
+                                "operator": "In",
+                                "values": [node_name],
+                            }]
+                        }]
+                    }
+                },
+            },
+        }
+        run_process(base(config) + ["apply", "-f", "-"], input_text=json.dumps(manifest), capture=True)
+
+
+def cleanup_replica_set_storage(config: dict[str, Any], rs_key: str, members: int) -> None:
+    """Remove the retained PVCs/PVs and local directories after an empty ReplicaSet is deleted."""
+    namespace = config["mongodb_namespace"]
+    node_name = config["storage_node_name"]
+    base_path = config["storage_base_path"].rstrip("/")
+
+    for ordinal in range(members):
+        pvc_name = f"data-{rs_key}-{ordinal}"
+        run_process(
+            base(config) + ["-n", namespace, "delete", "pvc", pvc_name, "--ignore-not-found=true", "--wait=true"],
+            capture=True, check=False,
+        )
+
+    for ordinal in range(members):
+        pv_name = f"{rs_key}-{ordinal}"
+        run_process(
+            base(config) + ["delete", "pv", pv_name, "--ignore-not-found=true", "--wait=true"],
+            capture=True, check=False,
+        )
+        local_path = f"{base_path}/{pv_name}"
+        run_process(["docker", "exec", node_name, "rm", "-rf", local_path], capture=True, check=False)
+
+
 def controller_user(rs_key: str) -> str:
     return f"tc-{rs_key}-admin"
 
