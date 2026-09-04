@@ -192,7 +192,14 @@ def reset_vault(config: dict[str, Any], vault: VaultClient, confirmed: bool) -> 
     for key in sorted(inventory):
         print(f"Deleting non-system databases from ReplicaSet '{inventory[key]['display_name']}' ...")
         count += len(kube.drop_all_databases(config, key))
-    apply_inventory(config, {})
+
+    for replica_set in inventory.values():
+        replica_set["databases"] = {}
+
+    apply_inventory(config, inventory)
+
     print("\nResetVault completed.")
-    print("All terraformController-managed ReplicaSets, databases, role accounts, and Vault records were removed.")
-    if count: print(f"MongoDB databases dropped: {count}")
+    print("All managed databases, their three role accounts, and database Vault records were removed.")
+    print("Managed ReplicaSets remain running and are now empty.")
+    if count:
+        print(f"MongoDB databases dropped: {count}")
