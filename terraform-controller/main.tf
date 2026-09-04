@@ -60,6 +60,34 @@ locals {
   }
 }
 
+# Source the existing working Ops Manager connection information.
+# The source ConfigMap currently contains baseUrl, orgId, and a fixed projectName.
+data "kubernetes_config_map_v1" "ops_manager_source" {
+  metadata {
+    name      = var.ops_manager_config_map
+    namespace = var.mongodb_namespace
+  }
+}
+
+# MongoDB supports reusing one ConfigMap for multiple deployments when projectName
+# is omitted. In that mode, the Operator creates/uses a distinct Ops Manager
+# project whose name matches each MongoDB resource name.
+resource "kubernetes_config_map_v1" "controller_ops_manager_projects" {
+  metadata {
+    name      = "tc-ops-manager-projects"
+    namespace = var.mongodb_namespace
+
+    labels = {
+      "app.kubernetes.io/managed-by" = "terraformController"
+    }
+  }
+
+  data = {
+    baseUrl = data.kubernetes_config_map_v1.ops_manager_source.data["baseUrl"]
+    orgId   = data.kubernetes_config_map_v1.ops_manager_source.data["orgId"]
+  }
+}
+
 resource "kubernetes_manifest" "replica_set" {
   for_each = var.replica_sets
 
@@ -93,7 +121,7 @@ resource "kubernetes_manifest" "replica_set" {
 
         opsManager = {
           configMapRef = {
-            name = var.ops_manager_config_map
+            name = kubernetes_config_map_v1.controller_ops_manager_projects.metadata[0].name
           }
         }
 
