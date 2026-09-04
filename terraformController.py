@@ -119,8 +119,8 @@ Use '<command> --help' for command-specific help.
     db_args(x)
     x.add_argument("account_type", metavar="ACCOUNT_TYPE", help="Owner, Read, or ReadWrite")
 
-    x = sub(sp, "ResetVault", "Delete all controller-managed ReplicaSets/databases.",
-            "Destructive demo reset. Drops all non-system databases on controller-managed ReplicaSets and removes their accounts, Vault records, and ReplicaSet resources. Unmanaged ReplicaSets are untouched.",
+    x = sub(sp, "ResetVault", "Delete all managed databases and their accounts.",
+            "Destructive demo reset. Drops all non-system databases on controller-managed ReplicaSets and removes their database accounts and Vault records. Managed ReplicaSets remain running and empty.",
             "terraformController.py ResetVault --confirm")
     x.add_argument("--confirm", action="store_true", help="Required destructive confirmation")
     return p
