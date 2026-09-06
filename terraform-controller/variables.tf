@@ -9,6 +9,9 @@ variable "replica_sets" {
     persistent                  = bool
     storage_class               = string
     storage_size                = string
+    storage_mode                = optional(string, "static-local")
+    storage_base_path           = optional(string, "")
+    storage_node_name           = optional(string, "")
     controller_password_version = number
 
     databases = map(object({
@@ -22,6 +25,23 @@ variable "replica_sets" {
   }))
 
   default = {}
+
+  validation {
+    condition = alltrue([
+      for replica_set in values(var.replica_sets) :
+      contains(["static-local", "dynamic"], replica_set.storage_mode)
+    ])
+    error_message = "Each ReplicaSet storage_mode must be static-local or dynamic."
+  }
+
+  validation {
+    condition = alltrue([
+      for replica_set in values(var.replica_sets) :
+      replica_set.storage_mode != "static-local" ||
+      (replica_set.storage_base_path != "" && replica_set.storage_node_name != "")
+    ])
+    error_message = "static-local ReplicaSets require storage_base_path and storage_node_name."
+  }
 }
 
 variable "operation" {
@@ -44,13 +64,27 @@ variable "operation" {
   validation {
     condition = contains([
       "none",
-      "prepare_replica_set_storage",
-      "cleanup_replica_set_storage",
       "create_database",
       "delete_database",
-      "validate_replica_set_empty"
+      "validate_replica_set_empty",
+      "rotate_passwords",
+      "disable_owner",
+      "verify_database_accounts",
+      "verify_database_accounts_owner_disabled",
+      "verify_database_users_absent"
     ], var.operation.action)
     error_message = "operation.action is not supported."
+  }
+}
+
+variable "rotation_days" {
+  description = "Password rotation interval in days"
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.rotation_days >= 1
+    error_message = "rotation_days must be at least 1."
   }
 }
 

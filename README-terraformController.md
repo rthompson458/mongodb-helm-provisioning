@@ -153,9 +153,7 @@ That collection materializes the database without inserting application data.
 
 `DeleteDatabase` requires `--confirm`.
 
-Before deletion, Terraform runs a temporary MongoDB Job that verifies there are no application collections other than `__dbaas_metadata` and MongoDB `system.*` collections. If application collections remain, Terraform fails and the database and credentials remain intact.
-
-When deletion is allowed, Terraform removes:
+`DeleteDatabase --confirm` is intentionally destructive. Confirmation authorizes deletion of the database and all data in it. Terraform drops the MongoDB database first, then removes:
 
 - the MongoDB database,
 - `<DB>_owner`,
@@ -246,7 +244,7 @@ For the local MVP, rotation is initiated with:
 python3 terraformController.py RotatePasswords RS1 HouseInfo
 ```
 
-The command rotates all three passwords together:
+Terraform itself increments the password revision, records the rotation time, applies the 30-day Owner-disable rule, and rotates all three passwords together:
 
 ```text
 HouseInfo_owner
@@ -337,9 +335,11 @@ The listings show each database's three accounts, account status, and time until
 Some MongoDB operations are imperative even though Terraform owns the workflow. These include:
 
 - materializing an empty database,
-- confirming a database is empty before deletion,
-- dropping a database,
+- dropping a confirmed database,
 - confirming a ReplicaSet has no application databases,
+- verifying that newly created or rotated credentials can actually authenticate,
+- verifying that a disabled Owner is absent in MongoDB,
+- verifying that deleted database users are absent,
 - preparing K3D static local storage,
 - cleaning K3D static local storage.
 
@@ -366,8 +366,8 @@ This is not one of the three application database accounts and is never shown as
 Terraform uses it only for controller runtime operations such as:
 
 - creating the internal database collection,
-- checking database contents before deletion,
-- dropping an approved empty database,
+- dropping a confirmed database,
+- verifying database-user lifecycle state,
 - confirming that a ReplicaSet contains no application databases.
 
 The internal credential is stored under:
@@ -432,7 +432,7 @@ python3 terraformController.py Reconcile
 1. reads managed desired state from Vault,
 2. refreshes the Terraform module from GitHub,
 3. applies the complete desired state,
-4. waits for managed ReplicaSets and the internal controller accounts to converge.
+4. waits for managed ReplicaSets, internal controller accounts, and all managed database accounts to converge.
 
 Use it after:
 

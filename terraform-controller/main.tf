@@ -16,7 +16,10 @@ locals {
     }
   }
 
-  databases = {
+  # Raw lifecycle state comes from Vault through var.replica_sets.
+  # RotatePasswords and DisableOwner are expressed as Terraform operations.
+  # Terraform, not Python, computes the resulting password revision and owner state.
+  database_inputs = {
     for database in flatten([
       for replica_set_key, replica_set in var.replica_sets : [
         for database_key, database in replica_set.databases : {
@@ -33,6 +36,60 @@ locals {
         }
       ]
     ]) : database.key => database
+  }
+
+  databases = {
+    for key, database in local.database_inputs : key => merge(database, {
+      rotation_version = (
+        var.operation.action == "rotate_passwords" &&
+        var.operation.replica_set == database.replica_set_key &&
+        lower(var.operation.database) == database.database_key
+      ) ? database.rotation_version + 1 : database.rotation_version
+
+      rotated_at = (
+        var.operation.action == "rotate_passwords" &&
+        var.operation.replica_set == database.replica_set_key &&
+        lower(var.operation.database) == database.database_key
+      ) ? plantimestamp() : database.rotated_at
+
+      owner_disabled = (
+        database.owner_disabled ||
+        (
+          var.operation.action == "disable_owner" &&
+          var.operation.replica_set == database.replica_set_key &&
+          lower(var.operation.database) == database.database_key
+        ) ||
+        (
+          var.operation.action == "rotate_passwords" &&
+          var.operation.replica_set == database.replica_set_key &&
+          lower(var.operation.database) == database.database_key &&
+          timecmp(
+            plantimestamp(),
+            timeadd(database.created_at, format("%dh", var.rotation_days * 24))
+          ) >= 0
+        )
+      )
+
+      owner_disabled_at = (
+        !database.owner_disabled &&
+        (
+          (
+            var.operation.action == "disable_owner" &&
+            var.operation.replica_set == database.replica_set_key &&
+            lower(var.operation.database) == database.database_key
+          ) ||
+          (
+            var.operation.action == "rotate_passwords" &&
+            var.operation.replica_set == database.replica_set_key &&
+            lower(var.operation.database) == database.database_key &&
+            timecmp(
+              plantimestamp(),
+              timeadd(database.created_at, format("%dh", var.rotation_days * 24))
+            ) >= 0
+          )
+        )
+      ) ? plantimestamp() : database.owner_disabled_at
+    })
   }
 
   accounts = {
@@ -61,6 +118,11 @@ locals {
     for key, account in local.accounts : key => account
     if account.enabled
   }
+
+  static_replica_sets = {
+    for key, replica_set in var.replica_sets : key => replica_set
+    if replica_set.persistent && replica_set.storage_mode == "static-local"
+  }
 }
 
 # Source the existing working Ops Manager connection information.
@@ -86,6 +148,62 @@ resource "kubernetes_config_map_v1" "controller_ops_manager_projects" {
   data = {
     baseUrl = data.kubernetes_config_map_v1.ops_manager_source.data["baseUrl"]
     orgId   = data.kubernetes_config_map_v1.ops_manager_source.data["orgId"]
+  }
+}
+
+# Static local storage is a Terraform-managed lifecycle resource.
+# Its state survives controller process failures. The create provisioner prepares
+# local directories/PVs before the MongoDB resource is created. The destroy
+# provisioner runs only after the MongoDB resource has been destroyed because
+# replica_set explicitly depends on this resource.
+resource "terraform_data" "replica_set_storage" {
+  for_each = local.static_replica_sets
+
+  input = {
+    replica_set       = each.key
+    members           = each.value.members
+    namespace         = var.mongodb_namespace
+    kubeconfig        = pathexpand(var.kubeconfig_path)
+    kube_context      = var.kube_context
+    storage_base_path = each.value.storage_base_path
+    storage_node_name = each.value.storage_node_name
+    storage_class     = each.value.storage_class
+    storage_size      = each.value.storage_size
+  }
+
+  provisioner "local-exec" {
+    command = "bash ${path.module}/scripts/lifecycle.sh"
+
+    environment = {
+      TC_ACTION            = "prepare_replica_set_storage"
+      TC_REPLICA_SET       = self.input.replica_set
+      TC_MEMBERS           = tostring(self.input.members)
+      TC_NAMESPACE         = self.input.namespace
+      TC_KUBECONFIG        = self.input.kubeconfig
+      TC_KUBE_CONTEXT      = self.input.kube_context
+      TC_STORAGE_BASE_PATH = self.input.storage_base_path
+      TC_STORAGE_NODE_NAME = self.input.storage_node_name
+      TC_STORAGE_CLASS     = self.input.storage_class
+      TC_STORAGE_SIZE      = self.input.storage_size
+    }
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "bash ${path.module}/scripts/lifecycle.sh"
+
+    environment = {
+      TC_ACTION            = "cleanup_replica_set_storage"
+      TC_REPLICA_SET       = self.input.replica_set
+      TC_MEMBERS           = tostring(self.input.members)
+      TC_NAMESPACE         = self.input.namespace
+      TC_KUBECONFIG        = self.input.kubeconfig
+      TC_KUBE_CONTEXT      = self.input.kube_context
+      TC_STORAGE_BASE_PATH = self.input.storage_base_path
+      TC_STORAGE_NODE_NAME = self.input.storage_node_name
+      TC_STORAGE_CLASS     = self.input.storage_class
+      TC_STORAGE_SIZE      = self.input.storage_size
+    }
   }
 }
 
@@ -131,20 +249,26 @@ resource "kubernetes_manifest" "replica_set" {
       each.value.persistent ? {
         podSpec = {
           persistence = {
-            single = {
-              storage      = each.value.storage_size
-              storageClass = each.value.storage_class
-              labelSelector = {
-                matchLabels = {
-                  "dbaas.replica-set" = each.key
+            single = merge(
+              {
+                storage      = each.value.storage_size
+                storageClass = each.value.storage_class
+              },
+              each.value.storage_mode == "static-local" ? {
+                labelSelector = {
+                  matchLabels = {
+                    "dbaas.replica-set" = each.key
+                  }
                 }
-              }
-            }
+              } : {}
+            )
           }
         }
       } : {}
     )
   }
+
+  depends_on = [terraform_data.replica_set_storage]
 }
 
 # Human-facing Vault hierarchy:
@@ -169,6 +293,9 @@ resource "vault_kv_secret_v2" "replica_set_metadata" {
     persistent                  = tostring(each.value.persistent)
     storage_class               = each.value.storage_class
     storage_size                = each.value.storage_size
+    storage_mode                = each.value.storage_mode
+    storage_base_path           = each.value.storage_base_path
+    storage_node_name           = each.value.storage_node_name
     controller_password_version = tostring(each.value.controller_password_version)
     managed_by                  = "terraformController"
   })
@@ -181,6 +308,10 @@ resource "vault_kv_secret_v2" "replica_set_metadata" {
       managed_by = "terraformController"
     }
   }
+
+  # Do not advertise a ReplicaSet in Vault inventory until Terraform has
+  # successfully created the MongoDB custom resource.
+  depends_on = [kubernetes_manifest.replica_set]
 }
 
 resource "vault_kv_secret_v2" "database_metadata" {
@@ -338,6 +469,11 @@ resource "vault_kv_secret_v2" "database_account" {
 
   data_json_wo_version = each.value.rotation_version
 
+  # Commit lifecycle metadata first. If a later credential write fails, the
+  # next RotatePasswords attempt advances the revision again and forces both
+  # Vault and Kubernetes to converge on one fresh password.
+  depends_on = [vault_kv_secret_v2.database_metadata]
+
   custom_metadata {
     max_versions = 5
 
@@ -371,6 +507,10 @@ resource "kubernetes_secret_v1" "database_account_password" {
 
   data_wo_revision = each.value.rotation_version
   type             = "Opaque"
+
+  # See database_account above. Metadata is the committed rotation intent and
+  # must advance before either write-only password sink is changed.
+  depends_on = [vault_kv_secret_v2.database_metadata]
 }
 
 # Disabled Owner = no Owner MongoDBUser. The Vault credential and password
@@ -429,7 +569,14 @@ resource "kubernetes_manifest" "database_account" {
 # RS is empty, and preparing/cleaning K3D static local storage. Python only
 # supplies the operation and reports its result.
 resource "terraform_data" "lifecycle_operation" {
-  count = var.operation.action == "none" ? 0 : 1
+  count = contains([
+    "create_database",
+    "delete_database",
+    "validate_replica_set_empty",
+    "verify_database_accounts",
+    "verify_database_accounts_owner_disabled",
+    "verify_database_users_absent"
+  ], var.operation.action) ? 1 : 0
 
   input            = var.operation
   triggers_replace = [var.operation.nonce]
@@ -446,6 +593,7 @@ resource "terraform_data" "lifecycle_operation" {
       TC_KUBECONFIG             = pathexpand(var.kubeconfig_path)
       TC_KUBE_CONTEXT           = var.kube_context
       TC_MONGO_IMAGE            = var.mongo_image
+      TC_AUTH_DATABASE          = var.mongodb_auth_database
       TC_PLACEHOLDER_COLLECTION = var.placeholder_collection
       TC_STORAGE_BASE_PATH      = var.storage_base_path
       TC_STORAGE_NODE_NAME      = var.storage_node_name

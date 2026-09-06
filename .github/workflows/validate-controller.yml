@@ -31,7 +31,10 @@ jobs:
           python-version: "3.12"
 
       - name: Validate Python syntax
-        run: python3 -m py_compile terraformController.py terraform_controller/*.py
+        run: python3 -m py_compile terraformController.py terraform_controller/*.py tests/*.py
+
+      - name: Run controller unit tests
+        run: python3 -m unittest discover -s tests -v
 
       - name: Validate lifecycle Bash syntax
         run: bash -n terraform-controller/scripts/lifecycle.sh

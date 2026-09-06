@@ -12,6 +12,7 @@ if [[ -n "${TC_KUBE_CONTEXT:-}" ]]; then
 fi
 
 run_mongo_job() {
+  local connection_secret="${1:-tc-${TC_REPLICA_SET}-admin-connection}"
   local job="tc-runtime-${TC_REPLICA_SET:0:12}-$(date +%s)-${RANDOM}"
   local manifest
 
@@ -41,7 +42,7 @@ spec:
             - name: MONGODB_URI
               valueFrom:
                 secretKeyRef:
-                  name: tc-${TC_REPLICA_SET}-admin-connection
+                  name: ${connection_secret}
                   key: connectionString.standard
             - name: TC_JS
               value: ${TC_JS_JSON}
@@ -82,6 +83,85 @@ EOF
 
 json_string() {
   python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"
+}
+
+account_resource_name() {
+  local account="$1"
+  local db_key="${TC_DATABASE,,}"
+  local digest
+  digest=$(python3 -c 'import hashlib,sys; print(hashlib.md5(sys.argv[1].encode()).hexdigest()[:6])' "${TC_REPLICA_SET}/${db_key}/${account}")
+  printf 'tc-%s-%s-%s-%s' "${TC_REPLICA_SET:0:8}" "${db_key:0:10}" "${account}" "${digest}"
+}
+
+verify_account() {
+  local account="$1"
+  local secret
+  secret="$(account_resource_name "${account}")-connection"
+  local js="const r=db.runCommand({ping:1});if(!r||r.ok!==1)quit(42);print('TC_RESULT=AUTH_OK');"
+  export TC_JS_JSON
+  TC_JS_JSON=$(json_string "$js")
+
+  local output=""
+  for _ in {1..30}; do
+    if output=$(run_mongo_job "$secret" 2>&1); then
+      printf '%s\n' "$output"
+      return 0
+    fi
+    sleep 2
+  done
+  printf '%s\n' "$output" >&2
+  echo "Credential verification failed for account type '${account}'." >&2
+  return 1
+}
+
+verify_users_absent() {
+  local owner="${TC_DATABASE}_owner"
+  local readwrite="${TC_DATABASE}_readWrite"
+  local read="${TC_DATABASE}_read"
+  local owner_json readwrite_json read_json
+  owner_json=$(json_string "$owner")
+  readwrite_json=$(json_string "$readwrite")
+  read_json=$(json_string "$read")
+  local auth_db_json
+  auth_db_json=$(json_string "${TC_AUTH_DATABASE:-admin}")
+  local js="const a=db.getSiblingDB(${auth_db_json});const n=[${owner_json},${readwrite_json},${read_json}];const f=n.filter(x=>a.getUser(x)!==null);if(f.length){print('TC_BLOCKED='+JSON.stringify(f));quit(42);}print('TC_RESULT=USERS_ABSENT');"
+  export TC_JS_JSON
+  TC_JS_JSON=$(json_string "$js")
+
+  local output=""
+  for _ in {1..30}; do
+    if output=$(run_mongo_job 2>&1); then
+      printf '%s\n' "$output"
+      return 0
+    fi
+    sleep 2
+  done
+  printf '%s\n' "$output" >&2
+  echo "Timed out waiting for MongoDB users to be absent." >&2
+  return 1
+}
+
+verify_owner_absent() {
+  local owner="${TC_DATABASE}_owner"
+  local owner_json
+  owner_json=$(json_string "$owner")
+  local auth_db_json
+  auth_db_json=$(json_string "${TC_AUTH_DATABASE:-admin}")
+  local js="const a=db.getSiblingDB(${auth_db_json});const u=a.getUser(${owner_json});if(u!==null){print('TC_BLOCKED=OWNER_STILL_EXISTS');quit(42);}print('TC_RESULT=OWNER_ABSENT');"
+  export TC_JS_JSON
+  TC_JS_JSON=$(json_string "$js")
+
+  local output=""
+  for _ in {1..30}; do
+    if output=$(run_mongo_job 2>&1); then
+      printf '%s\n' "$output"
+      return 0
+    fi
+    sleep 2
+  done
+  printf '%s\n' "$output" >&2
+  echo "Timed out waiting for the Owner account to be disabled in MongoDB." >&2
+  return 1
 }
 
 case "${TC_ACTION}" in
@@ -157,11 +237,9 @@ EOF
 
   delete_database)
     : "${TC_DATABASE:?TC_DATABASE is required}"
-    : "${TC_PLACEHOLDER_COLLECTION:?TC_PLACEHOLDER_COLLECTION is required}"
     : "${TC_MONGO_IMAGE:?TC_MONGO_IMAGE is required}"
     db_json=$(json_string "${TC_DATABASE}")
-    placeholder_json=$(json_string "${TC_PLACEHOLDER_COLLECTION}")
-    js="const d=${db_json},p=${placeholder_json};const n=db.adminCommand({listDatabases:1,nameOnly:true}).databases.map(x=>x.name);if(!n.includes(d)){print('TC_RESULT=ALREADY_ABSENT');quit(0);}const t=db.getSiblingDB(d);const b=t.getCollectionInfos().map(x=>x.name).filter(x=>x!==p&&!x.startsWith('system.'));if(b.length){print('TC_BLOCKED='+JSON.stringify(b.sort()));quit(42);}const r=t.dropDatabase();if(!r||r.ok!==1)quit(43);print('TC_RESULT=DELETED');"
+    js="const d=${db_json};const n=db.adminCommand({listDatabases:1,nameOnly:true}).databases.map(x=>x.name);if(!n.includes(d)){print('TC_RESULT=ALREADY_ABSENT');quit(0);}const r=db.getSiblingDB(d).dropDatabase();if(!r||r.ok!==1)quit(43);print('TC_RESULT=DELETED');"
     export TC_JS_JSON
     TC_JS_JSON=$(json_string "$js")
     run_mongo_job
@@ -173,6 +251,25 @@ EOF
     export TC_JS_JSON
     TC_JS_JSON=$(json_string "$js")
     run_mongo_job
+    ;;
+
+  verify_database_accounts)
+    : "${TC_DATABASE:?TC_DATABASE is required}"
+    verify_account owner
+    verify_account readwrite
+    verify_account read
+    ;;
+
+  verify_database_accounts_owner_disabled)
+    : "${TC_DATABASE:?TC_DATABASE is required}"
+    verify_account readwrite
+    verify_account read
+    verify_owner_absent
+    ;;
+
+  verify_database_users_absent)
+    : "${TC_DATABASE:?TC_DATABASE is required}"
+    verify_users_absent
     ;;
 
   *)

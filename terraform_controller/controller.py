@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import Any
 
 from .common import (
@@ -10,7 +9,6 @@ from .common import (
     iso_utc,
     normalize_database,
     normalize_replica_set,
-    parse_utc,
     print_table,
     utc_now,
 )
@@ -68,21 +66,17 @@ def add_replica_set(config: dict[str, Any], vault: VaultClient, name: str) -> No
     inventory = vault.load_inventory()
     if key in inventory:
         raise ControllerError(f"ReplicaSet '{inventory[key]['display_name']}' already exists.")
-    if kube.get_json(config, "mongodb", key) is not None:
-        raise ControllerError(
-            f"Kubernetes MongoDB resource '{key}' already exists outside terraformController; automatic adoption is blocked."
-        )
-
-    if config["persistent"]:
-        apply_inventory(
-            config,
-            inventory,
-            {
-                "action": "prepare_replica_set_storage",
-                "replica_set": key,
-                "database": "",
-                "members": config["default_members"],
-            },
+    existing = kube.get_json(config, "mongodb", key)
+    if existing is not None:
+        labels = existing.get("metadata", {}).get("labels", {})
+        if labels.get("app.kubernetes.io/managed-by") != "terraformController":
+            raise ControllerError(
+                f"Kubernetes MongoDB resource '{key}' already exists outside "
+                "terraformController; automatic adoption is blocked."
+            )
+        print(
+            f"Recovering an incomplete terraformController creation for "
+            f"ReplicaSet '{display}' ..."
         )
 
     inventory[key] = {
@@ -93,6 +87,9 @@ def add_replica_set(config: dict[str, Any], vault: VaultClient, name: str) -> No
         "persistent": config["persistent"],
         "storage_class": config["storage_class"],
         "storage_size": config["storage_size"],
+        "storage_mode": config["storage_mode"],
+        "storage_base_path": config["storage_base_path"],
+        "storage_node_name": config["storage_node_name"],
         "controller_password_version": 1,
         "databases": {},
     }
@@ -133,18 +130,6 @@ def delete_replica_set(
     del inventory[key]
     apply_inventory(config, inventory)
     kube.wait_absent(config, "mongodb", key, config["rs_ready_timeout"])
-
-    if rs["persistent"]:
-        apply_inventory(
-            config,
-            inventory,
-            {
-                "action": "cleanup_replica_set_storage",
-                "replica_set": key,
-                "database": "",
-                "members": int(rs["members"]),
-            },
-        )
 
     print(f"\nReplicaSet '{rs['display_name']}' was deleted.")
 
@@ -187,6 +172,48 @@ def list_replica_set(config: dict[str, Any], vault: VaultClient, name: str) -> N
         print_table(("REPLICA SET", "DATABASE", "ACCOUNT", "TYPE", "STATUS", "ROTATES IN"), rows)
 
 
+def _verify_database_accounts(
+    config: dict[str, Any],
+    inventory: dict[str, dict[str, Any]],
+    rs_key: str,
+    rs: dict[str, Any],
+    db_key: str,
+    db: dict[str, Any],
+) -> None:
+    if db["owner_disabled"]:
+        kube.wait_absent(
+            config,
+            "mongodbuser",
+            account_resource_name(rs_key, db_key, "owner"),
+            config["rs_ready_timeout"],
+        )
+        accounts = ("readwrite", "read")
+        action = "verify_database_accounts_owner_disabled"
+    else:
+        accounts = ("owner", "readwrite", "read")
+        action = "verify_database_accounts"
+
+    for account in accounts:
+        kube.wait_phase(
+            config,
+            "mongodbuser",
+            account_resource_name(rs_key, db_key, account),
+            "Updated",
+            config["rs_ready_timeout"],
+        )
+
+    apply_inventory(
+        config,
+        inventory,
+        {
+            "action": action,
+            "replica_set": rs_key,
+            "database": db["display_name"],
+            "members": int(rs["members"]),
+        },
+    )
+
+
 def add_database(config: dict[str, Any], vault: VaultClient, rs_name: str, db_name: str) -> None:
     inventory = vault.load_inventory()
     rs_key, rs = require_rs(inventory, rs_name)
@@ -194,18 +221,14 @@ def add_database(config: dict[str, Any], vault: VaultClient, rs_name: str, db_na
 
     db_key, display = normalize_database(db_name)
     if db_key in rs["databases"]:
-        raise ControllerError(f"Database '{display}' already exists on ReplicaSet '{rs['display_name']}'.")
+        raise ControllerError(
+            f"Database '{display}' already exists on ReplicaSet '{rs['display_name']}'. "
+            "Use Reconcile if a previous AddDatabase was interrupted."
+        )
 
-    now = iso_utc(utc_now())
-    rs["databases"][db_key] = {
-        "display_name": display,
-        "created_at": now,
-        "owner_disabled": False,
-        "owner_disabled_at": "",
-        "rotation_version": 1,
-        "rotated_at": now,
-    }
-
+    # Stage 1: Terraform materializes the MongoDB database while the desired
+    # inventory is still unchanged. If this fails, no DB users or Vault
+    # credentials have been added.
     apply_inventory(
         config,
         inventory,
@@ -217,26 +240,37 @@ def add_database(config: dict[str, Any], vault: VaultClient, rs_name: str, db_na
         },
     )
 
-    for account in ("owner", "readwrite", "read"):
-        kube.wait_phase(
-            config,
-            "mongodbuser",
-            account_resource_name(rs_key, db_key, account),
-            "Updated",
-            config["rs_ready_timeout"],
-        )
+    # Stage 2: after database materialization succeeds, Terraform records the
+    # lifecycle metadata and creates the three fixed accounts and credentials.
+    now = iso_utc(utc_now())
+    rs["databases"][db_key] = {
+        "display_name": display,
+        "created_at": now,
+        "owner_disabled": False,
+        "owner_disabled_at": "",
+        "rotation_version": 1,
+        "rotated_at": now,
+    }
+    apply_inventory(config, inventory)
 
-    print(f"\nDatabase '{display}' was created on ReplicaSet '{rs['display_name']}'.")
+    updated_inventory = vault.load_inventory()
+    rs_key, updated_rs, db_key, updated_db = require_db(updated_inventory, rs_name, db_name)
+    _verify_database_accounts(
+        config, updated_inventory, rs_key, updated_rs, db_key, updated_db
+    )
+
+    print(f"\nDatabase '{display}' was created on ReplicaSet '{updated_rs['display_name']}'.")
     print("Created accounts:")
     print(f"  {display}_owner      (dbOwner)")
     print(f"  {display}_readWrite  (readWrite)")
     print(f"  {display}_read       (read)")
     print(f"\nVault UI: {_vault_ui(config)}")
     print("Vault credential paths:")
-    for path in _vault_paths(config, rs, rs["databases"][db_key]):
+    for path in _vault_paths(config, updated_rs, updated_db):
         print(f"  {path}")
     print(f"\nPassword rotation interval: {config['rotation_days']} days")
     print("The owner account will be disabled at the first rotation at or after day 30.")
+
 
 
 def delete_database(
@@ -251,6 +285,8 @@ def delete_database(
     rs_key, rs, db_key, db = require_db(inventory, rs_name, db_name)
     _require_running(config, rs_key, rs["display_name"])
 
+    # --confirm authorizes deletion of the database and all of its contents.
+    # Terraform performs the MongoDB drop before desired account state is removed.
     apply_inventory(
         config,
         inventory,
@@ -264,31 +300,94 @@ def delete_database(
 
     del rs["databases"][db_key]
     apply_inventory(config, inventory)
+
+    for account in ("owner", "readwrite", "read"):
+        kube.wait_absent(
+            config,
+            "mongodbuser",
+            account_resource_name(rs_key, db_key, account),
+            config["rs_ready_timeout"],
+        )
+
+    apply_inventory(
+        config,
+        inventory,
+        {
+            "action": "verify_database_users_absent",
+            "replica_set": rs_key,
+            "database": db["display_name"],
+            "members": int(rs["members"]),
+        },
+    )
+
     print(f"\nDatabase '{db['display_name']}' was deleted from ReplicaSet '{rs['display_name']}'.")
     print("All three MongoDB role accounts and their Vault credentials were deleted.")
 
 
+
 def rotate_passwords(config: dict[str, Any], vault: VaultClient, rs_name: str, db_name: str) -> None:
     inventory = vault.load_inventory()
-    _, rs, _, db = require_db(inventory, rs_name, db_name)
-    now = utc_now()
-    created = parse_utc(db["created_at"])
-    owner_due = now >= created + timedelta(days=config["rotation_days"])
+    rs_key, rs, _, db = require_db(inventory, rs_name, db_name)
+    _require_running(config, rs_key, rs["display_name"])
 
-    db["rotation_version"] += 1
-    db["rotated_at"] = iso_utc(now)
-    if owner_due:
-        db["owner_disabled"] = True
-        db["owner_disabled_at"] = iso_utc(now)
+    # Rotation spans Vault and Kubernetes write-only fields. Database lifecycle
+    # metadata is committed first in Terraform. If an apply is interrupted
+    # after only one password sink changes, reload the committed revision and
+    # perform one fresh rotation. That new revision forces both sinks to use
+    # the same new ephemeral password.
+    last_error: ControllerError | None = None
+    for attempt in range(2):
+        if attempt:
+            inventory = vault.load_inventory()
+            rs_key, rs, _, db = require_db(inventory, rs_name, db_name)
+            _require_running(config, rs_key, rs["display_name"])
+            print("Retrying password rotation with a fresh Terraform revision ...")
 
-    apply_inventory(config, inventory)
-    print(f"\nRotated all three passwords for '{rs['display_name']}/{db['display_name']}'.")
-    if db["owner_disabled"]:
-        print("Owner status: Disabled in MongoDB. Its newly rotated password remains available in Vault.")
+        try:
+            apply_inventory(
+                config,
+                inventory,
+                {
+                    "action": "rotate_passwords",
+                    "replica_set": rs_key,
+                    "database": db["display_name"],
+                    "members": int(rs["members"]),
+                },
+            )
+            last_error = None
+            break
+        except ControllerError as exc:
+            last_error = exc
+            if attempt == 0:
+                continue
+
+    if last_error is not None:
+        raise ControllerError(
+            "Password rotation did not converge after a recovery retry. "
+            "No success was reported. Run RotatePasswords again after correcting "
+            "the Terraform/Kubernetes/Vault error."
+        ) from last_error
+
+    updated_inventory = vault.load_inventory()
+    rs_key, updated_rs, db_key, updated_db = require_db(
+        updated_inventory, rs_name, db_name
+    )
+    _verify_database_accounts(
+        config, updated_inventory, rs_key, updated_rs, db_key, updated_db
+    )
+
+    print(
+        f"\nRotated all three passwords for "
+        f"'{updated_rs['display_name']}/{updated_db['display_name']}'."
+    )
+    if updated_db["owner_disabled"]:
+        print(
+            "Owner status: Disabled in MongoDB. "
+            "Its newly rotated password remains available in Vault."
+        )
     else:
-        remaining = created + timedelta(days=config["rotation_days"]) - now
-        days = max(0, int(remaining.total_seconds() // 86400))
-        print(f"Owner status: Enabled. Automatic disable point has not been reached ({days} day(s) remaining).")
+        print("Owner status: Enabled.")
+    print(f"Last rotated: {updated_db['rotated_at']}")
     print(f"Vault UI: {_vault_ui(config)}")
 
 
@@ -301,15 +400,36 @@ def disable_owner(
         f"terraformController.py DisableOwner {rs_name} {db_name} --confirm",
     )
     inventory = vault.load_inventory()
-    _, _, _, db = require_db(inventory, rs_name, db_name)
+    rs_key, rs, _, db = require_db(inventory, rs_name, db_name)
+    _require_running(config, rs_key, rs["display_name"])
+
     if db["owner_disabled"]:
         print(f"Owner account '{db['display_name']}_owner' is already Disabled.")
         return
-    db["owner_disabled"] = True
-    db["owner_disabled_at"] = iso_utc(utc_now())
-    apply_inventory(config, inventory)
-    print(f"\nOwner account '{db['display_name']}_owner' is now Disabled in MongoDB.")
+
+    # Terraform writes the lifecycle state and removes the MongoDBUser.
+    apply_inventory(
+        config,
+        inventory,
+        {
+            "action": "disable_owner",
+            "replica_set": rs_key,
+            "database": db["display_name"],
+            "members": int(rs["members"]),
+        },
+    )
+
+    updated_inventory = vault.load_inventory()
+    rs_key, updated_rs, db_key, updated_db = require_db(
+        updated_inventory, rs_name, db_name
+    )
+    _verify_database_accounts(
+        config, updated_inventory, rs_key, updated_rs, db_key, updated_db
+    )
+
+    print(f"\nOwner account '{updated_db['display_name']}_owner' is now Disabled in MongoDB.")
     print("Its current Vault credential remains present and will continue to rotate.")
+
 
 
 def list_databases(
@@ -357,7 +477,7 @@ def reconcile(config: dict[str, Any], vault: VaultClient) -> None:
         return
 
     apply_inventory(config, inventory)
-    print("\nWaiting for managed ReplicaSets to converge ...")
+    print("\nWaiting for managed ReplicaSets and accounts to converge ...")
     for key in sorted(inventory):
         rs = inventory[key]
         kube.wait_phase(config, "mongodb", key, "Running", config["rs_ready_timeout"])
@@ -368,5 +488,26 @@ def reconcile(config: dict[str, Any], vault: VaultClient) -> None:
             "Updated",
             config["rs_ready_timeout"],
         )
+        for db_key in sorted(rs["databases"]):
+            db = rs["databases"][db_key]
+            if db["owner_disabled"]:
+                kube.wait_absent(
+                    config,
+                    "mongodbuser",
+                    account_resource_name(key, db_key, "owner"),
+                    config["rs_ready_timeout"],
+                )
+                accounts = ("readwrite", "read")
+            else:
+                accounts = ("owner", "readwrite", "read")
+            for account in accounts:
+                kube.wait_phase(
+                    config,
+                    "mongodbuser",
+                    account_resource_name(key, db_key, account),
+                    "Updated",
+                    config["rs_ready_timeout"],
+                )
         print(f"  {rs['display_name']}: Running")
+
     print("\nReconcile complete.")

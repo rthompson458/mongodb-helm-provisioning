@@ -150,7 +150,7 @@ Maintenance/demo:
         sp,
         "DeleteDatabase",
         "Delete an application database and its three managed accounts.",
-        "Requires --confirm. Terraform first verifies that no application collections remain. It then drops the database and removes the three MongoDB users, their Kubernetes password resources, and their Vault credentials.",
+        "Requires --confirm. Confirmation authorizes deletion of the database and its contents. Terraform drops the database, removes the three MongoDB users, removes their Kubernetes password resources, and removes their Vault credentials.",
         "terraformController.py DeleteDatabase RS1 HouseInfo --confirm",
     )
     db_args(x)
