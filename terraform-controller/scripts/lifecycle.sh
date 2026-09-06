@@ -12,7 +12,6 @@ if [[ -n "${TC_KUBE_CONTEXT:-}" ]]; then
 fi
 
 run_mongo_job() {
-  local javascript="$1"
   local job="tc-runtime-${TC_REPLICA_SET:0:12}-$(date +%s)-${RANDOM}"
   local manifest
 
@@ -55,19 +54,30 @@ EOF
 
   printf '%s\n' "$manifest" | "${K[@]}" apply -f - >/dev/null
 
-  set +e
-  "${K[@]}" -n "${TC_NAMESPACE}" wait --for=condition=complete "job/${job}" --timeout=300s >/dev/null 2>&1
-  local rc=$?
-  set -e
+  local succeeded=0
+  local failed=0
+  for _ in {1..150}; do
+    succeeded=$("${K[@]}" -n "${TC_NAMESPACE}" get job "${job}" -o jsonpath='{.status.succeeded}' 2>/dev/null || true)
+    failed=$("${K[@]}" -n "${TC_NAMESPACE}" get job "${job}" -o jsonpath='{.status.failed}' 2>/dev/null || true)
+    [[ "${succeeded:-0}" -gt 0 ]] && break
+    [[ "${failed:-0}" -gt 0 ]] && break
+    sleep 2
+  done
 
   local logs
   logs=$("${K[@]}" -n "${TC_NAMESPACE}" logs "job/${job}" 2>&1 || true)
   "${K[@]}" -n "${TC_NAMESPACE}" delete job "${job}" --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
-
   printf '%s\n' "$logs"
-  if [[ $rc -ne 0 ]]; then
-    return 1
+
+  if [[ "${succeeded:-0}" -gt 0 ]]; then
+    return 0
   fi
+  if [[ "${failed:-0}" -gt 0 ]]; then
+    echo "Terraform-driven MongoDB runtime Job failed." >&2
+  else
+    echo "Terraform-driven MongoDB runtime Job timed out." >&2
+  fi
+  return 1
 }
 
 json_string() {
@@ -142,7 +152,7 @@ EOF
     js="const d=${db_json},p=${placeholder_json},t=db.getSiblingDB(d),c=t.getCollectionNames();if(!c.includes(p))t.createCollection(p);print('TC_RESULT=OK');"
     export TC_JS_JSON
     TC_JS_JSON=$(json_string "$js")
-    run_mongo_job "$js"
+    run_mongo_job
     ;;
 
   delete_database)
@@ -154,7 +164,7 @@ EOF
     js="const d=${db_json},p=${placeholder_json};const n=db.adminCommand({listDatabases:1,nameOnly:true}).databases.map(x=>x.name);if(!n.includes(d)){print('TC_RESULT=ALREADY_ABSENT');quit(0);}const t=db.getSiblingDB(d);const b=t.getCollectionInfos().map(x=>x.name).filter(x=>x!==p&&!x.startsWith('system.'));if(b.length){print('TC_BLOCKED='+JSON.stringify(b.sort()));quit(42);}const r=t.dropDatabase();if(!r||r.ok!==1)quit(43);print('TC_RESULT=DELETED');"
     export TC_JS_JSON
     TC_JS_JSON=$(json_string "$js")
-    run_mongo_job "$js"
+    run_mongo_job
     ;;
 
   validate_replica_set_empty)
@@ -162,7 +172,7 @@ EOF
     js="const p=new Set(['admin','config','local']);const n=db.adminCommand({listDatabases:1,nameOnly:true}).databases.map(x=>x.name).filter(x=>!p.has(x)).sort();if(n.length){print('TC_BLOCKED='+JSON.stringify(n));quit(42);}print('TC_RESULT=EMPTY');"
     export TC_JS_JSON
     TC_JS_JSON=$(json_string "$js")
-    run_mongo_job "$js"
+    run_mongo_job
     ;;
 
   *)
