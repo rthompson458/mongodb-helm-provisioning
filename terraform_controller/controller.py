@@ -71,7 +71,7 @@ def add_replica_set(config: dict[str, Any], vault: VaultClient, name: str) -> No
             f"Kubernetes MongoDB resource '{key}' already exists outside terraformController; automatic adoption is blocked."
         )
 
-    if config["persistent"]:
+    if config["persistent"] and config["storage_mode"] == "static-local":
         apply_inventory(
             config,
             inventory,
@@ -91,6 +91,7 @@ def add_replica_set(config: dict[str, Any], vault: VaultClient, name: str) -> No
         "persistent": config["persistent"],
         "storage_class": config["storage_class"],
         "storage_size": config["storage_size"],
+        "storage_mode": config["storage_mode"],
         "controller_password_version": 1,
         "databases": {},
     }
@@ -132,7 +133,7 @@ def delete_replica_set(
     apply_inventory(config, inventory)
     kube.wait_absent(config, "mongodb", key, config["rs_ready_timeout"])
 
-    if rs["persistent"]:
+    if rs["persistent"] and rs.get("storage_mode", "static-local") == "static-local":
         apply_inventory(
             config,
             inventory,
