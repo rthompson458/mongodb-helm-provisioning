@@ -25,6 +25,23 @@ variable "replica_sets" {
   }))
 
   default = {}
+
+  validation {
+    condition = alltrue([
+      for replica_set in values(var.replica_sets) :
+      contains(["static-local", "dynamic"], replica_set.storage_mode)
+    ])
+    error_message = "Each ReplicaSet storage_mode must be static-local or dynamic."
+  }
+
+  validation {
+    condition = alltrue([
+      for replica_set in values(var.replica_sets) :
+      replica_set.storage_mode != "static-local" ||
+      (replica_set.storage_base_path != "" && replica_set.storage_node_name != "")
+    ])
+    error_message = "static-local ReplicaSets require storage_base_path and storage_node_name."
+  }
 }
 
 variable "operation" {
