@@ -12,12 +12,12 @@ variable "replica_sets" {
     controller_password_version = number
 
     databases = map(object({
-      display_name       = string
-      created_at         = string
-      owner_disabled     = bool
-      owner_disabled_at  = optional(string, "")
-      rotation_version   = number
-      rotated_at         = string
+      display_name      = string
+      created_at        = string
+      owner_disabled    = bool
+      owner_disabled_at = optional(string, "")
+      rotation_version  = number
+      rotated_at        = string
     }))
   }))
 
@@ -25,7 +25,7 @@ variable "replica_sets" {
 }
 
 variable "operation" {
-  description = "One-shot MongoDB runtime operation requested by terraformController"
+  description = "One-shot lifecycle operation requested by terraformController"
   type = object({
     action      = string
     replica_set = string
@@ -42,6 +42,8 @@ variable "operation" {
   validation {
     condition = contains([
       "none",
+      "prepare_replica_set_storage",
+      "cleanup_replica_set_storage",
       "create_database",
       "delete_database",
       "validate_replica_set_empty"
@@ -112,6 +114,22 @@ variable "placeholder_collection" {
   description = "Internal collection used to materialize an otherwise empty MongoDB database"
   type        = string
   default     = "__dbaas_metadata"
+}
+
+variable "default_members" {
+  description = "Member count used by storage preparation for a new ReplicaSet"
+  type        = number
+  default     = 3
+}
+
+variable "default_storage_class" {
+  description = "StorageClass used by storage preparation for a new ReplicaSet"
+  type        = string
+}
+
+variable "default_storage_size" {
+  description = "Storage size used by storage preparation for a new ReplicaSet"
+  type        = string
 }
 
 variable "storage_base_path" {
