@@ -118,6 +118,11 @@ locals {
     for key, account in local.accounts : key => account
     if account.enabled
   }
+
+  static_replica_sets = {
+    for key, replica_set in var.replica_sets : key => replica_set
+    if replica_set.persistent && replica_set.storage_mode == "static-local"
+  }
 }
 
 # Source the existing working Ops Manager connection information.
@@ -143,6 +148,62 @@ resource "kubernetes_config_map_v1" "controller_ops_manager_projects" {
   data = {
     baseUrl = data.kubernetes_config_map_v1.ops_manager_source.data["baseUrl"]
     orgId   = data.kubernetes_config_map_v1.ops_manager_source.data["orgId"]
+  }
+}
+
+# Static local storage is a Terraform-managed lifecycle resource.
+# Its state survives controller process failures. The create provisioner prepares
+# local directories/PVs before the MongoDB resource is created. The destroy
+# provisioner runs only after the MongoDB resource has been destroyed because
+# replica_set explicitly depends on this resource.
+resource "terraform_data" "replica_set_storage" {
+  for_each = local.static_replica_sets
+
+  input = {
+    replica_set       = each.key
+    members           = each.value.members
+    namespace         = var.mongodb_namespace
+    kubeconfig        = pathexpand(var.kubeconfig_path)
+    kube_context      = var.kube_context
+    storage_base_path = var.storage_base_path
+    storage_node_name = var.storage_node_name
+    storage_class     = each.value.storage_class
+    storage_size      = each.value.storage_size
+  }
+
+  provisioner "local-exec" {
+    command = "bash ${path.module}/scripts/lifecycle.sh"
+
+    environment = {
+      TC_ACTION            = "prepare_replica_set_storage"
+      TC_REPLICA_SET       = self.input.replica_set
+      TC_MEMBERS           = tostring(self.input.members)
+      TC_NAMESPACE         = self.input.namespace
+      TC_KUBECONFIG        = self.input.kubeconfig
+      TC_KUBE_CONTEXT      = self.input.kube_context
+      TC_STORAGE_BASE_PATH = self.input.storage_base_path
+      TC_STORAGE_NODE_NAME = self.input.storage_node_name
+      TC_STORAGE_CLASS     = self.input.storage_class
+      TC_STORAGE_SIZE      = self.input.storage_size
+    }
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "bash ${path.module}/scripts/lifecycle.sh"
+
+    environment = {
+      TC_ACTION            = "cleanup_replica_set_storage"
+      TC_REPLICA_SET       = self.input.replica_set
+      TC_MEMBERS           = tostring(self.input.members)
+      TC_NAMESPACE         = self.input.namespace
+      TC_KUBECONFIG        = self.input.kubeconfig
+      TC_KUBE_CONTEXT      = self.input.kube_context
+      TC_STORAGE_BASE_PATH = self.input.storage_base_path
+      TC_STORAGE_NODE_NAME = self.input.storage_node_name
+      TC_STORAGE_CLASS     = self.input.storage_class
+      TC_STORAGE_SIZE      = self.input.storage_size
+    }
   }
 }
 
@@ -206,6 +267,8 @@ resource "kubernetes_manifest" "replica_set" {
       } : {}
     )
   }
+
+  depends_on = [terraform_data.replica_set_storage]
 }
 
 # Human-facing Vault hierarchy:
@@ -501,8 +564,6 @@ resource "kubernetes_manifest" "database_account" {
 # supplies the operation and reports its result.
 resource "terraform_data" "lifecycle_operation" {
   count = contains([
-    "prepare_replica_set_storage",
-    "cleanup_replica_set_storage",
     "create_database",
     "delete_database",
     "validate_replica_set_empty",
