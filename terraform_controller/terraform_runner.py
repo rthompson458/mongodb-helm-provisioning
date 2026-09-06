@@ -76,6 +76,18 @@ def apply_inventory(
     """
     _require("terraform", "git", "kubectl")
     op = _operation_payload(operation)
+    imperative_actions = {
+        "prepare_replica_set_storage",
+        "cleanup_replica_set_storage",
+        "create_database",
+        "delete_database",
+        "validate_replica_set_empty",
+        "verify_database_accounts",
+        "verify_database_accounts_owner_disabled",
+        "verify_database_users_absent",
+    }
+    if op["action"] in imperative_actions:
+        _require("bash", "python3")
     if op["action"] in {"prepare_replica_set_storage", "cleanup_replica_set_storage"}:
         _require("docker")
 
@@ -93,6 +105,7 @@ def apply_inventory(
         "TF_VAR_vault_address": config["vault_address"],
         "TF_VAR_vault_mount": config["vault_mount"],
         "TF_VAR_vault_base_path": config["vault_base_path"],
+        "TF_VAR_rotation_days": str(config["rotation_days"]),
         "TF_VAR_mongodb_namespace": config["mongodb_namespace"],
         "TF_VAR_ops_manager_config_map": config["ops_manager_config_map"],
         "TF_VAR_ops_manager_credentials_secret": config["ops_manager_credentials_secret"],
