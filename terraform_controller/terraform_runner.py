@@ -49,11 +49,12 @@ def _sync(config: dict[str, Any]) -> Path:
     return tfdir
 
 
-def _operation_payload(operation: dict[str, str] | None) -> dict[str, str]:
-    payload = {
+def _operation_payload(operation: dict[str, Any] | None) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "action": "none",
         "replica_set": "",
         "database": "",
+        "members": 0,
         "nonce": "",
     }
     if operation:
@@ -66,7 +67,7 @@ def _operation_payload(operation: dict[str, str] | None) -> dict[str, str]:
 def apply_inventory(
     config: dict[str, Any],
     inventory: dict[str, dict[str, Any]],
-    operation: dict[str, str] | None = None,
+    operation: dict[str, Any] | None = None,
 ) -> None:
     """Apply desired state and an optional lifecycle operation through Terraform.
 
