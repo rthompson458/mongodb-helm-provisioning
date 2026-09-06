@@ -75,6 +75,10 @@ def apply_inventory(
     MongoDB, Vault, Kubernetes, and local-storage lifecycle changes.
     """
     _require("terraform", "git", "kubectl")
+    op = _operation_payload(operation)
+    if op["action"] in {"prepare_replica_set_storage", "cleanup_replica_set_storage"}:
+        _require("docker")
+
     _check_version()
     tfdir = _sync(config)
     token_name = config["vault_token_env"]
@@ -123,7 +127,7 @@ def apply_inventory(
     try:
         payload = {
             "replica_sets": inventory,
-            "operation": _operation_payload(operation),
+            "operation": op,
         }
         with tempfile.NamedTemporaryFile(
             "w",
