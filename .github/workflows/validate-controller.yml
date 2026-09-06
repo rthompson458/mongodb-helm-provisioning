@@ -42,7 +42,7 @@ jobs:
           terraform_version: "1.11.4"
 
       - name: Check Terraform formatting
-        run: terraform -chdir=terraform-controller fmt -check -recursive
+        run: terraform -chdir=terraform-controller fmt -check -diff -recursive
 
       - name: Initialize Terraform without backend
         run: terraform -chdir=terraform-controller init -backend=false -input=false
