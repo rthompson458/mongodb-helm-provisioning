@@ -188,15 +188,19 @@ resource "kubernetes_manifest" "replica_set" {
       each.value.persistent ? {
         podSpec = {
           persistence = {
-            single = {
-              storage      = each.value.storage_size
-              storageClass = each.value.storage_class
-              labelSelector = {
-                matchLabels = {
-                  "dbaas.replica-set" = each.key
+            single = merge(
+              {
+                storage      = each.value.storage_size
+                storageClass = each.value.storage_class
+              },
+              each.value.storage_mode == "static-local" ? {
+                labelSelector = {
+                  matchLabels = {
+                    "dbaas.replica-set" = each.key
+                  }
                 }
-              }
-            }
+              } : {}
+            )
           }
         }
       } : {}
@@ -226,6 +230,7 @@ resource "vault_kv_secret_v2" "replica_set_metadata" {
     persistent                  = tostring(each.value.persistent)
     storage_class               = each.value.storage_class
     storage_size                = each.value.storage_size
+    storage_mode                = each.value.storage_mode
     controller_password_version = tostring(each.value.controller_password_version)
     managed_by                  = "terraformController"
   })
