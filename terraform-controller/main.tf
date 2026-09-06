@@ -20,16 +20,16 @@ locals {
     for database in flatten([
       for replica_set_key, replica_set in var.replica_sets : [
         for database_key, database in replica_set.databases : {
-          key                = "${replica_set_key}/${database_key}"
-          replica_set_key    = replica_set_key
-          replica_set_name   = replica_set.display_name
-          database_key       = database_key
-          database_name      = database.display_name
-          created_at         = database.created_at
-          owner_disabled     = database.owner_disabled
-          owner_disabled_at  = database.owner_disabled_at
-          rotation_version   = database.rotation_version
-          rotated_at         = database.rotated_at
+          key               = "${replica_set_key}/${database_key}"
+          replica_set_key   = replica_set_key
+          replica_set_name  = replica_set.display_name
+          database_key      = database_key
+          database_name     = database.display_name
+          created_at        = database.created_at
+          owner_disabled    = database.owner_disabled
+          owner_disabled_at = database.owner_disabled_at
+          rotation_version  = database.rotation_version
+          rotated_at        = database.rotated_at
         }
       ]
     ]) : database.key => database
@@ -191,14 +191,14 @@ resource "vault_kv_secret_v2" "database_metadata" {
   delete_all_versions = true
 
   data_json = jsonencode({
-    replica_set      = each.value.replica_set_name
-    display_name     = each.value.database_name
-    created_at       = each.value.created_at
-    owner_disabled   = tostring(each.value.owner_disabled)
+    replica_set       = each.value.replica_set_name
+    display_name      = each.value.database_name
+    created_at        = each.value.created_at
+    owner_disabled    = tostring(each.value.owner_disabled)
     owner_disabled_at = each.value.owner_disabled_at
-    rotation_version = tostring(each.value.rotation_version)
-    rotated_at       = each.value.rotated_at
-    managed_by       = "terraformController"
+    rotation_version  = tostring(each.value.rotation_version)
+    rotated_at        = each.value.rotated_at
+    managed_by        = "terraformController"
   })
 
   custom_metadata {
@@ -431,7 +431,7 @@ resource "kubernetes_manifest" "database_account" {
 resource "terraform_data" "lifecycle_operation" {
   count = var.operation.action == "none" ? 0 : 1
 
-  input = var.operation
+  input            = var.operation
   triggers_replace = [var.operation.nonce]
 
   provisioner "local-exec" {
