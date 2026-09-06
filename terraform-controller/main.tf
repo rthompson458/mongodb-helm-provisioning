@@ -308,6 +308,10 @@ resource "vault_kv_secret_v2" "replica_set_metadata" {
       managed_by = "terraformController"
     }
   }
+
+  # Do not advertise a ReplicaSet in Vault inventory until Terraform has
+  # successfully created the MongoDB custom resource.
+  depends_on = [kubernetes_manifest.replica_set]
 }
 
 resource "vault_kv_secret_v2" "database_metadata" {
