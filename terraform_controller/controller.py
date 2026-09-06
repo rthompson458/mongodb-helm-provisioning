@@ -66,9 +66,17 @@ def add_replica_set(config: dict[str, Any], vault: VaultClient, name: str) -> No
     inventory = vault.load_inventory()
     if key in inventory:
         raise ControllerError(f"ReplicaSet '{inventory[key]['display_name']}' already exists.")
-    if kube.get_json(config, "mongodb", key) is not None:
-        raise ControllerError(
-            f"Kubernetes MongoDB resource '{key}' already exists outside terraformController; automatic adoption is blocked."
+    existing = kube.get_json(config, "mongodb", key)
+    if existing is not None:
+        labels = existing.get("metadata", {}).get("labels", {})
+        if labels.get("app.kubernetes.io/managed-by") != "terraformController":
+            raise ControllerError(
+                f"Kubernetes MongoDB resource '{key}' already exists outside "
+                "terraformController; automatic adoption is blocked."
+            )
+        print(
+            f"Recovering an incomplete terraformController creation for "
+            f"ReplicaSet '{display}' ..."
         )
 
     inventory[key] = {
