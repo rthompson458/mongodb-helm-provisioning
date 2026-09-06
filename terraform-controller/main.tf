@@ -165,8 +165,8 @@ resource "terraform_data" "replica_set_storage" {
     namespace         = var.mongodb_namespace
     kubeconfig        = pathexpand(var.kubeconfig_path)
     kube_context      = var.kube_context
-    storage_base_path = var.storage_base_path
-    storage_node_name = var.storage_node_name
+    storage_base_path = each.value.storage_base_path
+    storage_node_name = each.value.storage_node_name
     storage_class     = each.value.storage_class
     storage_size      = each.value.storage_size
   }
@@ -294,6 +294,8 @@ resource "vault_kv_secret_v2" "replica_set_metadata" {
     storage_class               = each.value.storage_class
     storage_size                = each.value.storage_size
     storage_mode                = each.value.storage_mode
+    storage_base_path           = each.value.storage_base_path
+    storage_node_name           = each.value.storage_node_name
     controller_password_version = tostring(each.value.controller_password_version)
     managed_by                  = "terraformController"
   })
