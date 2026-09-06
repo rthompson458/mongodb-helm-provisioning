@@ -48,60 +48,109 @@ class VaultClient:
     def account_secret(self, rs_display: str, db_display: str, username: str) -> dict[str, Any] | None:
         return self.read_secret(f"{self.base}/{rs_display}/{db_display}/{username}")
 
-    def load_inventory(self) -> dict[str, dict[str, Any]]:
-        """Reconstruct Terraform desired state from Vault metadata.
+    def _new_database(self, dbm: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "display_name": str(dbm["display_name"]),
+            "created_at": str(dbm["created_at"]),
+            "owner_disabled": str(dbm["owner_disabled"]).lower() == "true",
+            "owner_disabled_at": str(dbm.get("owner_disabled_at", "")),
+            "rotation_version": int(dbm["rotation_version"]),
+            "rotated_at": str(dbm["rotated_at"]),
+        }
 
-        Human-facing credential layout:
-          mongodb/<ReplicaSet>/<Database>/<Database>_owner
-          mongodb/<ReplicaSet>/<Database>/<Database>_readWrite
-          mongodb/<ReplicaSet>/<Database>/<Database>_read
+    def _new_replica_set(self, meta: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "display_name": str(meta["display_name"]),
+            "created_at": str(meta["created_at"]),
+            "members": int(meta["members"]),
+            "version": str(meta["version"]),
+            "persistent": str(meta["persistent"]).lower() == "true",
+            "storage_class": str(meta["storage_class"]),
+            "storage_size": str(meta["storage_size"]),
+            "controller_password_version": int(meta.get("controller_password_version", 1)),
+            "databases": {},
+        }
 
-        _metadata entries at the ReplicaSet and database levels hold lifecycle state.
-        """
+    def _load_current_layout(self) -> dict[str, dict[str, Any]]:
         inventory: dict[str, dict[str, Any]] = {}
-
         for rs_item in self.list_keys(self.base):
-            if not rs_item.endswith("/"):
+            if not rs_item.endswith("/") or rs_item == "replica-sets/":
                 continue
             rs_display = rs_item[:-1]
-            rs_key, _ = normalize_replica_set(rs_display)
+            try:
+                rs_key, _ = normalize_replica_set(rs_display)
+            except ControllerError:
+                continue
             meta = self.read_secret(f"{self.base}/{rs_display}/_metadata")
             if not meta:
                 continue
             try:
-                rs = {
-                    "display_name": str(meta["display_name"]),
-                    "created_at": str(meta["created_at"]),
-                    "members": int(meta["members"]),
-                    "version": str(meta["version"]),
-                    "persistent": str(meta["persistent"]).lower() == "true",
-                    "storage_class": str(meta["storage_class"]),
-                    "storage_size": str(meta["storage_size"]),
-                    "controller_password_version": int(meta.get("controller_password_version", 1)),
-                    "databases": {},
-                }
+                rs = self._new_replica_set(meta)
             except (KeyError, TypeError, ValueError) as exc:
                 raise ControllerError(f"Invalid ReplicaSet metadata for '{rs_display}'.") from exc
 
             for db_item in self.list_keys(f"{self.base}/{rs_display}"):
-                if not db_item.endswith("/"):
+                if not db_item.endswith("/") or db_item == "_internal/":
                     continue
                 db_display = db_item[:-1]
-                db_key, _ = normalize_database(db_display)
+                try:
+                    db_key, _ = normalize_database(db_display)
+                except ControllerError:
+                    continue
                 dbm = self.read_secret(f"{self.base}/{rs_display}/{db_display}/_metadata")
                 if not dbm:
                     continue
                 try:
-                    rs["databases"][db_key] = {
-                        "display_name": str(dbm["display_name"]),
-                        "created_at": str(dbm["created_at"]),
-                        "owner_disabled": str(dbm["owner_disabled"]).lower() == "true",
-                        "owner_disabled_at": str(dbm.get("owner_disabled_at", "")),
-                        "rotation_version": int(dbm["rotation_version"]),
-                        "rotated_at": str(dbm["rotated_at"]),
-                    }
+                    rs["databases"][db_key] = self._new_database(dbm)
                 except (KeyError, TypeError, ValueError) as exc:
                     raise ControllerError(f"Invalid database metadata for '{rs_display}/{db_display}'.") from exc
             inventory[rs_key] = rs
-
         return inventory
+
+    def _load_legacy_layout(self) -> dict[str, dict[str, Any]]:
+        """Read the pre-redesign mongodb/replica-sets/... layout for safe migration."""
+        inventory: dict[str, dict[str, Any]] = {}
+        root = f"{self.base}/replica-sets"
+        for rs_item in self.list_keys(root):
+            if not rs_item.endswith("/"):
+                continue
+            rs_key = rs_item[:-1]
+            meta = self.read_secret(f"{root}/{rs_key}/_metadata")
+            if not meta:
+                continue
+            try:
+                rs = self._new_replica_set(meta)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ControllerError(f"Invalid legacy ReplicaSet metadata for '{rs_key}'.") from exc
+
+            db_root = f"{root}/{rs_key}/databases"
+            for db_item in self.list_keys(db_root):
+                if not db_item.endswith("/"):
+                    continue
+                db_key = db_item[:-1]
+                dbm = self.read_secret(f"{db_root}/{db_key}/_metadata")
+                if not dbm:
+                    continue
+                try:
+                    rs["databases"][db_key] = self._new_database(dbm)
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise ControllerError(f"Invalid legacy database metadata for '{rs_key}/{db_key}'.") from exc
+            inventory[rs_key] = rs
+        return inventory
+
+    def load_inventory(self) -> dict[str, dict[str, Any]]:
+        """Reconstruct Terraform desired state from Vault metadata.
+
+        Current human-facing credential layout:
+          mongodb/<ReplicaSet>/<Database>/<Database>_owner
+          mongodb/<ReplicaSet>/<Database>/<Database>_readWrite
+          mongodb/<ReplicaSet>/<Database>/<Database>_read
+
+        The old mongodb/replica-sets/... layout is read as a migration fallback.
+        Current-layout records take precedence if both exist.
+        """
+        current = self._load_current_layout()
+        legacy = self._load_legacy_layout()
+        for key, value in legacy.items():
+            current.setdefault(key, value)
+        return current
