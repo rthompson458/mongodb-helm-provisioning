@@ -15,6 +15,9 @@ class VaultClient:
         self.address = config["vault_address"]
         self.mount = config["vault_mount"]
         self.base = config["vault_base_path"]
+        self.default_storage_mode = config.get("storage_mode", "static-local")
+        self.default_storage_base_path = config.get("storage_base_path", "")
+        self.default_storage_node_name = config.get("storage_node_name", "")
         env_name = config["vault_token_env"]
         self.token = os.getenv(env_name, "")
         if not self.token:
@@ -67,7 +70,9 @@ class VaultClient:
             "persistent": str(meta["persistent"]).lower() == "true",
             "storage_class": str(meta["storage_class"]),
             "storage_size": str(meta["storage_size"]),
-            "storage_mode": str(meta.get("storage_mode", "static-local")),
+            "storage_mode": str(meta.get("storage_mode", self.default_storage_mode)),
+            "storage_base_path": str(meta.get("storage_base_path", self.default_storage_base_path)),
+            "storage_node_name": str(meta.get("storage_node_name", self.default_storage_node_name)),
             "controller_password_version": int(meta.get("controller_password_version", 1)),
             "databases": {},
         }
