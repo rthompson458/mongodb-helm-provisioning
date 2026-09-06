@@ -67,6 +67,7 @@ class VaultClient:
             "persistent": str(meta["persistent"]).lower() == "true",
             "storage_class": str(meta["storage_class"]),
             "storage_size": str(meta["storage_size"]),
+            "storage_mode": str(meta.get("storage_mode", "static-local")),
             "controller_password_version": int(meta.get("controller_password_version", 1)),
             "databases": {},
         }
