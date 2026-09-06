@@ -1,5 +1,5 @@
 variable "replica_sets" {
-  description = "Replica sets, databases, and account lifecycle state managed by terraformController"
+  description = "ReplicaSets, databases, and account lifecycle state managed by terraformController"
 
   type = map(object({
     display_name                = string
@@ -12,15 +12,42 @@ variable "replica_sets" {
     controller_password_version = number
 
     databases = map(object({
-      display_name     = string
-      created_at       = string
-      owner_disabled   = bool
-      rotation_version = number
-      rotated_at       = string
+      display_name       = string
+      created_at         = string
+      owner_disabled     = bool
+      owner_disabled_at  = optional(string, "")
+      rotation_version   = number
+      rotated_at         = string
     }))
   }))
 
   default = {}
+}
+
+variable "operation" {
+  description = "One-shot MongoDB runtime operation requested by terraformController"
+  type = object({
+    action      = string
+    replica_set = string
+    database    = string
+    nonce       = string
+  })
+  default = {
+    action      = "none"
+    replica_set = ""
+    database    = ""
+    nonce       = ""
+  }
+
+  validation {
+    condition = contains([
+      "none",
+      "create_database",
+      "delete_database",
+      "validate_replica_set_empty"
+    ], var.operation.action)
+    error_message = "operation.action is not supported."
+  }
 }
 
 variable "vault_address" {
@@ -73,4 +100,26 @@ variable "kube_context" {
   description = "Kubeconfig context"
   type        = string
   default     = ""
+}
+
+variable "mongo_image" {
+  description = "MongoDB image used by Terraform-driven runtime Jobs"
+  type        = string
+  default     = "mongo:8.0"
+}
+
+variable "placeholder_collection" {
+  description = "Internal collection used to materialize an otherwise empty MongoDB database"
+  type        = string
+  default     = "__dbaas_metadata"
+}
+
+variable "storage_base_path" {
+  description = "Host/node path used for static local MongoDB volumes"
+  type        = string
+}
+
+variable "storage_node_name" {
+  description = "Kubernetes node and K3D container name that hosts local MongoDB volumes"
+  type        = string
 }
