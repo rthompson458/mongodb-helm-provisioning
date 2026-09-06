@@ -5,6 +5,7 @@ from typing import Any
 
 from .common import (
     ControllerError,
+    account_resource_name,
     database_rows,
     iso_utc,
     normalize_database,
@@ -72,6 +73,18 @@ def add_replica_set(config: dict[str, Any], vault: VaultClient, name: str) -> No
             f"Kubernetes MongoDB resource '{key}' already exists outside terraformController; automatic adoption is blocked."
         )
 
+    if config["persistent"]:
+        apply_inventory(
+            config,
+            inventory,
+            {
+                "action": "prepare_replica_set_storage",
+                "replica_set": key,
+                "database": "",
+                "members": config["default_members"],
+            },
+        )
+
     inventory[key] = {
         "display_name": display,
         "created_at": iso_utc(utc_now()),
@@ -106,16 +119,33 @@ def delete_replica_set(
             f"ReplicaSet '{rs['display_name']}' contains managed databases:\n{names}\nDelete the databases first."
         )
 
-    # Terraform runs the MongoDB runtime validation. It ignores admin/config/local.
     apply_inventory(
         config,
         inventory,
-        {"action": "validate_replica_set_empty", "replica_set": key, "database": ""},
+        {
+            "action": "validate_replica_set_empty",
+            "replica_set": key,
+            "database": "",
+            "members": int(rs["members"]),
+        },
     )
 
     del inventory[key]
     apply_inventory(config, inventory)
     kube.wait_absent(config, "mongodb", key, config["rs_ready_timeout"])
+
+    if rs["persistent"]:
+        apply_inventory(
+            config,
+            inventory,
+            {
+                "action": "cleanup_replica_set_storage",
+                "replica_set": key,
+                "database": "",
+                "members": int(rs["members"]),
+            },
+        )
+
     print(f"\nReplicaSet '{rs['display_name']}' was deleted.")
 
 
@@ -179,14 +209,19 @@ def add_database(config: dict[str, Any], vault: VaultClient, rs_name: str, db_na
     apply_inventory(
         config,
         inventory,
-        {"action": "create_database", "replica_set": rs_key, "database": display},
+        {
+            "action": "create_database",
+            "replica_set": rs_key,
+            "database": display,
+            "members": int(rs["members"]),
+        },
     )
 
     for account in ("owner", "readwrite", "read"):
         kube.wait_phase(
             config,
             "mongodbuser",
-            kube.account_resource_name(rs_key, db_key, account),
+            account_resource_name(rs_key, db_key, account),
             "Updated",
             config["rs_ready_timeout"],
         )
@@ -196,7 +231,7 @@ def add_database(config: dict[str, Any], vault: VaultClient, rs_name: str, db_na
     print(f"  {display}_owner      (dbOwner)")
     print(f"  {display}_readWrite  (readWrite)")
     print(f"  {display}_read       (read)")
-    print(f"\nVault UI: { _vault_ui(config) }")
+    print(f"\nVault UI: {_vault_ui(config)}")
     print("Vault credential paths:")
     for path in _vault_paths(config, rs, rs["databases"][db_key]):
         print(f"  {path}")
@@ -216,12 +251,15 @@ def delete_database(
     rs_key, rs, db_key, db = require_db(inventory, rs_name, db_name)
     _require_running(config, rs_key, rs["display_name"])
 
-    # Terraform performs the empty-database validation and drop before credentials
-    # are removed from desired state.
     apply_inventory(
         config,
         inventory,
-        {"action": "delete_database", "replica_set": rs_key, "database": db["display_name"]},
+        {
+            "action": "delete_database",
+            "replica_set": rs_key,
+            "database": db["display_name"],
+            "members": int(rs["members"]),
+        },
     )
 
     del rs["databases"][db_key]
