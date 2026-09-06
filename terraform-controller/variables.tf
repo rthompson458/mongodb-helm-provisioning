@@ -10,6 +10,8 @@ variable "replica_sets" {
     storage_class               = string
     storage_size                = string
     storage_mode                = optional(string, "static-local")
+    storage_base_path           = optional(string, "")
+    storage_node_name           = optional(string, "")
     controller_password_version = number
 
     databases = map(object({
