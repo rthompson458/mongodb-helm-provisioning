@@ -25,7 +25,7 @@ def load_config(path: Path) -> dict[str, Any]:
         "Terraform": ["repository_url", "branch", "subdirectory", "cache_directory", "backend_namespace", "backend_secret_suffix"],
         "Kubernetes": ["kubeconfig", "context", "namespace"],
         "MongoDB": ["ops_manager_config_map", "ops_manager_credentials_secret", "auth_database", "default_version", "default_members", "persistent", "storage_class", "storage_size"],
-        "Storage": ["mode", "base_path", "node_name"],
+        "Storage": ["mode"],
         "Rotation": ["days"],
         "Runtime": ["mongo_image", "placeholder_collection", "job_timeout_seconds", "replica_set_ready_timeout_seconds"],
     }
@@ -45,6 +45,12 @@ def load_config(path: Path) -> dict[str, Any]:
     storage_mode = p.get("Storage", "mode").strip().lower()
     if storage_mode not in {"static-local", "dynamic"}:
         raise ControllerError("Storage mode must be 'static-local' or 'dynamic'.")
+    if storage_mode == "static-local":
+        for key in ("base_path", "node_name"):
+            if not p.get("Storage", key, fallback="").strip():
+                raise ControllerError(
+                    f"Storage '{key}' is required when mode is static-local."
+                )
     expand = lambda v: os.path.expandvars(os.path.expanduser(v.strip()))
     return {
         "vault_address": p.get("Vault", "address").strip().rstrip("/"),
@@ -69,8 +75,8 @@ def load_config(path: Path) -> dict[str, Any]:
         "storage_class": p.get("MongoDB", "storage_class").strip(),
         "storage_size": p.get("MongoDB", "storage_size").strip(),
         "storage_mode": storage_mode,
-        "storage_base_path": expand(p.get("Storage", "base_path")),
-        "storage_node_name": p.get("Storage", "node_name").strip(),
+        "storage_base_path": expand(p.get("Storage", "base_path", fallback="")),
+        "storage_node_name": p.get("Storage", "node_name", fallback="").strip(),
         "rotation_days": rotation,
         "mongo_image": p.get("Runtime", "mongo_image").strip(),
         "placeholder_collection": p.get("Runtime", "placeholder_collection").strip(),
