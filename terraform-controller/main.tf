@@ -512,7 +512,7 @@ resource "terraform_data" "lifecycle_operation" {
       TC_KUBECONFIG             = pathexpand(var.kubeconfig_path)
       TC_KUBE_CONTEXT           = var.kube_context
       TC_MONGO_IMAGE            = var.mongo_image
-      TC_AUTH_DATABASE           = var.mongodb_auth_database
+      TC_AUTH_DATABASE          = var.mongodb_auth_database
       TC_PLACEHOLDER_COLLECTION = var.placeholder_collection
       TC_STORAGE_BASE_PATH      = var.storage_base_path
       TC_STORAGE_NODE_NAME      = var.storage_node_name
