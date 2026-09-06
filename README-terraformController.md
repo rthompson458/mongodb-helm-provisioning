@@ -1,125 +1,384 @@
 # terraformController
 
-`terraformController.py` is the local command-line controller for the K3D MongoDB/Vault demo.
+`terraformController.py` is the temporary local orchestration layer for the MongoDB DBaaS proof of concept.
 
-It manages this hierarchy:
+The long-term execution path is Spacelift plus a private worker. The private worker will run the same Terraform code that this local controller runs now.
+
+## Design rule
+
+**Terraform performs all managed changes.**
+
+Python does these tasks:
+
+- validate command input,
+- read Vault inventory,
+- read Kubernetes/MongoDB status,
+- pass desired state and lifecycle operations to Terraform,
+- wait for status convergence,
+- format results for the user.
+
+Python does **not** directly create, delete, rotate, enable, or disable managed MongoDB/Vault resources.
+
+Terraform performs:
+
+- ReplicaSet creation and deletion,
+- K3D static local-storage preparation and cleanup,
+- database materialization and deletion,
+- MongoDB role-account creation and deletion,
+- password generation and rotation,
+- owner-account disable/enable state enforcement,
+- Vault credential and lifecycle metadata management.
+
+## Managed hierarchy
 
 ```text
 ReplicaSet
   Database
-    <Database>_owner
-    <Database>_readWrite
-    <Database>_read
+    <Database>_owner      -> dbOwner
+    <Database>_readWrite  -> readWrite
+    <Database>_read       -> read
 ```
 
-Vault keeps credentials unique by full path:
+A ReplicaSet can contain multiple application databases.
 
-```text
-secret/mongodb/replica-sets/<replica-set>/databases/<database>/accounts/<account-type>
-```
-
-Therefore `RS1/Tank/Owner` and `RS2/Tank/Owner` are different Vault credentials.
+The three accounts above are the only application accounts created and managed by this controller.
 
 ## Commands
 
 ```text
 AddReplicaSet REPLICASET
-DeleteReplicaSet REPLICASET
+DeleteReplicaSet REPLICASET --confirm
 ListReplicaSets
 ListReplicaSet REPLICASET
 
 AddDatabase REPLICASET DATABASE
-DeleteDatabase REPLICASET DATABASE
-RotatePassword REPLICASET DATABASE
-DisableOwner REPLICASET DATABASE
-ListDatabases
+DeleteDatabase REPLICASET DATABASE --confirm
+ListDatabases [REPLICASET]
 ListDatabase REPLICASET DATABASE
-RecoverPassword REPLICASET DATABASE ACCOUNT_TYPE
-Reconcile
+RotatePasswords REPLICASET DATABASE
 
-ResetVault --confirm
+DisableOwner REPLICASET DATABASE --confirm
+Reconcile
 ```
 
 Examples:
 
 ```bash
 python3 terraformController.py AddReplicaSet RS1
-python3 terraformController.py AddDatabase RS1 Tank
-python3 terraformController.py ListDatabase RS1 Tank
-python3 terraformController.py RecoverPassword RS1 Tank ReadWrite
-python3 terraformController.py RotatePassword RS1 Tank
-python3 terraformController.py DisableOwner RS1 Tank
-python3 terraformController.py DeleteDatabase RS1 Tank
-python3 terraformController.py DeleteReplicaSet RS1
+python3 terraformController.py ListReplicaSets
+python3 terraformController.py AddDatabase RS1 HouseInfo
+python3 terraformController.py ListDatabases RS1
+python3 terraformController.py ListDatabases
+python3 terraformController.py ListDatabase RS1 HouseInfo
+python3 terraformController.py RotatePasswords RS1 HouseInfo
+python3 terraformController.py DisableOwner RS1 HouseInfo --confirm
+python3 terraformController.py DeleteDatabase RS1 HouseInfo --confirm
+python3 terraformController.py DeleteReplicaSet RS1 --confirm
 ```
 
-Use top-level or command-specific help:
+Use help at every level:
 
 ```bash
 python3 terraformController.py --help
 python3 terraformController.py AddReplicaSet --help
+python3 terraformController.py DeleteReplicaSet --help
 python3 terraformController.py AddDatabase --help
-python3 terraformController.py RecoverPassword --help
-python3 terraformController.py ResetVault --help
+python3 terraformController.py DeleteDatabase --help
+python3 terraformController.py ListDatabases --help
+python3 terraformController.py RotatePasswords --help
+python3 terraformController.py DisableOwner --help
+python3 terraformController.py Reconcile --help
 ```
 
-## Ops Manager project isolation
+## ReplicaSet rules
 
-MongoDB permits only one MongoDB resource per Ops Manager project. terraformController therefore does **not** point managed ReplicaSets directly at the existing `my-project` ConfigMap because that ConfigMap hard-codes:
+`AddReplicaSet RS1` creates one user-facing MongoDB ReplicaSet.
+
+Default configuration:
 
 ```text
-projectName: mongodb-development
+Members:       3
+MongoDB:       8.0.29
+Persistent:    true
+StorageClass:  mongodb-data-local
+Storage:       16Gi per member
 ```
 
-Instead, Terraform reads the working `baseUrl` and `orgId` from `my-project` and creates a controller-owned ConfigMap:
+Only ReplicaSets managed by `terraformController` appear in `ListReplicaSets`.
+
+Ops Manager's own Application Database ReplicaSet and any other system/internal MongoDB resources are not listed as user-facing ReplicaSets.
+
+`ListReplicaSets` reports the live Kubernetes/MongoDB phase, for example:
 
 ```text
-tc-ops-manager-projects
+REPLICA SET  K8S RESOURCE  PHASE     MEMBERS  MONGODB  DATABASES
+-----------  ------------  --------  -------  -------  ---------
+RS1          rs1           Running   3        8.0.29   2
+RS2          rs2           Pending   3        8.0.29   0
 ```
 
-That ConfigMap intentionally omits `projectName`. MongoDB Operator behavior then creates/uses a unique Ops Manager project matching each MongoDB resource name:
+`DeleteReplicaSet` requires `--confirm`.
+
+Deletion is allowed only when there are zero application databases on the ReplicaSet.
+
+The runtime validation ignores these MongoDB system databases:
 
 ```text
-rs1 -> Ops Manager project rs1
-rs2 -> Ops Manager project rs2
+admin
+config
+local
 ```
 
-The existing `organization-secret` is reused for Ops Manager API authentication.
+Terraform performs the final MongoDB emptiness check before the ReplicaSet is removed.
 
-## Reconcile
+## Database rules
+
+A database must be created on a ReplicaSet that already exists and is in phase `Running`.
+
+For example:
+
+```bash
+python3 terraformController.py AddDatabase RS1 HouseInfo
+```
+
+The controller refuses the request when RS1 is Absent, Pending, Creating, Failed, or any other state except `Running`.
+
+MongoDB does not retain a truly empty user database. Terraform therefore runs a temporary Kubernetes Job that creates this internal collection:
+
+```text
+__dbaas_metadata
+```
+
+That collection materializes the database without inserting application data.
+
+`DeleteDatabase` requires `--confirm`.
+
+Before deletion, Terraform runs a temporary MongoDB Job that verifies there are no application collections other than `__dbaas_metadata` and MongoDB `system.*` collections. If application collections remain, Terraform fails and the database and credentials remain intact.
+
+When deletion is allowed, Terraform removes:
+
+- the MongoDB database,
+- `<DB>_owner`,
+- `<DB>_readWrite`,
+- `<DB>_read`,
+- their Kubernetes password resources,
+- their Vault credentials,
+- their database lifecycle metadata.
+
+## Fixed database accounts
+
+Creating `HouseInfo` creates exactly:
+
+```text
+HouseInfo_owner      -> dbOwner on HouseInfo
+HouseInfo_readWrite  -> readWrite on HouseInfo
+HouseInfo_read       -> read on HouseInfo
+```
+
+No arbitrary AddUser/DeleteUser/ChangeRole commands are part of this MVP.
+
+The ReplicaSet is part of the security boundary. The same database or username text can exist on a different ReplicaSet with completely separate credentials and MongoDB security state.
+
+## Vault layout
+
+Human-facing Vault paths mirror ReplicaSet, database, and account ownership.
+
+For `RS1/HouseInfo`:
+
+```text
+mongodb/RS1/HouseInfo/HouseInfo_owner
+mongodb/RS1/HouseInfo/HouseInfo_readWrite
+mongodb/RS1/HouseInfo/HouseInfo_read
+```
+
+Lifecycle metadata is stored at:
+
+```text
+mongodb/RS1/_metadata
+mongodb/RS1/HouseInfo/_metadata
+```
+
+The metadata records include values needed for reliable automation, including:
+
+```text
+ReplicaSet creation time
+Database creation time
+MongoDB version
+Member count
+Storage settings
+Password rotation version
+Last rotation time
+Owner enabled/disabled state
+Owner disabled time
+```
+
+The controller can also read the previous `mongodb/replica-sets/...` layout so an existing environment can be migrated safely when Terraform is first reconciled with this version.
+
+## Vault credential retrieval
+
+After `AddDatabase` succeeds, the command prints:
+
+- the Vault UI URL,
+- the three Vault credential paths,
+- the password rotation interval.
+
+Default local Vault UI:
+
+```text
+http://127.0.0.1:8200/ui/
+```
+
+An authorized Vault administrator can log in and retrieve the **current** password for any managed account. Password rotation replaces the current credential in Vault.
+
+The passwords are generated by Terraform as ephemeral values and are passed to Vault and Kubernetes through write-only provider fields. Plaintext passwords are not intentionally stored in Terraform state.
+
+## Password rotation
+
+Default rotation interval:
+
+```text
+30 days
+```
+
+For the local MVP, rotation is initiated with:
+
+```bash
+python3 terraformController.py RotatePasswords RS1 HouseInfo
+```
+
+The command rotates all three passwords together:
+
+```text
+HouseInfo_owner
+HouseInfo_readWrite
+HouseInfo_read
+```
+
+The production installation is expected to invoke the same Terraform workflow from an approved scheduler. Possible schedulers include:
+
+- Spacelift scheduled runs,
+- cron,
+- AWS EventBridge/Lambda,
+- another customer-approved automation platform.
+
+The scheduler is outside the Terraform data model. The important point is that the scheduled process invokes the same Terraform password-rotation workflow.
+
+## Owner account lifecycle
+
+The owner password rotates every 30 days like the other two passwords.
+
+At the first rotation at or after 30 days from database creation, Terraform also disables the owner in MongoDB.
+
+Disabled means:
+
+```text
+The Owner MongoDBUser does not exist.
+The account cannot authenticate to MongoDB.
+The current Owner password still exists in Vault.
+Future RotatePasswords runs continue rotating the stored Owner password.
+```
+
+Removing only the Vault secret would not be sufficient because a previously known MongoDB password could still authenticate. The actual enforcement point is MongoDB.
+
+### Re-enabling Owner
+
+Vault holds the lifecycle state.
+
+An authorized administrator can change this field in:
+
+```text
+mongodb/<RS>/<DB>/_metadata
+```
+
+from:
+
+```text
+owner_disabled = true
+```
+
+to:
+
+```text
+owner_disabled = false
+```
+
+Then run:
 
 ```bash
 python3 terraformController.py Reconcile
 ```
 
-`Reconcile` refreshes the Terraform module from GitHub, reapplies the complete desired inventory reconstructed from Vault, and waits for all managed ReplicaSets and internal controller accounts to converge. It is useful after controller/Terraform upgrades or after repairing a Pending deployment.
+Terraform recreates the Owner `MongoDBUser` using the current password already stored by the managed lifecycle.
 
-## ReplicaSet rules
+Vault itself does not directly change MongoDB merely because a KV value changed. A Terraform reconcile or future automated equivalent is required to apply the Vault lifecycle state to MongoDB.
 
-`AddReplicaSet` creates a new MongoDB Kubernetes Operator `MongoDB` resource.
+If the owner is later re-enabled after day 30, the next scheduled `RotatePasswords` run disables it again while rotating its password.
 
-The default config creates:
+`DisableOwner --confirm` is retained as a direct lifecycle/demo command so the customer can see the disabled behavior without waiting 30 days.
 
-```text
-3 members
-MongoDB 8.0.29
-persistent storage
-local-path StorageClass
-16Gi per member
+## ListDatabases behavior
+
+One ReplicaSet:
+
+```bash
+python3 terraformController.py ListDatabases RS1
 ```
 
-Change those defaults in `terraformController.config` when needed.
+All managed ReplicaSets:
 
-`DeleteReplicaSet` has no force option. It is blocked when:
+```bash
+python3 terraformController.py ListDatabases
+```
 
-1. terraformController still has a managed database under that ReplicaSet, or
-2. MongoDB itself reports any non-system database on that ReplicaSet.
+The listings show each database's three accounts, account status, and time until password rotation is due.
 
-The controller ignores MongoDB's built-in `admin`, `config`, and `local` databases for this check.
+## Terraform lifecycle operations
 
-## Static local storage
+Some MongoDB operations are imperative even though Terraform owns the workflow. These include:
 
-The nix-k3d cluster uses a no-provisioner StorageClass, so terraformController creates the required local storage before it creates a ReplicaSet.
+- materializing an empty database,
+- confirming a database is empty before deletion,
+- dropping a database,
+- confirming a ReplicaSet has no application databases,
+- preparing K3D static local storage,
+- cleaning K3D static local storage.
+
+Terraform handles these with a one-shot `terraform_data.lifecycle_operation` resource that calls:
+
+```text
+terraform-controller/scripts/lifecycle.sh
+```
+
+The script creates short-lived Kubernetes MongoDB Jobs for MongoDB runtime actions. A failed Job causes the Terraform apply to fail, which prevents the Python controller from advancing to the destructive follow-up step.
+
+This is deliberate. Python is not the component performing the mutation.
+
+## Internal controller account
+
+Each managed ReplicaSet has one hidden internal administrator:
+
+```text
+tc_<replica-set>_admin
+```
+
+This is not one of the three application database accounts and is never shown as an application user.
+
+Terraform uses it only for controller runtime operations such as:
+
+- creating the internal database collection,
+- checking database contents before deletion,
+- dropping an approved empty database,
+- confirming that a ReplicaSet contains no application databases.
+
+The internal credential is stored under:
+
+```text
+mongodb/<ReplicaSet>/_internal/controller-admin
+```
+
+## K3D static local storage
+
+The current nix-k3d environment uses static local volumes.
 
 Default configuration:
 
@@ -129,7 +388,9 @@ Node:         k3d-nix-dev-server-0
 Base path:    /home/rich/mongodb-dbaas-dev/storage
 ```
 
-For `AddReplicaSet RS1`, the controller creates three local directories and PersistentVolumes:
+Before Terraform creates a persistent ReplicaSet, Terraform runs the storage preparation lifecycle operation. It creates the local directories and PersistentVolumes required by the ReplicaSet.
+
+For RS1 with three members:
 
 ```text
 /home/rich/mongodb-dbaas-dev/storage/rs1-0
@@ -137,118 +398,60 @@ For `AddReplicaSet RS1`, the controller creates three local directories and Pers
 /home/rich/mongodb-dbaas-dev/storage/rs1-2
 ```
 
-The PVs are labeled with `dbaas.replica-set=rs1`. The MongoDB resource uses that label selector so its PVCs cannot bind to another ReplicaSet's local PVs.
+After an empty ReplicaSet is deleted, Terraform runs the cleanup operation for its retained PVCs, static PVs, and local directories.
 
-After an empty ReplicaSet is deleted, the controller removes its retained PVCs, static PVs, and local storage directories.
+## Ops Manager project isolation
 
-## Database rules
+MongoDB permits only one MongoDB resource per Ops Manager project in this Operator workflow.
 
-`AddDatabase RS1 Tank` creates an empty MongoDB database and these accounts:
-
-```text
-Tank_owner      -> dbOwner on Tank
-Tank_readWrite  -> readWrite on Tank
-Tank_read       -> read on Tank
-```
-
-MongoDB does not retain a truly empty user database, so the controller creates one empty internal collection named:
+The controller therefore reads `baseUrl` and `orgId` from the existing working Ops Manager ConfigMap and creates:
 
 ```text
-__dbaas_metadata
+tc-ops-manager-projects
 ```
 
-This makes the database exist immediately without inserting application data.
+That ConfigMap intentionally omits `projectName`.
 
-`DeleteDatabase` is blocked if the database contains any non-system collection other than `__dbaas_metadata`. This prevents the controller from silently deleting application data.
+The Operator can then use a distinct Ops Manager project for each MongoDB resource:
 
-## Owner disable behavior
+```text
+rs1 -> Ops Manager project rs1
+rs2 -> Ops Manager project rs2
+```
 
-`DisableOwner` removes the owner `MongoDBUser` resource from MongoDB. The Vault credential and Kubernetes password Secret remain.
+The existing organization credentials Secret is reused for Ops Manager API authentication.
 
-This provides an actual disabled state instead of merely removing roles from an account that can still authenticate.
-
-`RotatePassword` always rotates all three stored passwords. If Owner is disabled, its credential rotates but its MongoDBUser remains absent.
-
-## Password rotation
-
-The configured rotation interval is 30 days.
-
-`ListDatabases`, `ListDatabase`, and `ListReplicaSet` report the time remaining from the last successful creation/rotation time.
-
-`RotatePassword` is the manual demo action that rotates all three database passwords in one operation and restarts the 30-day countdown.
-
-Automatic scheduling is intentionally not part of this first controller version. A scheduler can call the same command later without changing the data model.
-
-## RecoverPassword
-
-`RecoverPassword` is demo-only.
-
-Account type is case-insensitive:
+## Reconcile
 
 ```bash
-python3 terraformController.py RecoverPassword RS1 Tank Owner
-python3 terraformController.py RecoverPassword RS1 Tank read
-python3 terraformController.py RecoverPassword RS1 Tank READWRITE
+python3 terraformController.py Reconcile
 ```
 
-It intentionally prints the selected Vault password to the terminal so password rotation can be demonstrated.
+`Reconcile`:
 
-## Internal controller account
+1. reads managed desired state from Vault,
+2. refreshes the Terraform module from GitHub,
+3. applies the complete desired state,
+4. waits for managed ReplicaSets and the internal controller accounts to converge.
 
-Each terraformController-created ReplicaSet has one hidden internal administrator:
+Use it after:
 
-```text
-tc_<replica-set>_admin
-```
-
-This account is not one of the three application role accounts and is not shown by normal database listings.
-
-It is used only for controller operations such as:
-
-- materializing an empty database,
-- verifying that a database is empty before deletion,
-- verifying that a ReplicaSet is truly empty before deletion,
-- performing `ResetVault --confirm`.
-
-Its password is stored in Vault and a Kubernetes Secret through Terraform write-only fields.
-
-## ResetVault
-
-```bash
-python3 terraformController.py ResetVault --confirm
-```
-
-This is intentionally destructive.
-
-For every ReplicaSet created by terraformController, it drops all non-system MongoDB databases and removes:
-
-- managed database role accounts,
-- database Kubernetes password Secrets,
-- database Vault records.
-
-The managed ReplicaSets remain running and empty. Their internal controller accounts remain available.
-
-Use DeleteReplicaSet separately when you want to remove an empty ReplicaSet.
-
-ReplicaSets not created by terraformController, such as existing resources already in the cluster, are not touched.
+- a supported lifecycle metadata change in Vault,
+- a controller/Terraform upgrade,
+- repairing a Pending deployment,
+- re-enabling an Owner account through Vault.
 
 ## Vault token
 
-Do not place the Vault token in `terraformController.config`.
+Do not put the Vault token in `terraformController.config`.
 
-Set it in the WSL shell:
+Set it in the shell:
 
 ```bash
-export VAULT_TOKEN='<your-current-vault-token>'
+export VAULT_TOKEN='<current-vault-token>'
 ```
 
-Vault is configured at:
-
-```text
-http://127.0.0.1:8200
-```
-
-The existing Vault port-forward must be running.
+The local Vault port-forward must be running when using the default address.
 
 ## GitHub source of truth
 
@@ -264,26 +467,43 @@ and executes:
 terraform-controller/
 ```
 
-from a dedicated cache under `~/.cache/terraformController/`.
+The normal working copy is not Terraform's execution source. The controller uses its dedicated cache under:
 
-The normal local working copy is not used as Terraform's execution source.
+```text
+~/.cache/terraformController/
+```
 
 ## Terraform state
 
-The new module uses Terraform's Kubernetes backend.
+Terraform uses the Kubernetes backend.
 
 Default state location:
 
 ```text
-namespace: mongodb
+namespace:     mongodb
 secret suffix: mongodb-vault-controller
-context: k3d-nix-dev
+context:       k3d-nix-dev
 ```
 
-This keeps controller state in the K3D cluster instead of tying it to the temporary Git execution clone.
+## Relationship to Spacelift
 
-## Existing Helm/Spacelift path
+The current local flow is:
 
-The existing root Terraform and `mongodb-chart/` remain unchanged. They still support the earlier Spacelift/Helm workflow for `mongodb-development`.
+```text
+User
+  -> terraformController.py
+      -> Terraform from GitHub
+          -> Kubernetes / MongoDB Operator / Ops Manager / Vault
+```
 
-The new `terraform-controller/` directory is separate so multi-ReplicaSet local development does not break the existing working chart.
+The intended installed flow is:
+
+```text
+User or scheduled process
+  -> Spacelift
+      -> Private Worker
+          -> same Terraform from GitHub
+              -> Kubernetes / MongoDB Operator / Ops Manager / Vault
+```
+
+The Terraform module is the durable implementation. The local Python controller is the temporary execution/orchestration replacement for the private worker path.
