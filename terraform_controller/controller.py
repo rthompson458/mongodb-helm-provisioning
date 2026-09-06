@@ -343,18 +343,43 @@ def rotate_passwords(config: dict[str, Any], vault: VaultClient, rs_name: str, d
     rs_key, rs, _, db = require_db(inventory, rs_name, db_name)
     _require_running(config, rs_key, rs["display_name"])
 
-    # Terraform owns the rotation revision, timestamp, and 30-day Owner rule.
-    # Python supplies only the requested operation.
-    apply_inventory(
-        config,
-        inventory,
-        {
-            "action": "rotate_passwords",
-            "replica_set": rs_key,
-            "database": db["display_name"],
-            "members": int(rs["members"]),
-        },
-    )
+    # Rotation spans Vault and Kubernetes write-only fields. Database lifecycle
+    # metadata is committed first in Terraform. If an apply is interrupted
+    # after only one password sink changes, reload the committed revision and
+    # perform one fresh rotation. That new revision forces both sinks to use
+    # the same new ephemeral password.
+    last_error: ControllerError | None = None
+    for attempt in range(2):
+        if attempt:
+            inventory = vault.load_inventory()
+            rs_key, rs, _, db = require_db(inventory, rs_name, db_name)
+            _require_running(config, rs_key, rs["display_name"])
+            print("Retrying password rotation with a fresh Terraform revision ...")
+
+        try:
+            apply_inventory(
+                config,
+                inventory,
+                {
+                    "action": "rotate_passwords",
+                    "replica_set": rs_key,
+                    "database": db["display_name"],
+                    "members": int(rs["members"]),
+                },
+            )
+            last_error = None
+            break
+        except ControllerError as exc:
+            last_error = exc
+            if attempt == 0:
+                continue
+
+    if last_error is not None:
+        raise ControllerError(
+            "Password rotation did not converge after a recovery retry. "
+            "No success was reported. Run RotatePasswords again after correcting "
+            "the Terraform/Kubernetes/Vault error."
+        ) from last_error
 
     updated_inventory = vault.load_inventory()
     rs_key, updated_rs, db_key, updated_db = require_db(
@@ -377,7 +402,6 @@ def rotate_passwords(config: dict[str, Any], vault: VaultClient, rs_name: str, d
         print("Owner status: Enabled.")
     print(f"Last rotated: {updated_db['rotated_at']}")
     print(f"Vault UI: {_vault_ui(config)}")
-
 
 
 def disable_owner(
