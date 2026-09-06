@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from terraform_controller import controller
@@ -63,7 +64,7 @@ class ControllerLifecycleTests(unittest.TestCase):
             patch.object(controller, "_verify_database_accounts"),
             patch.object(controller, "utc_now"),
         ):
-            controller.utc_now.return_value = controller.parse_utc("2026-09-06T12:00:00Z") if hasattr(controller, "parse_utc") else __import__("datetime").datetime(2026, 9, 6, 12, 0, tzinfo=__import__("datetime").timezone.utc)
+            controller.utc_now.return_value = datetime(2026, 9, 6, 12, 0, tzinfo=timezone.utc)
             controller.add_database(self.config, vault, "RS1", "HouseInfo")
 
         self.assertEqual(calls[0][1]["action"], "create_database")
