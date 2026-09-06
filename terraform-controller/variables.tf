@@ -9,6 +9,7 @@ variable "replica_sets" {
     persistent                  = bool
     storage_class               = string
     storage_size                = string
+    storage_mode                = optional(string, "static-local")
     controller_password_version = number
 
     databases = map(object({
