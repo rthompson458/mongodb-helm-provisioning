@@ -30,12 +30,14 @@ variable "operation" {
     action      = string
     replica_set = string
     database    = string
+    members     = number
     nonce       = string
   })
   default = {
     action      = "none"
     replica_set = ""
     database    = ""
+    members     = 0
     nonce       = ""
   }
 
