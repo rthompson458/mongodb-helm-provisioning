@@ -395,6 +395,11 @@ resource "vault_kv_secret_v2" "database_account" {
 
   data_json_wo_version = each.value.rotation_version
 
+  # Commit lifecycle metadata first. If a later credential write fails, the
+  # next RotatePasswords attempt advances the revision again and forces both
+  # Vault and Kubernetes to converge on one fresh password.
+  depends_on = [vault_kv_secret_v2.database_metadata]
+
   custom_metadata {
     max_versions = 5
 
@@ -428,6 +433,10 @@ resource "kubernetes_secret_v1" "database_account_password" {
 
   data_wo_revision = each.value.rotation_version
   type             = "Opaque"
+
+  # See database_account above. Metadata is the committed rotation intent and
+  # must advance before either write-only password sink is changed.
+  depends_on = [vault_kv_secret_v2.database_metadata]
 }
 
 # Disabled Owner = no Owner MongoDBUser. The Vault credential and password
