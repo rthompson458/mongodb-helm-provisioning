@@ -74,21 +74,9 @@ def apply_inventory(
     Python supplies intent and reads status. Terraform performs all managed
     MongoDB, Vault, Kubernetes, and local-storage lifecycle changes.
     """
-    _require("terraform", "git", "kubectl")
+    _require("terraform", "git", "kubectl", "bash", "python3")
     op = _operation_payload(operation)
-    imperative_actions = {
-        "prepare_replica_set_storage",
-        "cleanup_replica_set_storage",
-        "create_database",
-        "delete_database",
-        "validate_replica_set_empty",
-        "verify_database_accounts",
-        "verify_database_accounts_owner_disabled",
-        "verify_database_users_absent",
-    }
-    if op["action"] in imperative_actions:
-        _require("bash", "python3")
-    if op["action"] in {"prepare_replica_set_storage", "cleanup_replica_set_storage"}:
+    if config["storage_mode"] == "static-local":
         _require("docker")
 
     _check_version()
