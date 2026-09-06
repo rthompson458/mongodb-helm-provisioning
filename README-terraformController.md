@@ -346,7 +346,7 @@ Some MongoDB operations are imperative even though Terraform owns the workflow. 
 Terraform handles these with a one-shot `terraform_data.lifecycle_operation` resource that calls:
 
 ```text
-terraform-controller/scripts/lifecycle.sh
+terraform-dbaas/scripts/lifecycle.sh
 ```
 
 The script creates short-lived Kubernetes MongoDB Jobs for MongoDB runtime actions. A failed Job causes the Terraform apply to fail, which prevents the Python controller from advancing to the destructive follow-up step.
@@ -464,7 +464,7 @@ https://github.com/rthompson458/mongodb-helm-provisioning.git
 and executes:
 
 ```text
-terraform-controller/
+terraform-dbaas/
 ```
 
 The normal working copy is not Terraform's execution source. The controller uses its dedicated cache under:
