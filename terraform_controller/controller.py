@@ -80,6 +80,8 @@ def add_replica_set(config: dict[str, Any], vault: VaultClient, name: str) -> No
         "storage_class": config["storage_class"],
         "storage_size": config["storage_size"],
         "storage_mode": config["storage_mode"],
+        "storage_base_path": config["storage_base_path"],
+        "storage_node_name": config["storage_node_name"],
         "controller_password_version": 1,
         "databases": {},
     }
