@@ -68,10 +68,10 @@ def apply_inventory(
     inventory: dict[str, dict[str, Any]],
     operation: dict[str, str] | None = None,
 ) -> None:
-    """Apply desired state and an optional imperative MongoDB operation through Terraform.
+    """Apply desired state and an optional lifecycle operation through Terraform.
 
-    Python supplies intent. Terraform remains the component that performs managed
-    MongoDB, Vault, and Kubernetes changes.
+    Python supplies intent and reads status. Terraform performs all managed
+    MongoDB, Vault, Kubernetes, and local-storage lifecycle changes.
     """
     _require("terraform", "git", "kubectl")
     _check_version()
@@ -96,6 +96,9 @@ def apply_inventory(
         "TF_VAR_kube_context": config["kube_context"],
         "TF_VAR_mongo_image": config["mongo_image"],
         "TF_VAR_placeholder_collection": config["placeholder_collection"],
+        "TF_VAR_default_members": str(config["default_members"]),
+        "TF_VAR_default_storage_class": config["storage_class"],
+        "TF_VAR_default_storage_size": config["storage_size"],
         "TF_VAR_storage_base_path": config["storage_base_path"],
         "TF_VAR_storage_node_name": config["storage_node_name"],
     })
