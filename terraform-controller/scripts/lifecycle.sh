@@ -122,7 +122,9 @@ verify_users_absent() {
   owner_json=$(json_string "$owner")
   readwrite_json=$(json_string "$readwrite")
   read_json=$(json_string "$read")
-  local js="const a=db.getSiblingDB('admin');const n=[${owner_json},${readwrite_json},${read_json}];const f=n.filter(x=>a.getUser(x)!==null);if(f.length){print('TC_BLOCKED='+JSON.stringify(f));quit(42);}print('TC_RESULT=USERS_ABSENT');"
+  local auth_db_json
+  auth_db_json=$(json_string "${TC_AUTH_DATABASE:-admin}")
+  local js="const a=db.getSiblingDB(${auth_db_json});const n=[${owner_json},${readwrite_json},${read_json}];const f=n.filter(x=>a.getUser(x)!==null);if(f.length){print('TC_BLOCKED='+JSON.stringify(f));quit(42);}print('TC_RESULT=USERS_ABSENT');"
   export TC_JS_JSON
   TC_JS_JSON=$(json_string "$js")
 
@@ -143,7 +145,9 @@ verify_owner_absent() {
   local owner="${TC_DATABASE}_owner"
   local owner_json
   owner_json=$(json_string "$owner")
-  local js="const a=db.getSiblingDB('admin');const u=a.getUser(${owner_json});if(u!==null){print('TC_BLOCKED=OWNER_STILL_EXISTS');quit(42);}print('TC_RESULT=OWNER_ABSENT');"
+  local auth_db_json
+  auth_db_json=$(json_string "${TC_AUTH_DATABASE:-admin}")
+  local js="const a=db.getSiblingDB(${auth_db_json});const u=a.getUser(${owner_json});if(u!==null){print('TC_BLOCKED=OWNER_STILL_EXISTS');quit(42);}print('TC_RESULT=OWNER_ABSENT');"
   export TC_JS_JSON
   TC_JS_JSON=$(json_string "$js")
 
