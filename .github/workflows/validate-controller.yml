@@ -5,7 +5,7 @@ on:
     paths:
       - "terraformController.py"
       - "terraform_controller/**"
-      - "terraform-controller/**"
+      - "terraform-dbaas/**"
       - "terraformController.config"
       - ".github/workflows/validate-controller.yml"
   push:
@@ -14,7 +14,7 @@ on:
     paths:
       - "terraformController.py"
       - "terraform_controller/**"
-      - "terraform-controller/**"
+      - "terraform-dbaas/**"
       - "terraformController.config"
 
 jobs:
@@ -37,7 +37,7 @@ jobs:
         run: python3 -m unittest discover -s tests -v
 
       - name: Validate lifecycle Bash syntax
-        run: bash -n terraform-controller/scripts/lifecycle.sh
+        run: bash -n terraform-dbaas/scripts/lifecycle.sh
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
@@ -45,10 +45,10 @@ jobs:
           terraform_version: "1.11.4"
 
       - name: Check Terraform formatting
-        run: terraform -chdir=terraform-controller fmt -check -diff -recursive
+        run: terraform -chdir=terraform-dbaas fmt -check -diff -recursive
 
       - name: Initialize Terraform without backend
-        run: terraform -chdir=terraform-controller init -backend=false -input=false
+        run: terraform -chdir=terraform-dbaas init -backend=false -input=false
 
       - name: Validate Terraform
-        run: terraform -chdir=terraform-controller validate
+        run: terraform -chdir=terraform-dbaas validate
