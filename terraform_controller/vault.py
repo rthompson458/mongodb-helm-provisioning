@@ -7,7 +7,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from .common import ControllerError
+from .common import ControllerError, normalize_database, normalize_replica_set
 
 
 class VaultClient:
@@ -22,14 +22,16 @@ class VaultClient:
 
     def _request(self, api_path: str, *, list_request: bool = False) -> dict[str, Any] | None:
         url = f"{self.address}/v1/{urllib.parse.quote(api_path.strip('/'), safe='/')}"
-        if list_request: url += "?list=true"
+        if list_request:
+            url += "?list=true"
         request = urllib.request.Request(url, method="GET", headers={"X-Vault-Token": self.token})
         try:
             with urllib.request.urlopen(request, timeout=10) as response:
                 body = response.read().decode("utf-8")
                 return json.loads(body) if body else {}
         except urllib.error.HTTPError as exc:
-            if exc.code == 404: return None
+            if exc.code == 404:
+                return None
             body = exc.read().decode("utf-8", errors="replace")
             raise ControllerError(f"Vault returned HTTP {exc.code} for '{api_path}': {body}") from exc
         except urllib.error.URLError as exc:
@@ -43,17 +45,29 @@ class VaultClient:
         response = self._request(f"{self.mount}/data/{path.strip('/')}")
         return response.get("data", {}).get("data", {}) if response else None
 
-    def account_secret(self, rs: str, db: str, account: str) -> dict[str, Any] | None:
-        return self.read_secret(f"{self.base}/replica-sets/{rs}/databases/{db}/accounts/{account}")
+    def account_secret(self, rs_display: str, db_display: str, username: str) -> dict[str, Any] | None:
+        return self.read_secret(f"{self.base}/{rs_display}/{db_display}/{username}")
 
     def load_inventory(self) -> dict[str, dict[str, Any]]:
+        """Reconstruct Terraform desired state from Vault metadata.
+
+        Human-facing credential layout:
+          mongodb/<ReplicaSet>/<Database>/<Database>_owner
+          mongodb/<ReplicaSet>/<Database>/<Database>_readWrite
+          mongodb/<ReplicaSet>/<Database>/<Database>_read
+
+        _metadata entries at the ReplicaSet and database levels hold lifecycle state.
+        """
         inventory: dict[str, dict[str, Any]] = {}
-        root = f"{self.base}/replica-sets"
-        for rs_item in self.list_keys(root):
-            if not rs_item.endswith("/"): continue
-            rs_key = rs_item[:-1]
-            meta = self.read_secret(f"{root}/{rs_key}/_metadata")
-            if not meta: continue
+
+        for rs_item in self.list_keys(self.base):
+            if not rs_item.endswith("/"):
+                continue
+            rs_display = rs_item[:-1]
+            rs_key, _ = normalize_replica_set(rs_display)
+            meta = self.read_secret(f"{self.base}/{rs_display}/_metadata")
+            if not meta:
+                continue
             try:
                 rs = {
                     "display_name": str(meta["display_name"]),
@@ -67,22 +81,27 @@ class VaultClient:
                     "databases": {},
                 }
             except (KeyError, TypeError, ValueError) as exc:
-                raise ControllerError(f"Invalid ReplicaSet metadata for '{rs_key}'.") from exc
-            db_root = f"{root}/{rs_key}/databases"
-            for db_item in self.list_keys(db_root):
-                if not db_item.endswith("/"): continue
-                db_key = db_item[:-1]
-                dbm = self.read_secret(f"{db_root}/{db_key}/_metadata")
-                if not dbm: continue
+                raise ControllerError(f"Invalid ReplicaSet metadata for '{rs_display}'.") from exc
+
+            for db_item in self.list_keys(f"{self.base}/{rs_display}"):
+                if not db_item.endswith("/"):
+                    continue
+                db_display = db_item[:-1]
+                db_key, _ = normalize_database(db_display)
+                dbm = self.read_secret(f"{self.base}/{rs_display}/{db_display}/_metadata")
+                if not dbm:
+                    continue
                 try:
                     rs["databases"][db_key] = {
                         "display_name": str(dbm["display_name"]),
                         "created_at": str(dbm["created_at"]),
                         "owner_disabled": str(dbm["owner_disabled"]).lower() == "true",
+                        "owner_disabled_at": str(dbm.get("owner_disabled_at", "")),
                         "rotation_version": int(dbm["rotation_version"]),
                         "rotated_at": str(dbm["rotated_at"]),
                     }
                 except (KeyError, TypeError, ValueError) as exc:
-                    raise ControllerError(f"Invalid database metadata for '{rs_key}/{db_key}'.") from exc
+                    raise ControllerError(f"Invalid database metadata for '{rs_display}/{db_display}'.") from exc
             inventory[rs_key] = rs
+
         return inventory
