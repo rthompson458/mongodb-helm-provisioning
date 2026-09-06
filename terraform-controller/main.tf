@@ -16,7 +16,10 @@ locals {
     }
   }
 
-  databases = {
+  # Raw lifecycle state comes from Vault through var.replica_sets.
+  # RotatePasswords and DisableOwner are expressed as Terraform operations.
+  # Terraform, not Python, computes the resulting password revision and owner state.
+  database_inputs = {
     for database in flatten([
       for replica_set_key, replica_set in var.replica_sets : [
         for database_key, database in replica_set.databases : {
@@ -33,6 +36,60 @@ locals {
         }
       ]
     ]) : database.key => database
+  }
+
+  databases = {
+    for key, database in local.database_inputs : key => merge(database, {
+      rotation_version = (
+        var.operation.action == "rotate_passwords" &&
+        var.operation.replica_set == database.replica_set_key &&
+        lower(var.operation.database) == database.database_key
+      ) ? database.rotation_version + 1 : database.rotation_version
+
+      rotated_at = (
+        var.operation.action == "rotate_passwords" &&
+        var.operation.replica_set == database.replica_set_key &&
+        lower(var.operation.database) == database.database_key
+      ) ? plantimestamp() : database.rotated_at
+
+      owner_disabled = (
+        database.owner_disabled ||
+        (
+          var.operation.action == "disable_owner" &&
+          var.operation.replica_set == database.replica_set_key &&
+          lower(var.operation.database) == database.database_key
+        ) ||
+        (
+          var.operation.action == "rotate_passwords" &&
+          var.operation.replica_set == database.replica_set_key &&
+          lower(var.operation.database) == database.database_key &&
+          timecmp(
+            plantimestamp(),
+            timeadd(database.created_at, format("%dh", var.rotation_days * 24))
+          ) >= 0
+        )
+      )
+
+      owner_disabled_at = (
+        !database.owner_disabled &&
+        (
+          (
+            var.operation.action == "disable_owner" &&
+            var.operation.replica_set == database.replica_set_key &&
+            lower(var.operation.database) == database.database_key
+          ) ||
+          (
+            var.operation.action == "rotate_passwords" &&
+            var.operation.replica_set == database.replica_set_key &&
+            lower(var.operation.database) == database.database_key &&
+            timecmp(
+              plantimestamp(),
+              timeadd(database.created_at, format("%dh", var.rotation_days * 24))
+            ) >= 0
+          )
+        )
+      ) ? plantimestamp() : database.owner_disabled_at
+    })
   }
 
   accounts = {
@@ -429,7 +486,16 @@ resource "kubernetes_manifest" "database_account" {
 # RS is empty, and preparing/cleaning K3D static local storage. Python only
 # supplies the operation and reports its result.
 resource "terraform_data" "lifecycle_operation" {
-  count = var.operation.action == "none" ? 0 : 1
+  count = contains([
+    "prepare_replica_set_storage",
+    "cleanup_replica_set_storage",
+    "create_database",
+    "delete_database",
+    "validate_replica_set_empty",
+    "verify_database_accounts",
+    "verify_database_accounts_owner_disabled",
+    "verify_database_users_absent"
+  ], var.operation.action) ? 1 : 0
 
   input            = var.operation
   triggers_replace = [var.operation.nonce]
