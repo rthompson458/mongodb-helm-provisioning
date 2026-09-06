@@ -500,24 +500,3 @@ def reconcile(config: dict[str, Any], vault: VaultClient) -> None:
         print(f"  {rs['display_name']}: Running")
 
     print("\nReconcile complete.")
-def reconcile(config: dict[str, Any], vault: VaultClient) -> None:
-    """Reapply complete Vault-backed desired state through Terraform."""
-    inventory = vault.load_inventory()
-    if not inventory:
-        print("No terraformController-managed ReplicaSets exist. Nothing to reconcile.")
-        return
-
-    apply_inventory(config, inventory)
-    print("\nWaiting for managed ReplicaSets to converge ...")
-    for key in sorted(inventory):
-        rs = inventory[key]
-        kube.wait_phase(config, "mongodb", key, "Running", config["rs_ready_timeout"])
-        kube.wait_phase(
-            config,
-            "mongodbuser",
-            kube.controller_user(key),
-            "Updated",
-            config["rs_ready_timeout"],
-        )
-        print(f"  {rs['display_name']}: Running")
-    print("\nReconcile complete.")
