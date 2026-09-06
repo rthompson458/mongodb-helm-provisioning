@@ -45,8 +45,6 @@ variable "operation" {
   validation {
     condition = contains([
       "none",
-      "prepare_replica_set_storage",
-      "cleanup_replica_set_storage",
       "create_database",
       "delete_database",
       "validate_replica_set_empty",
