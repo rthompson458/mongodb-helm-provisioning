@@ -48,9 +48,25 @@ variable "operation" {
       "cleanup_replica_set_storage",
       "create_database",
       "delete_database",
-      "validate_replica_set_empty"
+      "validate_replica_set_empty",
+      "rotate_passwords",
+      "disable_owner",
+      "verify_database_accounts",
+      "verify_database_accounts_owner_disabled",
+      "verify_database_users_absent"
     ], var.operation.action)
     error_message = "operation.action is not supported."
+  }
+}
+
+variable "rotation_days" {
+  description = "Password rotation interval in days"
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.rotation_days >= 1
+    error_message = "rotation_days must be at least 1."
   }
 }
 
