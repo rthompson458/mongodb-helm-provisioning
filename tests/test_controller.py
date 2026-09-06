@@ -96,6 +96,34 @@ class ControllerLifecycleTests(unittest.TestCase):
         self.assertEqual(calls[0][0]["rs1"]["databases"]["houseinfo"]["rotation_version"], 1)
         self.assertFalse(calls[0][0]["rs1"]["databases"]["houseinfo"]["owner_disabled"])
 
+    def test_rotate_passwords_recovers_with_a_new_revision_after_partial_apply(self):
+        vault = FakeVault(rs_inventory(with_db=True))
+        calls = []
+
+        def apply_side_effect(config, inventory, operation=None):
+            calls.append((copy.deepcopy(inventory), copy.deepcopy(operation)))
+            db = vault.inventory["rs1"]["databases"]["houseinfo"]
+            if len(calls) == 1:
+                # Model Terraform committing metadata before one of the two
+                # write-only password sinks fails.
+                db["rotation_version"] = 2
+                db["rotated_at"] = "2026-09-06T12:00:00Z"
+                raise controller.ControllerError("simulated partial apply")
+            db["rotation_version"] = 3
+            db["rotated_at"] = "2026-09-06T12:01:00Z"
+
+        with (
+            patch.object(controller.kube, "phase", return_value="Running"),
+            patch.object(controller, "apply_inventory", side_effect=apply_side_effect),
+            patch.object(controller, "_verify_database_accounts"),
+        ):
+            controller.rotate_passwords(self.config, vault, "RS1", "HouseInfo")
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0][0]["rs1"]["databases"]["houseinfo"]["rotation_version"], 1)
+        self.assertEqual(calls[1][0]["rs1"]["databases"]["houseinfo"]["rotation_version"], 2)
+        self.assertEqual(calls[1][1]["action"], "rotate_passwords")
+
     def test_rotate_passwords_requires_running_replica_set(self):
         vault = FakeVault(rs_inventory(with_db=True))
         with (
