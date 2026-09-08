@@ -9,13 +9,15 @@
 # - Read current application database credentials.
 # - Read/update DB lifecycle _metadata so an authorized admin can re-enable Owner.
 # - Never read the hidden controller root credential.
+#
+# Deployment can be either a ReplicaSet or a ShardedCluster.
 
 path "secret/metadata/mongodb/*" {
   capabilities = ["list", "read"]
 }
 
 # Application credentials have three path segments below mongodb:
-#   <ReplicaSet>/<Database>/<Username>
+#   <Deployment>/<Database>/<Username>
 path "secret/data/mongodb/+/+/+" {
   capabilities = ["read"]
 }
