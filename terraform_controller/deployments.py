@@ -119,6 +119,7 @@ def _new_common(config: dict[str, Any], display: str, deployment_type: str) -> d
         "storage_node_name": config["storage_node_name"],
         "controller_password_version": 1,
         "shard_count": 0,
+        "storage_shard_count": 0,
         "members_per_shard": 0,
         "mongos_count": 0,
         "config_server_count": 0,
@@ -195,6 +196,7 @@ def add_sharded_cluster(
         {
             "members": config["default_members_per_shard"],
             "shard_count": shard_count,
+            "storage_shard_count": shard_count,
             "members_per_shard": config["default_members_per_shard"],
             "mongos_count": config["default_mongos"],
             "config_server_count": config["default_config_servers"],
@@ -304,13 +306,20 @@ def add_shard(config: dict[str, Any], vault: VaultClient, name: str) -> None:
     require_running(config, key, item)
 
     old_count = int(item["shard_count"])
-    item["shard_count"] = old_count + 1
+    new_count = old_count + 1
     log_event(
         "shard.add.requested",
         deployment=item["display_name"],
         previous_shards=old_count,
-        requested_shards=item["shard_count"],
+        requested_shards=new_count,
     )
+
+    # Stage 1: prepare persistent storage before asking the Operator for the shard.
+    item["storage_shard_count"] = new_count
+    apply_inventory(config, inventory)
+
+    # Stage 2: increase the actual MongoDB shard count.
+    item["shard_count"] = new_count
     apply_inventory(config, inventory)
     print(
         f"Waiting for new shard '{key}-{old_count}' on ShardedCluster "
@@ -375,19 +384,26 @@ def delete_shard(
     )
 
     old_count = int(item["shard_count"])
+    new_count = old_count - 1
     removed = f"{key}-{old_count - 1}"
-    item["shard_count"] = old_count - 1
+    item["shard_count"] = new_count
     log_event(
         "shard.delete.requested",
         deployment=item["display_name"],
         shard=removed,
-        requested_shards=item["shard_count"],
+        requested_shards=new_count,
     )
+
+    # Stage 1: remove the shard from MongoDB while its storage still exists.
     apply_inventory(config, inventory)
     kube.wait_sharded_cluster_ready(
-        config, key, int(item["shard_count"]), config["sc_ready_timeout"]
+        config, key, new_count, config["sc_ready_timeout"]
     )
     kube.wait_absent(config, "statefulset", removed, config["sc_ready_timeout"])
+
+    # Stage 2: only after the shard is gone may Terraform clean its old PVs.
+    item["storage_shard_count"] = new_count
+    apply_inventory(config, inventory)
     log_event(
         "shard.delete.succeeded",
         deployment=item["display_name"],
