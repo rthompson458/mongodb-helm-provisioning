@@ -22,6 +22,13 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# When Python executes a file inside tests/, sys.path starts at tests/ rather
+# than the repository root.  Add the root explicitly before importing harness
+# scenarios because some scenarios reuse production config/Kubernetes helpers.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from harness.models import HarnessContext
 from harness.runner import HarnessRunner
 from harness import (
@@ -30,9 +37,6 @@ from harness import (
     scenario_replicaset,
     scenario_sharded,
 )
-
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def build_parser() -> argparse.ArgumentParser:
