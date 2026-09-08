@@ -166,7 +166,7 @@ python3 terraformController.py ListShards
 Example:
 
 ```text
-CLUSTER  SHARD   STATUS  READY  DESIRED  UPDATED  TOPOLOGY CHANGE
+CLUSTER  SHARD   STATUS  READY  DESIRED  UPDATED  ACTIVE CHANGE
 -------  ------  ------  -----  -------  -------  ---------------
 SC1      sc1-0   Online  3      3        3        -
 SC1      sc1-1   Online  3      3        3        -
@@ -188,7 +188,7 @@ The targeted view shows:
 - each expected/current shard,
 - shard status,
 - ready/desired/updated member counts,
-- active topology change,
+- active managed change,
 - config-server status,
 - mongos status.
 
