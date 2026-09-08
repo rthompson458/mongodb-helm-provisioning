@@ -146,3 +146,36 @@ Database work on a ShardedCluster is blocked until:
 ## Documentation
 
 See [README-terraformController.md](README-terraformController.md) for the complete command reference, lifecycle rules, logging configuration, storage model, Vault behavior, deployment locking, and Terraform architecture.
+
+
+## Testing
+
+Tests are split by responsibility instead of being kept in one large Python file.
+
+Fast unit/regression suite:
+
+```bash
+python3 -m unittest discover -s tests -p "test_*.py" -v
+```
+
+Safe read-only live preflight:
+
+```bash
+python3 tests/run_harness.py
+```
+
+Full live lifecycle test against the configured development environment:
+
+```bash
+python3 tests/run_harness.py \
+  --profile all \
+  --allow-mutations \
+  --allow-destructive
+```
+
+The live harness creates temporary resources with `TH...` names and covers
+ReplicaSet lifecycle, ShardedCluster lifecycle, multi-shard add/delete,
+database/account lifecycle, password rotation, Owner disable, shard safety
+guards, global/targeted shard status, and concurrent ShardedCluster locking.
+
+See [tests/README.md](tests/README.md) for the complete test map and safety rules.
