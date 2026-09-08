@@ -136,7 +136,7 @@ locals {
 
   static_shard_volumes = merge(concat([{}], [
     for key, cluster in local.sharded_clusters : {
-      for ordinal in range(cluster.shard_count * cluster.members_per_shard) :
+      for ordinal in range(cluster.storage_shard_count * cluster.members_per_shard) :
       "${key}/shard/${ordinal}" => {
         deployment       = key
         component        = "shard"
@@ -176,7 +176,7 @@ data "kubernetes_config_map_v1" "ops_manager_source" {
 }
 
 # One MongoDB resource per Ops Manager project. Omitting projectName lets the
-# Operator create/use a distinct Ops Manager project for each ReplicaSet.
+# Operator create/use a distinct Ops Manager project for each managed deployment.
 resource "kubernetes_config_map_v1" "controller_ops_manager_projects" {
   metadata {
     name      = "tc-ops-manager-projects"
@@ -526,6 +526,7 @@ resource "vault_kv_secret_v2" "replica_set_metadata" {
     storage_node_name           = each.value.storage_node_name
     controller_password_version = tostring(each.value.controller_password_version)
     shard_count                 = tostring(each.value.shard_count)
+    storage_shard_count         = tostring(each.value.storage_shard_count)
     members_per_shard           = tostring(each.value.members_per_shard)
     mongos_count                = tostring(each.value.mongos_count)
     config_server_count         = tostring(each.value.config_server_count)
@@ -541,8 +542,8 @@ resource "vault_kv_secret_v2" "replica_set_metadata" {
     }
   }
 
-  # Do not advertise a ReplicaSet in Vault inventory until Terraform has
-  # successfully created the MongoDB custom resource.
+  # Do not advertise a deployment in Vault inventory until Terraform has
+  # successfully created its MongoDB custom resource.
   depends_on = [
     kubernetes_manifest.replica_set,
     kubernetes_manifest.sharded_cluster
@@ -806,7 +807,7 @@ resource "kubernetes_manifest" "database_account" {
 
 # Terraform owns imperative lifecycle actions that cannot be represented as a
 # long-lived MongoDB object: creating/dropping a logical DB, verifying that an
-# RS is empty, and preparing/cleaning K3D static local storage. Python only
+# deployment is empty, and preparing/cleaning K3D static local storage. Python only
 # supplies the operation and reports its result.
 resource "terraform_data" "lifecycle_operation" {
   count = contains([
@@ -844,11 +845,12 @@ resource "terraform_data" "lifecycle_operation" {
   }
 }
 
-output "managed_replica_sets" {
+output "managed_deployments" {
   value = {
-    for deployment_key, replica_set in var.deployments : deployment_key => {
-      display_name = replica_set.display_name
-      databases    = keys(replica_set.databases)
+    for deployment_key, deployment in var.deployments : deployment_key => {
+      display_name    = deployment.display_name
+      deployment_type = deployment.deployment_type
+      databases       = keys(deployment.databases)
     }
   }
 }
