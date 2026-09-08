@@ -1,8 +1,9 @@
-variable "replica_sets" {
-  description = "ReplicaSets, databases, and account lifecycle state managed by terraformController"
+variable "deployments" {
+  description = "ReplicaSets, ShardedClusters, databases, and account lifecycle state managed by terraformController"
 
   type = map(object({
     display_name                = string
+    deployment_type             = string
     created_at                  = string
     members                     = number
     version                     = string
@@ -13,6 +14,10 @@ variable "replica_sets" {
     storage_base_path           = optional(string, "")
     storage_node_name           = optional(string, "")
     controller_password_version = number
+    shard_count                 = optional(number, 0)
+    members_per_shard           = optional(number, 0)
+    mongos_count                = optional(number, 0)
+    config_server_count         = optional(number, 0)
 
     databases = map(object({
       display_name      = string
@@ -28,37 +33,61 @@ variable "replica_sets" {
 
   validation {
     condition = alltrue([
-      for replica_set in values(var.replica_sets) :
-      contains(["static-local", "dynamic"], replica_set.storage_mode)
+      for deployment in values(var.deployments) :
+      contains(["ReplicaSet", "ShardedCluster"], deployment.deployment_type)
     ])
-    error_message = "Each ReplicaSet storage_mode must be static-local or dynamic."
+    error_message = "deployment_type must be ReplicaSet or ShardedCluster."
   }
 
   validation {
     condition = alltrue([
-      for replica_set in values(var.replica_sets) :
-      replica_set.storage_mode != "static-local" ||
-      (replica_set.storage_base_path != "" && replica_set.storage_node_name != "")
+      for deployment in values(var.deployments) :
+      contains(["static-local", "dynamic"], deployment.storage_mode)
     ])
-    error_message = "static-local ReplicaSets require storage_base_path and storage_node_name."
+    error_message = "Each deployment storage_mode must be static-local or dynamic."
+  }
+
+  validation {
+    condition = alltrue([
+      for deployment in values(var.deployments) :
+      deployment.storage_mode != "static-local" ||
+      (deployment.storage_base_path != "" && deployment.storage_node_name != "")
+    ])
+    error_message = "static-local deployments require storage_base_path and storage_node_name."
+  }
+
+  validation {
+    condition = alltrue([
+      for deployment in values(var.deployments) :
+      deployment.deployment_type != "ShardedCluster" ||
+      (
+        deployment.shard_count >= 1 &&
+        deployment.members_per_shard >= 1 &&
+        deployment.mongos_count >= 1 &&
+        deployment.config_server_count >= 1
+      )
+    ])
+    error_message = "ShardedCluster deployments require at least one shard, member per shard, mongos, and config server."
   }
 }
 
 variable "operation" {
   description = "One-shot lifecycle operation requested by terraformController"
   type = object({
-    action      = string
-    replica_set = string
-    database    = string
-    members     = number
-    nonce       = string
+    action          = string
+    deployment      = string
+    deployment_type = string
+    database        = string
+    members         = number
+    nonce           = string
   })
   default = {
-    action      = "none"
-    replica_set = ""
-    database    = ""
-    members     = 0
-    nonce       = ""
+    action          = "none"
+    deployment      = ""
+    deployment_type = ""
+    database        = ""
+    members         = 0
+    nonce           = ""
   }
 
   validation {
@@ -66,7 +95,7 @@ variable "operation" {
       "none",
       "create_database",
       "delete_database",
-      "validate_replica_set_empty",
+      "validate_deployment_empty",
       "rotate_passwords",
       "disable_owner",
       "verify_database_accounts",
@@ -153,18 +182,18 @@ variable "placeholder_collection" {
 }
 
 variable "default_members" {
-  description = "Member count used by storage preparation for a new ReplicaSet"
+  description = "Fallback member count used by lifecycle operations"
   type        = number
   default     = 3
 }
 
 variable "default_storage_class" {
-  description = "StorageClass used by storage preparation for a new ReplicaSet"
+  description = "Fallback StorageClass for lifecycle operations"
   type        = string
 }
 
 variable "default_storage_size" {
-  description = "Storage size used by storage preparation for a new ReplicaSet"
+  description = "Fallback storage size for lifecycle operations"
   type        = string
 }
 
