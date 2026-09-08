@@ -50,7 +50,9 @@ def load_config(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise ControllerError(f"Configuration file does not exist: {path}")
 
-    p = configparser.ConfigParser()
+    # Disable ConfigParser's old-style % interpolation.  Our logging filename
+    # pattern legitimately contains strftime tokens such as %Y%m%d.
+    p = configparser.ConfigParser(interpolation=None)
     p.read(path, encoding="utf-8")
     # Keep the required-field list in one place.  Missing configuration is
     # easier to diagnose here than after Terraform has already started.
