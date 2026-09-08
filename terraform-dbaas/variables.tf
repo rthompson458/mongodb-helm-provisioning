@@ -15,6 +15,7 @@ variable "deployments" {
     storage_node_name           = optional(string, "")
     controller_password_version = number
     shard_count                 = optional(number, 0)
+    storage_shard_count         = optional(number, 0)
     members_per_shard           = optional(number, 0)
     mongos_count                = optional(number, 0)
     config_server_count         = optional(number, 0)
@@ -62,6 +63,7 @@ variable "deployments" {
       deployment.deployment_type != "ShardedCluster" ||
       (
         deployment.shard_count >= 1 &&
+        deployment.storage_shard_count >= deployment.shard_count &&
         deployment.members_per_shard >= 1 &&
         deployment.mongos_count >= 1 &&
         deployment.config_server_count >= 1
