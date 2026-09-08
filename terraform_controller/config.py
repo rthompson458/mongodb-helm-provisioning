@@ -29,7 +29,12 @@ def _bool(value: str, label: str) -> bool:
     raise ControllerError(f"{label} must be true or false.")
 
 
-def _integer(parser: configparser.ConfigParser, section: str, key: str, minimum: int) -> int:
+def _integer(
+    parser: configparser.ConfigParser,
+    section: str,
+    key: str,
+    minimum: int,
+) -> int:
     """Read an integer and enforce the minimum allowed value."""
     try:
         value = parser.getint(section, key)
@@ -40,46 +45,81 @@ def _integer(parser: configparser.ConfigParser, section: str, key: str, minimum:
     return value
 
 
+def _expand_path(value: str) -> Path:
+    """Expand ~ and environment variables without deciding relative location."""
+    return Path(os.path.expandvars(os.path.expanduser(value.strip())))
+
+
+def _resolve_config_relative_path(value: str, config_directory: Path) -> Path:
+    """Resolve a config path exactly once.
+
+    Absolute paths stay absolute.
+    Relative paths are resolved from the directory containing the config file,
+    not from whichever directory the user happened to run the controller from.
+    """
+    candidate = _expand_path(value)
+    if candidate.is_absolute():
+        return candidate
+    return (config_directory / candidate).resolve()
+
+
 def load_config(path: Path) -> dict[str, Any]:
     """Load, validate, normalize, and return all controller configuration.
 
     The returned dictionary is the internal configuration contract used by the
-    rest of the package.  Paths and environment variables are expanded here so
+    rest of the package. Paths and environment variables are expanded here so
     downstream modules receive ready-to-use values.
     """
+    path = path.expanduser().resolve()
     if not path.exists():
         raise ControllerError(f"Configuration file does not exist: {path}")
 
-    # Disable ConfigParser's old-style % interpolation.  Our logging filename
-    # pattern legitimately contains strftime tokens such as %Y%m%d.
+    config_directory = path.parent
+
+    # Disable ConfigParser's old-style % interpolation. Logging filename
+    # formats legitimately contain strftime tokens such as %Y%m%d.
     p = configparser.ConfigParser(interpolation=None)
     p.read(path, encoding="utf-8")
-    # Keep the required-field list in one place.  Missing configuration is
+
+    # Keep the required-field list in one place. Missing configuration is
     # easier to diagnose here than after Terraform has already started.
     required = {
         "Vault": ["address", "token_environment_variable", "mount", "base_path"],
         "Terraform": [
-            "repository_url", "branch", "subdirectory", "cache_directory",
-            "backend_namespace", "backend_secret_suffix",
+            "repository_url",
+            "branch",
+            "subdirectory",
+            "cache_directory",
+            "backend_namespace",
+            "backend_secret_suffix",
         ],
         "Kubernetes": ["kubeconfig", "context", "namespace"],
         "MongoDB": [
-            "ops_manager_config_map", "ops_manager_credentials_secret", "auth_database",
-            "default_version", "default_members", "persistent", "storage_class", "storage_size",
+            "ops_manager_config_map",
+            "ops_manager_credentials_secret",
+            "auth_database",
+            "default_version",
+            "default_members",
+            "persistent",
+            "storage_class",
+            "storage_size",
         ],
         "Sharding": [
-            "default_shards", "default_members_per_shard", "default_mongos",
+            "default_shards",
+            "default_members_per_shard",
+            "default_mongos",
             "default_config_servers",
         ],
         "Storage": ["mode"],
         "Rotation": ["days"],
         "Runtime": [
-            "mongo_image", "placeholder_collection", "job_timeout_seconds",
-            "replica_set_ready_timeout_seconds", "sharded_cluster_ready_timeout_seconds",
+            "mongo_image",
+            "placeholder_collection",
+            "job_timeout_seconds",
+            "replica_set_ready_timeout_seconds",
+            "sharded_cluster_ready_timeout_seconds",
         ],
-        "Logging": [
-            "enabled", "level", "directory", "mode", "filename_pattern", "retention_days",
-        ],
+        "Logging": ["enabled", "level", "directory", "mode"],
     }
     for section, keys in required.items():
         if not p.has_section(section):
@@ -96,11 +136,12 @@ def load_config(path: Path) -> dict[str, Any]:
     rotation = _integer(p, "Rotation", "days", 1)
     job_timeout = _integer(p, "Runtime", "job_timeout_seconds", 30)
     rs_ready_timeout = _integer(p, "Runtime", "replica_set_ready_timeout_seconds", 30)
-    sc_ready_timeout = _integer(p, "Runtime", "sharded_cluster_ready_timeout_seconds", 30)
-    retention_days = _integer(p, "Logging", "retention_days", 0)
+    sc_ready_timeout = _integer(
+        p, "Runtime", "sharded_cluster_ready_timeout_seconds", 30
+    )
 
-    # Storage has two supported models.  static-local needs a host path and
-    # node name; dynamic delegates volume provisioning to a StorageClass.
+    # Storage has two supported models. static-local needs a host path and node
+    # name; dynamic delegates volume provisioning to a StorageClass.
     storage_mode = p.get("Storage", "mode").strip().lower()
     if storage_mode not in {"static-local", "dynamic"}:
         raise ControllerError("Storage mode must be 'static-local' or 'dynamic'.")
@@ -111,15 +152,30 @@ def load_config(path: Path) -> dict[str, Any]:
                     f"Storage '{key}' is required when mode is static-local."
                 )
 
-    # Validate logging choices before any command attempts to open a file.
+    # Logging intentionally has only two write modes. This makes the behavior
+    # easy for an operator to understand from the config file.
     logging_mode = p.get("Logging", "mode").strip().lower()
-    if logging_mode not in {"per-run", "append", "replace"}:
-        raise ControllerError("Logging mode must be 'per-run', 'append', or 'replace'.")
+    if logging_mode not in {"append", "overwrite"}:
+        raise ControllerError("Logging mode must be 'append' or 'overwrite'.")
+
     logging_level = p.get("Logging", "level").strip().upper()
     if logging_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
-        raise ControllerError("Logging level must be DEBUG, INFO, WARNING, ERROR, or CRITICAL.")
+        raise ControllerError(
+            "Logging level must be DEBUG, INFO, WARNING, ERROR, or CRITICAL."
+        )
+
+    filename_format = p.get("Logging", "filename_format", fallback="").strip()
+
+    # filename_format is deliberately a file name only. Keeping path selection
+    # in the separate directory setting prevents surprising path traversal.
+    if "/" in filename_format or "\\" in filename_format:
+        raise ControllerError(
+            "Logging filename_format must be a file name only. "
+            "Put directory information in Logging.directory."
+        )
 
     expand = lambda v: os.path.expandvars(os.path.expanduser(v.strip()))
+
     return {
         "vault_address": p.get("Vault", "address").strip().rstrip("/"),
         "vault_token_env": p.get("Vault", "token_environment_variable").strip(),
@@ -135,7 +191,9 @@ def load_config(path: Path) -> dict[str, Any]:
         "kube_context": p.get("Kubernetes", "context").strip(),
         "mongodb_namespace": p.get("Kubernetes", "namespace").strip(),
         "ops_manager_config_map": p.get("MongoDB", "ops_manager_config_map").strip(),
-        "ops_manager_credentials_secret": p.get("MongoDB", "ops_manager_credentials_secret").strip(),
+        "ops_manager_credentials_secret": p.get(
+            "MongoDB", "ops_manager_credentials_secret"
+        ).strip(),
         "mongodb_auth_database": p.get("MongoDB", "auth_database").strip(),
         "default_version": p.get("MongoDB", "default_version").strip(),
         "default_members": members,
@@ -155,10 +213,15 @@ def load_config(path: Path) -> dict[str, Any]:
         "job_timeout": job_timeout,
         "rs_ready_timeout": rs_ready_timeout,
         "sc_ready_timeout": sc_ready_timeout,
-        "logging_enabled": _bool(p.get("Logging", "enabled"), "Logging.enabled"),
+        "logging_enabled": _bool(
+            p.get("Logging", "enabled"), "Logging.enabled"
+        ),
         "logging_level": logging_level,
-        "logging_directory": expand(p.get("Logging", "directory")),
+        "logging_directory": str(
+            _resolve_config_relative_path(
+                p.get("Logging", "directory"), config_directory
+            )
+        ),
         "logging_mode": logging_mode,
-        "logging_filename_pattern": p.get("Logging", "filename_pattern").strip(),
-        "logging_retention_days": retention_days,
+        "logging_filename_format": filename_format,
     }
