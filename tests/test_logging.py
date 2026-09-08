@@ -1,4 +1,4 @@
-"""Unit tests for JSON Lines operational logging."""
+"""Unit tests for structured controller logging."""
 
 from __future__ import annotations
 
@@ -7,12 +7,13 @@ import logging
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from terraform_controller import logging_component
 
 
 class LoggingTests(unittest.TestCase):
-    """Verify logs are structured and contain operational fields."""
+    """Verify file naming, append/overwrite rules, and structured content."""
 
     def setUp(self) -> None:
         # configure_logging is intentionally process-global in production.
@@ -30,15 +31,96 @@ class LoggingTests(unittest.TestCase):
         logging_component._CONFIGURED = False
         logging_component._LOG_PATH = None
 
-    def test_jsonl_log_contains_event_and_fields(self) -> None:
+    def _flush(self) -> None:
+        """Flush all active controller handlers before a test reads the file."""
+        for handler in logging.getLogger(
+            logging_component.LOGGER_NAME
+        ).handlers:
+            handler.flush()
+
+    def test_blank_filename_format_uses_controller_log(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             config = {
                 "logging_enabled": True,
                 "logging_level": "INFO",
                 "logging_directory": temp,
-                "logging_mode": "per-run",
-                "logging_filename_pattern": "test-{pid}.jsonl",
-                "logging_retention_days": 30,
+                "logging_mode": "append",
+                "logging_filename_format": "",
+            }
+            path = logging_component.configure_logging(config)
+            self.assertEqual(Path(path).name, "Controller.log")
+
+    def test_formatted_filename_uses_standard_strftime_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            config = {
+                "logging_enabled": True,
+                "logging_level": "INFO",
+                "logging_directory": temp,
+                "logging_mode": "append",
+                "logging_filename_format": "Controller-%Y%m%d-%H%M.log",
+            }
+
+            fake_now = logging_component.datetime(2026, 9, 8, 16, 7, 42)
+            with patch.object(
+                logging_component.datetime,
+                "now",
+                return_value=fake_now,
+            ):
+                path = logging_component.configure_logging(config)
+
+            self.assertEqual(
+                Path(path).name,
+                "Controller-20260908-1607.log",
+            )
+
+    def test_append_keeps_existing_file_contents(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "Controller.log"
+            path.write_text("PREVIOUS\n", encoding="utf-8")
+
+            config = {
+                "logging_enabled": True,
+                "logging_level": "INFO",
+                "logging_directory": temp,
+                "logging_mode": "append",
+                "logging_filename_format": "",
+            }
+            logging_component.configure_logging(config)
+            logging_component.log_event("test.append")
+            self._flush()
+
+            content = path.read_text(encoding="utf-8")
+            self.assertTrue(content.startswith("PREVIOUS\n"))
+            self.assertIn("test.append", content)
+
+    def test_overwrite_replaces_existing_file_contents(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "Controller.log"
+            path.write_text("PREVIOUS\n", encoding="utf-8")
+
+            config = {
+                "logging_enabled": True,
+                "logging_level": "INFO",
+                "logging_directory": temp,
+                "logging_mode": "overwrite",
+                "logging_filename_format": "",
+            }
+            logging_component.configure_logging(config)
+            logging_component.log_event("test.overwrite")
+            self._flush()
+
+            content = path.read_text(encoding="utf-8")
+            self.assertNotIn("PREVIOUS", content)
+            self.assertIn("test.overwrite", content)
+
+    def test_log_contains_structured_event_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            config = {
+                "logging_enabled": True,
+                "logging_level": "INFO",
+                "logging_directory": temp,
+                "logging_mode": "append",
+                "logging_filename_format": "",
             }
             path = logging_component.configure_logging(config)
             logging_component.log_event(
@@ -46,14 +128,8 @@ class LoggingTests(unittest.TestCase):
                 deployment="SC9",
                 shard_count=3,
             )
+            self._flush()
 
-            # Flush the file handler before reading the log back.
-            for handler in logging.getLogger(
-                logging_component.LOGGER_NAME
-            ).handlers:
-                handler.flush()
-
-            self.assertIsNotNone(path)
             lines = Path(path).read_text(encoding="utf-8").splitlines()
             payload = json.loads(lines[-1])
             self.assertEqual(payload["event"], "test.event")
