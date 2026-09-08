@@ -301,6 +301,55 @@ EOF
     cleanup_local_pv "${TC_PV_NAME}"
     ;;
 
+  acquire_deployment_lock)
+    : "${TC_LOCK_CATEGORY:?TC_LOCK_CATEGORY is required}"
+    : "${TC_LOCK_ACTION:?TC_LOCK_ACTION is required}"
+    : "${TC_OPERATION_ID:?TC_OPERATION_ID is required}"
+    : "${TC_START_SHARDS:?TC_START_SHARDS is required}"
+    : "${TC_TARGET_SHARDS:?TC_TARGET_SHARDS is required}"
+
+    lock="tc-deployment-lock-${TC_DEPLOYMENT}"
+    started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+    cat <<EOF | "${K[@]}" -n "${TC_NAMESPACE}" create -f - >/dev/null
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${lock}
+  namespace: ${TC_NAMESPACE}
+  labels:
+    app.kubernetes.io/managed-by: terraformController
+    dbaas.deployment: ${TC_DEPLOYMENT}
+    dbaas.lock: deployment
+data:
+  operation_id: "${TC_OPERATION_ID}"
+  category: "${TC_LOCK_CATEGORY}"
+  action: "${TC_LOCK_ACTION}"
+  database: "${TC_DATABASE:-}"
+  start_shards: "${TC_START_SHARDS}"
+  target_shards: "${TC_TARGET_SHARDS}"
+  started_at: "${started_at}"
+EOF
+    ;;
+
+  release_deployment_lock)
+    : "${TC_OPERATION_ID:?TC_OPERATION_ID is required}"
+    lock="tc-deployment-lock-${TC_DEPLOYMENT}"
+    current_id=$("${K[@]}" -n "${TC_NAMESPACE}" get configmap "${lock}" -o jsonpath='{.data.operation_id}' 2>/dev/null || true)
+
+    if [[ -z "${current_id}" ]]; then
+      echo "Deployment lock is already absent."
+      exit 0
+    fi
+
+    if [[ "${current_id}" != "${TC_OPERATION_ID}" ]]; then
+      echo "Deployment lock operation ID does not match. Refusing to release another operation's lock." >&2
+      exit 42
+    fi
+
+    "${K[@]}" -n "${TC_NAMESPACE}" delete configmap "${lock}" --wait=true >/dev/null
+    ;;
+
   create_database)
     : "${TC_DATABASE:?TC_DATABASE is required}"
     : "${TC_PLACEHOLDER_COLLECTION:?TC_PLACEHOLDER_COLLECTION is required}"

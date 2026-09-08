@@ -62,6 +62,11 @@ def _operation_payload(operation: dict[str, Any] | None) -> dict[str, Any]:
         "deployment_type": "",
         "database": "",
         "members": 0,
+        "lock_category": "",
+        "lock_action": "",
+        "operation_id": "",
+        "start_shards": 0,
+        "target_shards": 0,
         "nonce": "",
     }
     if operation:
@@ -154,6 +159,10 @@ def apply_inventory(
             deployment=op["deployment"],
             deployment_type=op["deployment_type"],
             database=op["database"],
+            lock_category=op["lock_category"],
+            lock_action=op["lock_action"],
+            start_shards=op["start_shards"],
+            target_shards=op["target_shards"],
             deployment_count=len(inventory),
         )
         try:

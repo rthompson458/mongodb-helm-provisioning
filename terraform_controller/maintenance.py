@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from . import kube
-from .common import account_resource_name
+from .common import ControllerError, account_resource_name
+from .deployment_lock import describe_deployment_lock, read_deployment_lock
 from .deployments import deployment_type_label
 from .logging_component import log_event
 from .terraform_runner import apply_inventory
@@ -16,6 +17,24 @@ def reconcile(config: dict[str, Any], vault: VaultClient) -> None:
     if not inventory:
         print("No terraformController-managed MongoDB deployments exist. Nothing to reconcile.")
         return
+
+    active = []
+    for key in sorted(inventory):
+        deployment = inventory[key]
+        if deployment_type_label(deployment) != "ShardedCluster":
+            continue
+        lock = read_deployment_lock(config, key)
+        if lock:
+            active.append(
+                f"  {deployment['display_name']}: {describe_deployment_lock(lock)}"
+            )
+
+    if active:
+        raise ControllerError(
+            "Reconcile is blocked while a ShardedCluster managed change is in progress:\n"
+            + "\n".join(active)
+            + "\nUse ListShards [SHARDED_CLUSTER] to view progress."
+        )
 
     log_event("reconcile.requested", deployments=len(inventory))
     apply_inventory(config, inventory)

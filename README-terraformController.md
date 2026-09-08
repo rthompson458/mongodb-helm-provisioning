@@ -20,7 +20,13 @@ Python performs orchestration only:
 - formats user-facing results,
 - writes structured operational logs.
 
-Python does not directly create, delete, rotate, enable, or disable managed MongoDB/Vault resources.
+Python does not directly create, delete, rotate, enable, disable, add shards, delete shards, or create/remove deployment locks.
+
+Terraform performs managed mutations directly or through:
+
+```text
+terraform-dbaas/scripts/lifecycle.sh
+```
 
 ## Fresh installation
 
@@ -76,6 +82,8 @@ ListReplicaSet REPLICASET
 
 ListShardedClusters
 ListShardedCluster SHARDED_CLUSTER
+
+ListShards
 ListShards SHARDED_CLUSTER
 ```
 
@@ -91,8 +99,20 @@ DeleteReplicaSet REPLICASET --confirm
 ```text
 AddShardedCluster SHARDED_CLUSTER [--shards N]
 DeleteShardedCluster SHARDED_CLUSTER --confirm
-AddShard SHARDED_CLUSTER
-DeleteShard SHARDED_CLUSTER --confirm
+
+AddShard SHARDED_CLUSTER [COUNT]
+DeleteShard SHARDED_CLUSTER [COUNT] --confirm
+```
+
+`COUNT` defaults to 1.
+
+Examples:
+
+```bash
+python3 terraformController.py AddShard SC9
+python3 terraformController.py AddShard SC9 2
+python3 terraformController.py DeleteShard SC9 --confirm
+python3 terraformController.py DeleteShard SC9 2 --confirm
 ```
 
 ### Database lifecycle
@@ -129,49 +149,59 @@ Use command-level help:
 ```bash
 python3 terraformController.py AddShardedCluster --help
 python3 terraformController.py ListShards --help
-python3 terraformController.py AddDatabase --help
+python3 terraformController.py AddShard --help
 python3 terraformController.py DeleteShard --help
+python3 terraformController.py AddDatabase --help
 python3 terraformController.py RotatePasswords --help
 ```
 
-## Deployment status
+## Shard status
 
-The MongoDB Kubernetes Operator exposes the deployment phase through `status.phase`.
+### All ShardedClusters
 
-The controller reports phases such as:
-
-```text
-Pending
-Running
-Failed
-Absent
-Unknown
-```
-
-For ShardedClusters, the controller also reports each expected shard as:
-
-```text
-Online
-Creating
-Degraded
-Failed
-Unknown
+```bash
+python3 terraformController.py ListShards
 ```
 
 Example:
 
 ```text
-ShardedCluster: SC9
-Phase:          Running
+CLUSTER  SHARD   STATUS  READY  DESIRED  UPDATED  ACTIVE CHANGE
+-------  ------  ------  -----  -------  -------  ---------------
+SC1      sc1-0   Online  3      3        3        -
+SC1      sc1-1   Online  3      3        3        -
+SC9      sc9-0   Online  3      3        3        AddShard 3 -> 5
+SC9      sc9-1   Online  3      3        3        AddShard 3 -> 5
+SC9      sc9-2   Online  3      3        3        AddShard 3 -> 5
+SC9      sc9-3   Creating 0     0        0        AddShard 3 -> 5
+SC9      sc9-4   Creating 0     0        0        AddShard 3 -> 5
+```
 
-SHARD  STATUS  READY  DESIRED  UPDATED
------  ------  -----  -------  -------
-sc9-0  Online  3      3        3
-sc9-1  Online  3      3        3
-sc9-2  Online  3      3        3
+### One ShardedCluster
 
-Config servers: Online (3/3)
-mongos:         Online (2/2)
+```bash
+python3 terraformController.py ListShards SC9
+```
+
+The targeted view shows:
+
+- each expected/current shard,
+- shard status,
+- ready/desired/updated member counts,
+- active managed change,
+- config-server status,
+- mongos status.
+
+Shard status can include:
+
+```text
+Online
+Creating
+Degraded
+Removing
+Removed
+Failed
+Unknown
 ```
 
 ## Readiness rules
@@ -195,15 +225,51 @@ MongoDB resource phase = Running
 Every expected shard   = Online
 Config servers         = Online
 mongos                 = Online
+No conflicting managed change is active
 ```
 
-If any condition is not satisfied, the command fails before Terraform changes database state.
+If any condition is not satisfied, the command fails before the requested database/credential change begins.
 
-The error identifies the current phase/component status.
+## ShardedCluster deployment lock
+
+Each managed ShardedCluster uses one atomic Kubernetes ConfigMap lock:
+
+```text
+tc-deployment-lock-<deployment>
+```
+
+The lock is **created and released by Terraform through the lifecycle script**. Python reads it but does not directly create or delete it.
+
+The lock serializes ShardedCluster mutations across separate controller processes/shells.
+
+Protected operations include:
+
+```text
+AddDatabase
+DeleteDatabase
+RotatePasswords
+DisableOwner
+AddShard
+DeleteShard
+```
+
+`Reconcile` refuses to run while any ShardedCluster managed change is active.
+
+Read-only commands remain available, including:
+
+```text
+ListDeployments
+ListDeployment
+ListShardedClusters
+ListShardedCluster
+ListShards
+ListDatabases
+ListDatabase
+```
+
+This is important during shard creation/removal because Kubernetes can still report the existing cluster as `Running` while Terraform is preparing storage for a topology change.
 
 ## AddReplicaSet
-
-Example:
 
 ```bash
 python3 terraformController.py AddReplicaSet RS1
@@ -222,8 +288,6 @@ Storage:       16Gi/member
 The command does not report success until the MongoDB resource is Running and the hidden controller account is ready.
 
 ## AddShardedCluster
-
-Example:
 
 ```bash
 python3 terraformController.py AddShardedCluster SC9 --shards 3
@@ -245,45 +309,73 @@ The command waits for the ShardedCluster and all expected components before repo
 
 ## AddShard
 
-```bash
-python3 terraformController.py AddShard SC9
+Syntax:
+
+```text
+AddShard SHARDED_CLUSTER [COUNT]
 ```
 
-Shard addition is staged:
+Examples:
 
-1. Terraform prepares the new shard's persistent storage.
-2. Terraform increases the ShardedCluster shard count.
-3. The controller waits until the new shard and the complete cluster are online.
-4. Success is reported.
+```bash
+python3 terraformController.py AddShard SC9
+python3 terraformController.py AddShard SC9 2
+```
 
-This prevents MongoDB from being asked to create a persistent shard before its local-development storage exists.
+For `AddShard SC9 2`, if SC9 starts with 3 shards, the target is 5 shards.
+
+The operation is staged:
+
+1. verify COUNT is at least 1,
+2. verify SC9 exists and is fully ready,
+3. atomically acquire the SC9 deployment lock through Terraform,
+4. Terraform prepares persistent storage for the target shard count,
+5. Terraform changes the MongoDB `shardCount` to the target,
+6. wait until every target shard is online,
+7. release the deployment lock through Terraform,
+8. report the previous and final shard counts.
+
+If the controller process is interrupted after the lock is acquired, rerun the **same** AddShard command. The controller recognizes the matching lock and resumes toward the stored target instead of adding the count again.
 
 ## DeleteShard
 
-```bash
-python3 terraformController.py DeleteShard SC9 --confirm
+Syntax:
+
+```text
+DeleteShard SHARDED_CLUSTER [COUNT] --confirm
 ```
 
-This first-pass implementation is intentionally conservative.
+Examples:
 
-Deletion is allowed only if:
+```bash
+python3 terraformController.py DeleteShard SC9 --confirm
+python3 terraformController.py DeleteShard SC9 2 --confirm
+```
 
-1. the ShardedCluster is fully Running,
-2. the cluster has more than one shard,
-3. managed inventory contains zero application databases,
-4. Terraform performs a live MongoDB check and finds zero non-system databases.
+Safety rules:
 
-The highest-numbered shard is removed.
+1. COUNT must be at least 1.
+2. The ShardedCluster must retain at least **one shard**.
+3. The cluster must initially be fully ready.
+4. Managed inventory must contain zero application databases.
+5. Terraform performs a live MongoDB check and must find zero non-system application databases.
+6. The SC deployment lock must be acquired before topology changes begin.
 
-Deletion is staged:
+For example, if SC9 has 3 shards:
 
-1. Terraform lowers the MongoDB shard count while existing storage remains available.
-2. The controller waits for the removed shard StatefulSet to disappear and the remaining cluster to return to full readiness.
-3. Terraform removes the old shard's persistent storage.
+```text
+DeleteShard SC9 1 --confirm  -> allowed target: 2
+DeleteShard SC9 2 --confirm  -> allowed target: 1
+DeleteShard SC9 3 --confirm  -> BLOCKED
+```
 
-This avoids deleting storage before MongoDB has removed the shard.
+The highest-numbered shards are removed first.
 
-More advanced shard draining/data-distribution behavior is deferred until the customer defines its collection sharding policy.
+For `DeleteShard SC9 2 --confirm` from five shards, Terraform changes the desired shard count from 5 to 3, waits for shards `sc9-3` and `sc9-4` to disappear, verifies the remaining cluster is fully ready, and only then removes the old persistent storage.
+
+If an operation is interrupted after the deployment lock is acquired, rerun the **same** DeleteShard command to resume safely.
+
+This first-pass implementation remains intentionally conservative: if any application database exists on the ShardedCluster, shard deletion is blocked. More advanced shard draining/data-distribution behavior will be designed with the customer.
 
 ## Database targeting
 
@@ -304,25 +396,25 @@ When multiple deployments exist and the target is omitted, the command fails and
 
 ## AddDatabase lifecycle
 
-Example:
-
 ```bash
 python3 terraformController.py AddDatabase SC9 HouseInfo
 ```
 
-The controller:
+For a ShardedCluster, the controller:
 
-1. verifies SC9 exists in managed inventory,
-2. verifies SC9 is fully ready,
-3. verifies HouseInfo does not already exist,
-4. asks Terraform to materialize HouseInfo,
-5. only after materialization succeeds, adds database lifecycle state,
-6. Terraform creates the three managed users and credentials,
-7. the controller waits for MongoDBUser reconciliation,
-8. Terraform performs actual credential verification,
-9. only then does the command report success.
+1. verifies SC9 exists,
+2. verifies no conflicting SC9 managed change is active,
+3. verifies SC9 is fully ready,
+4. atomically acquires the SC9 deployment lock through Terraform,
+5. asks Terraform to materialize HouseInfo,
+6. only after materialization succeeds, adds database lifecycle state,
+7. Terraform creates the three managed users and credentials,
+8. waits for MongoDBUser reconciliation,
+9. Terraform performs actual credential verification,
+10. releases the SC9 deployment lock,
+11. reports success.
 
-Expected success output is explicit:
+Expected success output remains explicit:
 
 ```text
 MongoDB database 'HouseInfo' was successfully created on ShardedCluster 'SC9'.
@@ -354,7 +446,7 @@ Vault is organized by deployment, not by individual shard:
 mongodb/<Deployment>/<Database>/<Username>
 ```
 
-ReplicaSet example:
+ReplicaSet:
 
 ```text
 mongodb/RS1/HouseInfo/HouseInfo_owner
@@ -362,18 +454,12 @@ mongodb/RS1/HouseInfo/HouseInfo_readWrite
 mongodb/RS1/HouseInfo/HouseInfo_read
 ```
 
-ShardedCluster example:
+ShardedCluster:
 
 ```text
 mongodb/SC9/HouseInfo/HouseInfo_owner
 mongodb/SC9/HouseInfo/HouseInfo_readWrite
 mongodb/SC9/HouseInfo/HouseInfo_read
-```
-
-Do not create user credential paths such as:
-
-```text
-mongodb/SC9/Shard1/HouseInfo/...
 ```
 
 Users authenticate to the deployment. Individual shard credentials are not part of the DBaaS user model.
@@ -396,13 +482,9 @@ Hidden controller credential:
 mongodb/<Deployment>/_internal/controller-admin
 ```
 
-Existing metadata that predates the deployment-type field is treated as ReplicaSet metadata for backward compatibility.
-
-The older `mongodb/replica-sets/...` layout is also still readable as a migration fallback.
-
 ## Password rotation
 
-Default:
+Default interval:
 
 ```text
 30 days
@@ -414,32 +496,19 @@ Example:
 python3 terraformController.py RotatePasswords SC9 HouseInfo
 ```
 
-Before rotation, the target deployment must pass the same readiness checks used for database changes.
+On a ShardedCluster, rotation uses the same deployment lock as other mutations. This prevents shard topology changes from starting during a credential rotation.
 
-Terraform owns:
+Terraform owns the password revision, timestamp, Owner-disable decision, password generation, Vault write, and Kubernetes Secret write.
 
-- password revision,
-- rotation timestamp,
-- Owner-disable decision,
-- password generation,
-- Vault write,
-- Kubernetes Secret write.
-
-The controller verifies actual MongoDB authentication before reporting success.
-
-If a partial multi-provider apply occurs, the controller reloads committed lifecycle metadata and makes one recovery retry with a fresh revision so Vault and Kubernetes converge on a new password.
+The existing recovery retry for partial Vault/Kubernetes rotation remains in place.
 
 ## Owner lifecycle
-
-At the first rotation at or after the configured rotation age, Terraform disables the Owner MongoDBUser.
-
-The current Owner credential remains in Vault and continues rotating.
-
-For demonstration or administration:
 
 ```bash
 python3 terraformController.py DisableOwner SC9 HouseInfo --confirm
 ```
+
+On a ShardedCluster, the command acquires the same deployment lock before changing Owner state.
 
 To re-enable Owner, an authorized administrator updates:
 
@@ -454,6 +523,8 @@ then runs:
 python3 terraformController.py Reconcile
 ```
 
+Reconcile is blocked while another ShardedCluster managed change is active.
+
 ## Database deletion
 
 ```bash
@@ -462,20 +533,11 @@ python3 terraformController.py DeleteDatabase SC9 HouseInfo --confirm
 
 The target deployment must be fully ready.
 
+On a ShardedCluster, DeleteDatabase acquires the deployment lock before Terraform drops the database.
+
 `--confirm` authorizes destruction of the database and its contents.
 
-Terraform drops the MongoDB database before desired account state is removed.
-
-Then the lifecycle removes:
-
-- Owner,
-- ReadWrite,
-- Read,
-- Kubernetes password resources,
-- Vault credentials,
-- database lifecycle metadata.
-
-The controller verifies the MongoDB users are absent before reporting success.
+Terraform drops the MongoDB database before desired account state is removed, then removes the three managed users, Kubernetes password resources, Vault credentials, and lifecycle metadata.
 
 ## Deployment deletion
 
@@ -495,13 +557,15 @@ Deletion is blocked when managed databases exist.
 
 Terraform also performs a live MongoDB database check before deleting the deployment.
 
-These MongoDB system databases do not block deletion:
+System databases ignored by the emptiness check:
 
 ```text
 admin
 config
 local
 ```
+
+A ShardedCluster deletion is also blocked while its deployment lock is active.
 
 ## Sharding scope
 
@@ -526,31 +590,15 @@ Logging is implemented by:
 terraform_controller/logging_component.py
 ```
 
-Business/lifecycle code sends events to this component. Business logic does not open log files directly.
-
-Default format:
+Deployment locking is implemented by:
 
 ```text
-JSON Lines (.jsonl)
+terraform_controller/deployment_lock.py
 ```
 
-Each line is one JSON object. Example fields include:
+Business/lifecycle code sends events to the logging component. Passwords, Vault tokens, and secret values are not intentionally logged.
 
-```text
-timestamp
-level
-logger
-event
-deployment
-deployment_type
-database
-action
-phase
-```
-
-Passwords, Vault tokens, and secret values are not intentionally logged.
-
-Configuration:
+Default logging:
 
 ```ini
 [Logging]
@@ -561,16 +609,6 @@ mode = per-run
 filename_pattern = terraformController-%Y%m%d-%H%M%S-{pid}.jsonl
 retention_days = 30
 ```
-
-Modes:
-
-```text
-per-run  New timestamped log file for each controller execution.
-append   Append to the rendered file name.
-replace  Replace the rendered file when the run starts.
-```
-
-Default retention removes old `.jsonl` files in the configured log directory after 30 days.
 
 ## Local static storage
 
@@ -586,51 +624,37 @@ ShardedCluster local storage is Terraform-managed per persistent volume:
 
 - one PV for each shard member,
 - one PV for each config-server member,
-- no persistent volume is required for mongos.
+- no persistent volume for mongos.
 
-This per-volume model lets AddShard prepare only new volumes and lets DeleteShard remove only the deleted shard's volumes.
+For shard addition, storage is increased before `shardCount`.
 
-Future/customer mode can use:
-
-```text
-dynamic
-```
-
-where a cluster StorageClass dynamically provisions storage.
+For shard deletion, `shardCount` is reduced and the removed shard StatefulSets disappear before old shard storage is cleaned up.
 
 ## Ops Manager project isolation
 
-The controller reuses the known working Ops Manager connection information from:
+The controller reuses:
 
 ```text
 my-project
 organization-secret
 ```
 
-It creates/uses:
+and uses:
 
 ```text
 tc-ops-manager-projects
 ```
 
-without a fixed `projectName`, allowing each MongoDB resource to use a distinct Ops Manager project.
-
-Do not casually delete or replace the known-good Ops Manager integration artifacts.
+without a fixed `projectName`, allowing each managed MongoDB resource to use a distinct Ops Manager project.
 
 ## Source layout
 
-The Python entry point is intentionally small:
-
 ```text
 terraformController.py
-```
-
-Python responsibilities are split across:
-
-```text
 terraform_controller/cli.py
 terraform_controller/deployments.py
 terraform_controller/databases.py
+terraform_controller/deployment_lock.py
 terraform_controller/maintenance.py
 terraform_controller/kube.py
 terraform_controller/vault.py
@@ -638,15 +662,8 @@ terraform_controller/terraform_runner.py
 terraform_controller/logging_component.py
 terraform_controller/config.py
 terraform_controller/common.py
-```
-
-Terraform implementation:
-
-```text
 terraform-dbaas/
 ```
-
-The controller refreshes Terraform from GitHub before applying managed changes.
 
 ## Reconcile
 
@@ -654,15 +671,9 @@ The controller refreshes Terraform from GitHub before applying managed changes.
 python3 terraformController.py Reconcile
 ```
 
-Reconcile:
+Reconcile reconstructs desired state from Vault, refreshes Terraform, reapplies managed state, and waits for convergence.
 
-1. reconstructs desired deployment state from Vault,
-2. refreshes Terraform from GitHub,
-3. reapplies all managed deployment/database/account state,
-4. waits for ReplicaSets and ShardedClusters to become ready,
-5. waits for controller and database accounts to reconcile.
-
-If there are zero managed deployments, Reconcile reports that there is nothing to do.
+If any ShardedCluster deployment lock is active, Reconcile stops before applying Terraform and lists the active change.
 
 ## Vault token
 
@@ -673,8 +684,6 @@ Use:
 ```bash
 export VAULT_TOKEN='<current-vault-token>'
 ```
-
-The local Vault port-forward must be available when using the default local Vault address.
 
 ## Validation
 
@@ -687,4 +696,4 @@ GitHub Actions validates:
 - Terraform provider initialization,
 - Terraform validation.
 
-Live Kubernetes/Ops Manager/Vault behavior still requires an end-to-end smoke test against the local environment after code validation succeeds.
+After static/CI validation, new ShardedCluster shard lifecycle behavior still requires a controlled live smoke test against the local Kubernetes/Ops Manager/Vault environment.
