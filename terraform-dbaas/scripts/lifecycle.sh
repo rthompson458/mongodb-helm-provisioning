@@ -338,12 +338,12 @@ EOF
     current_id=$("${K[@]}" -n "${TC_NAMESPACE}" get configmap "${lock}" -o jsonpath='{.data.operation_id}' 2>/dev/null || true)
 
     if [[ -z "${current_id}" ]]; then
-      echo "Topology lock is already absent."
+      echo "Deployment lock is already absent."
       exit 0
     fi
 
     if [[ "${current_id}" != "${TC_OPERATION_ID}" ]]; then
-      echo "Topology lock operation ID does not match. Refusing to release another operation's lock." >&2
+      echo "Deployment lock operation ID does not match. Refusing to release another operation's lock." >&2
       exit 42
     fi
 
