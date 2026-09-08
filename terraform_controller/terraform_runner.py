@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .common import ControllerError, run_process
+from .logging_component import log_event
 
 
 def _require(*names: str) -> None:
@@ -25,7 +26,9 @@ def _check_version() -> None:
     except Exception as exc:
         raise ControllerError("Could not determine Terraform version.") from exc
     if (major, minor) < (1, 11):
-        raise ControllerError(f"Terraform {version} is installed; terraformController requires 1.11 or newer.")
+        raise ControllerError(
+            f"Terraform {version} is installed; terraformController requires 1.11 or newer."
+        )
 
 
 def _sync(config: dict[str, Any]) -> Path:
@@ -37,12 +40,15 @@ def _sync(config: dict[str, Any]) -> Path:
         if cache.exists() and any(cache.iterdir()):
             raise ControllerError(f"Terraform cache exists but is not a Git repository: {cache}")
         print(f"Cloning Terraform from {repo} ...")
+        log_event("terraform.repository.clone", repository=repo, branch=branch, cache=str(cache))
         run_process(["git", "clone", "--depth", "1", "--branch", branch, repo, str(cache)])
     else:
         print(f"Refreshing Terraform from GitHub branch '{branch}' ...")
+        log_event("terraform.repository.refresh", repository=repo, branch=branch, cache=str(cache))
         run_process(["git", "-C", str(cache), "fetch", "--depth", "1", "origin", branch])
         run_process(["git", "-C", str(cache), "reset", "--hard", "FETCH_HEAD"])
         run_process(["git", "-C", str(cache), "clean", "-fd", "-e", ".terraform"])
+
     tfdir = cache / config["terraform_subdir"]
     if not tfdir.is_dir():
         raise ControllerError(f"Terraform subdirectory not found: {tfdir}")
@@ -52,7 +58,8 @@ def _sync(config: dict[str, Any]) -> Path:
 def _operation_payload(operation: dict[str, Any] | None) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "action": "none",
-        "replica_set": "",
+        "deployment": "",
+        "deployment_type": "",
         "database": "",
         "members": 0,
         "nonce": "",
@@ -69,11 +76,7 @@ def apply_inventory(
     inventory: dict[str, dict[str, Any]],
     operation: dict[str, Any] | None = None,
 ) -> None:
-    """Apply desired state and an optional lifecycle operation through Terraform.
-
-    Python supplies intent and reads status. Terraform performs all managed
-    MongoDB, Vault, Kubernetes, and local-storage lifecycle changes.
-    """
+    """Apply desired deployment state and an optional lifecycle operation through Terraform."""
     _require("terraform", "git", "kubectl", "bash", "python3")
     op = _operation_payload(operation)
     if config["storage_mode"] == "static-local":
@@ -122,12 +125,14 @@ def apply_inventory(
         init.append(f"-backend-config=config_context={config['kube_context']}")
 
     print("Initializing Terraform ...")
+    log_event("terraform.init.started", directory=str(tfdir))
     run_process(init, cwd=tfdir, env=env)
+    log_event("terraform.init.succeeded", directory=str(tfdir))
 
     temp: Path | None = None
     try:
         payload = {
-            "replica_sets": inventory,
+            "deployments": inventory,
             "operation": op,
         }
         with tempfile.NamedTemporaryFile(
@@ -143,10 +148,42 @@ def apply_inventory(
             temp = Path(handle.name)
 
         print("Applying Terraform ...")
-        run_process(
-            ["terraform", "apply", "-input=false", "-auto-approve", f"-var-file={temp.name}"],
-            cwd=tfdir,
-            env=env,
+        log_event(
+            "terraform.apply.started",
+            action=op["action"],
+            deployment=op["deployment"],
+            deployment_type=op["deployment_type"],
+            database=op["database"],
+            deployment_count=len(inventory),
+        )
+        try:
+            run_process(
+                [
+                    "terraform",
+                    "apply",
+                    "-input=false",
+                    "-auto-approve",
+                    f"-var-file={temp.name}",
+                ],
+                cwd=tfdir,
+                env=env,
+            )
+        except ControllerError:
+            log_event(
+                "terraform.apply.failed",
+                level=40,
+                action=op["action"],
+                deployment=op["deployment"],
+                deployment_type=op["deployment_type"],
+                database=op["database"],
+            )
+            raise
+        log_event(
+            "terraform.apply.succeeded",
+            action=op["action"],
+            deployment=op["deployment"],
+            deployment_type=op["deployment_type"],
+            database=op["database"],
         )
     finally:
         if temp and temp.exists():
