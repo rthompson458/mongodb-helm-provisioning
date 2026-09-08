@@ -81,7 +81,8 @@ variable "operation" {
     deployment_type = string
     database        = string
     members         = number
-    topology_action = string
+    lock_category = string
+    lock_action   = string
     operation_id    = string
     start_shards    = number
     target_shards   = number
@@ -93,7 +94,8 @@ variable "operation" {
     deployment_type = ""
     database        = ""
     members         = 0
-    topology_action = ""
+    lock_category = ""
+    lock_action   = ""
     operation_id    = ""
     start_shards    = 0
     target_shards   = 0
@@ -111,8 +113,8 @@ variable "operation" {
       "verify_database_accounts",
       "verify_database_accounts_owner_disabled",
       "verify_database_users_absent",
-      "acquire_topology_lock",
-      "release_topology_lock"
+      "acquire_deployment_lock",
+      "release_deployment_lock"
     ], var.operation.action)
     error_message = "operation.action is not supported."
   }
