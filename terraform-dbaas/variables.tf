@@ -81,8 +81,8 @@ variable "operation" {
     deployment_type = string
     database        = string
     members         = number
-    lock_category = string
-    lock_action   = string
+    lock_category   = string
+    lock_action     = string
     operation_id    = string
     start_shards    = number
     target_shards   = number
@@ -94,8 +94,8 @@ variable "operation" {
     deployment_type = ""
     database        = ""
     members         = 0
-    lock_category = ""
-    lock_action   = ""
+    lock_category   = ""
+    lock_action     = ""
     operation_id    = ""
     start_shards    = 0
     target_shards   = 0
