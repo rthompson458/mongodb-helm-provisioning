@@ -37,6 +37,13 @@ class HarnessRunner:
                     print(f"         {line}")
         return result
 
+    def check(self, name: str, passed: bool, note: str = "") -> StepResult:
+        """Record a check that does not map directly to one foreground command."""
+
+        return self._record(
+            StepResult(name=name, passed=passed, note=note)
+        )
+
     def run(
         self,
         name: str,
