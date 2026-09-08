@@ -81,8 +81,11 @@ class DatabaseLifecycleTests(unittest.TestCase):
         )
         vault = FakeVault(inventory)
 
-        with self.assertRaises(databases.ControllerError) as ctx:
-            databases.add_database(self.config, vault, "HouseInfo")
+        # resolve_deployment includes each live phase in its error message.
+        # Mock that read so this unit test stays independent of kubectl.
+        with patch.object(deployments.kube, "phase", return_value="Running"):
+            with self.assertRaises(databases.ControllerError) as ctx:
+                databases.add_database(self.config, vault, "HouseInfo")
 
         self.assertIn("Multiple MongoDB deployments exist", str(ctx.exception))
 
