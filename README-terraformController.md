@@ -685,6 +685,36 @@ Use:
 export VAULT_TOKEN='<current-vault-token>'
 ```
 
+## Test harness
+
+Fast unit/regression tests are separated by subsystem under `tests/`.
+
+```bash
+python3 -m unittest discover -s tests -p "test_*.py" -v
+```
+
+The default live harness profile is read-only:
+
+```bash
+python3 tests/run_harness.py
+```
+
+For a complete local development lifecycle test:
+
+```bash
+python3 tests/run_harness.py \
+  --profile all \
+  --allow-mutations \
+  --allow-destructive
+```
+
+The full profile exercises ReplicaSet lifecycle, database/account lifecycle,
+ShardedCluster lifecycle, count-based shard add/delete, final-shard protection,
+database-based shard-deletion blocking, global/targeted shard status, and an
+actual concurrent-process deployment-lock test.
+
+See `tests/README.md` for scenario details.
+
 ## Validation
 
 GitHub Actions validates:
