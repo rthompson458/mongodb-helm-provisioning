@@ -24,8 +24,8 @@ locals {
       for deployment_key, replica_set in var.deployments : [
         for database_key, database in replica_set.databases : {
           key               = "${deployment_key}/${database_key}"
-          deployment_key   = deployment_key
-          deployment_name  = replica_set.display_name
+          deployment_key    = deployment_key
+          deployment_name   = replica_set.display_name
           database_key      = database_key
           database_name     = database.display_name
           created_at        = database.created_at
@@ -97,8 +97,8 @@ locals {
       for database_key, database in local.databases : [
         for account_key, account_type in local.account_types : {
           key              = "${database_key}/${account_key}"
-          deployment_key  = database.deployment_key
-          deployment_name = database.deployment_name
+          deployment_key   = database.deployment_key
+          deployment_name  = database.deployment_name
           database_key     = database.database_key
           database_name    = database.database_name
           account_key      = account_key
@@ -138,10 +138,10 @@ locals {
     for key, cluster in local.sharded_clusters : {
       for ordinal in range(cluster.storage_shard_count * cluster.members_per_shard) :
       "${key}/shard/${ordinal}" => {
-        deployment       = key
-        component        = "shard"
-        ordinal          = ordinal
-        pv_name          = "${key}-shard-${ordinal}"
+        deployment        = key
+        component         = "shard"
+        ordinal           = ordinal
+        pv_name           = "${key}-shard-${ordinal}"
         storage_base_path = cluster.storage_base_path
         storage_node_name = cluster.storage_node_name
         storage_class     = cluster.storage_class
@@ -154,10 +154,10 @@ locals {
     for key, cluster in local.sharded_clusters : {
       for ordinal in range(cluster.config_server_count) :
       "${key}/config/${ordinal}" => {
-        deployment       = key
-        component        = "config"
-        ordinal          = ordinal
-        pv_name          = "${key}-config-${ordinal}"
+        deployment        = key
+        component         = "config"
+        ordinal           = ordinal
+        pv_name           = "${key}-config-${ordinal}"
         storage_base_path = cluster.storage_base_path
         storage_node_name = cluster.storage_node_name
         storage_class     = cluster.storage_class
@@ -426,13 +426,13 @@ resource "kubernetes_manifest" "sharded_cluster" {
 
     spec = merge(
       {
-        type                  = "ShardedCluster"
-        shardCount            = each.value.shard_count
-        mongodsPerShardCount  = each.value.members_per_shard
-        mongosCount           = each.value.mongos_count
-        configServerCount     = each.value.config_server_count
-        version               = each.value.version
-        persistent            = each.value.persistent
+        type                 = "ShardedCluster"
+        shardCount           = each.value.shard_count
+        mongodsPerShardCount = each.value.members_per_shard
+        mongosCount          = each.value.mongos_count
+        configServerCount    = each.value.config_server_count
+        version              = each.value.version
+        persistent           = each.value.persistent
 
         security = {
           authentication = {
@@ -573,8 +573,8 @@ resource "vault_kv_secret_v2" "database_metadata" {
     max_versions = 5
 
     data = {
-      type        = "database-metadata"
-      managed_by  = "terraformController"
+      type       = "database-metadata"
+      managed_by = "terraformController"
       deployment = each.value.deployment_name
     }
   }
@@ -599,10 +599,10 @@ resource "vault_kv_secret_v2" "controller_admin" {
   delete_all_versions = true
 
   data_json_wo = jsonencode({
-    deployment = each.value.display_name
+    deployment      = each.value.display_name
     deployment_type = each.value.deployment_type
     username        = "tc_${each.key}_admin"
-    password    = ephemeral.random_password.controller_admin[each.key].result
+    password        = ephemeral.random_password.controller_admin[each.key].result
   })
 
   data_json_wo_version = each.value.controller_password_version
@@ -698,13 +698,13 @@ resource "vault_kv_secret_v2" "database_account" {
   delete_all_versions = true
 
   data_json_wo = jsonencode({
-    deployment   = each.value.deployment_name
+    deployment      = each.value.deployment_name
     database        = each.value.database_name
     deployment_type = var.deployments[each.value.deployment_key].deployment_type
-    account_type = each.value.account_type
-    username     = each.value.username
-    password     = ephemeral.random_password.database_account[each.key].result
-    rotated_at   = each.value.rotated_at
+    account_type    = each.value.account_type
+    username        = each.value.username
+    password        = ephemeral.random_password.database_account[each.key].result
+    rotated_at      = each.value.rotated_at
   })
 
   data_json_wo_version = each.value.rotation_version
