@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import copy
+import io
 import unittest
+from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from terraform_controller import databases, deployments
+from terraform_controller import cli, databases, deployment_lock, deployments
 
 
 def deployment_inventory(
@@ -14,6 +16,7 @@ def deployment_inventory(
     name: str = "RS1",
     with_db: bool = False,
     owner_disabled: bool = False,
+    shard_count: int = 3,
 ):
     key = name.lower()
     dbs = {}
@@ -41,8 +44,8 @@ def deployment_inventory(
             "storage_base_path": "/tmp/mongodb",
             "storage_node_name": "node-0",
             "controller_password_version": 1,
-            "shard_count": 3 if is_sc else 0,
-            "storage_shard_count": 3 if is_sc else 0,
+            "shard_count": shard_count if is_sc else 0,
+            "storage_shard_count": shard_count if is_sc else 0,
             "members_per_shard": 3 if is_sc else 0,
             "mongos_count": 2 if is_sc else 0,
             "config_server_count": 3 if is_sc else 0,
@@ -51,14 +54,14 @@ def deployment_inventory(
     }
 
 
-def online_sc_status(shards: int = 3):
+def online_sc_status(shards: int = 3, cluster: str = "sc9"):
     return {
         "phase": "Running",
         "message": "",
         "shards": [
             {
-                "shard": f"sc9-{i}",
-                "name": f"sc9-{i}",
+                "shard": f"{cluster}-{i}",
+                "name": f"{cluster}-{i}",
                 "status": "Online",
                 "desired": 3,
                 "ready": 3,
@@ -67,19 +70,36 @@ def online_sc_status(shards: int = 3):
             for i in range(shards)
         ],
         "config_servers": {
-            "name": "sc9-config",
+            "name": f"{cluster}-config",
             "status": "Online",
             "desired": 3,
             "ready": 3,
             "updated": 3,
         },
         "mongos": {
-            "name": "sc9-mongos",
+            "name": f"{cluster}-mongos",
             "status": "Online",
             "desired": 2,
             "ready": 2,
             "updated": 2,
         },
+    }
+
+
+def topology_lock(
+    *,
+    action: str = "AddShard",
+    start: int = 3,
+    target: int = 5,
+):
+    return {
+        "operation_id": "op-123",
+        "category": "topology",
+        "action": action,
+        "database": "",
+        "start_shards": start,
+        "target_shards": target,
+        "started_at": "2026-09-08T12:00:00Z",
     }
 
 
@@ -139,9 +159,11 @@ class DatabaseLifecycleTests(unittest.TestCase):
                 ),
             ),
             patch.object(databases, "_verify_database_accounts"),
-            patch.object(databases, "utc_now", return_value=datetime(
-                2026, 9, 6, 12, 0, tzinfo=timezone.utc
-            )),
+            patch.object(
+                databases,
+                "utc_now",
+                return_value=datetime(2026, 9, 6, 12, 0, tzinfo=timezone.utc),
+            ),
         ):
             databases.add_database(self.config, vault, "HouseInfo")
 
@@ -168,8 +190,13 @@ class DatabaseLifecycleTests(unittest.TestCase):
         status["shards"][1]["ready"] = 1
 
         with (
+            patch.object(deployment_lock, "read_deployment_lock", return_value=None),
             patch.object(deployments.kube, "phase", return_value="Running"),
-            patch.object(deployments.kube, "sharded_cluster_status", return_value=status),
+            patch.object(
+                deployments.kube,
+                "sharded_cluster_status",
+                return_value=status,
+            ),
             patch.object(databases, "apply_inventory") as apply_mock,
         ):
             with self.assertRaises(databases.ControllerError) as ctx:
@@ -177,6 +204,23 @@ class DatabaseLifecycleTests(unittest.TestCase):
 
         self.assertIn("not ready for database work", str(ctx.exception))
         self.assertIn("Creating", str(ctx.exception))
+        apply_mock.assert_not_called()
+
+    def test_active_shard_change_blocks_database_creation(self):
+        vault = FakeVault(
+            deployment_inventory(deployment_type="ShardedCluster", name="SC9")
+        )
+        lock = topology_lock()
+
+        with (
+            patch.object(deployment_lock, "read_deployment_lock", return_value=lock),
+            patch.object(databases, "apply_inventory") as apply_mock,
+        ):
+            with self.assertRaises(databases.ControllerError) as ctx:
+                databases.add_database(self.config, vault, "SC9", "HouseInfo")
+
+        self.assertIn("busy with another managed change", str(ctx.exception))
+        self.assertIn("AddShard 3 -> 5", str(ctx.exception))
         apply_mock.assert_not_called()
 
     def test_rotate_passwords_is_requested_as_terraform_operation(self):
@@ -202,7 +246,8 @@ class DatabaseLifecycleTests(unittest.TestCase):
         self.assertEqual(calls[0][1]["action"], "rotate_passwords")
         self.assertEqual(calls[0][1]["deployment"], "rs1")
         self.assertEqual(
-            calls[0][0]["rs1"]["databases"]["houseinfo"]["rotation_version"], 1
+            calls[0][0]["rs1"]["databases"]["houseinfo"]["rotation_version"],
+            1,
         )
 
     def test_rotate_passwords_recovers_after_partial_apply(self):
@@ -227,8 +272,14 @@ class DatabaseLifecycleTests(unittest.TestCase):
             databases.rotate_passwords(self.config, vault, "RS1", "HouseInfo")
 
         self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0][0]["rs1"]["databases"]["houseinfo"]["rotation_version"], 1)
-        self.assertEqual(calls[1][0]["rs1"]["databases"]["houseinfo"]["rotation_version"], 2)
+        self.assertEqual(
+            calls[0][0]["rs1"]["databases"]["houseinfo"]["rotation_version"],
+            1,
+        )
+        self.assertEqual(
+            calls[1][0]["rs1"]["databases"]["houseinfo"]["rotation_version"],
+            2,
+        )
         self.assertEqual(calls[1][1]["action"], "rotate_passwords")
 
     def test_delete_database_drops_then_removes_desired_state(self):
@@ -254,7 +305,9 @@ class DatabaseLifecycleTests(unittest.TestCase):
         self.assertIn("houseinfo", calls[0][0]["rs1"]["databases"])
         self.assertIsNone(calls[1][1])
         self.assertNotIn("houseinfo", calls[1][0]["rs1"]["databases"])
-        self.assertEqual(calls[2][1]["action"], "verify_database_users_absent")
+        self.assertEqual(
+            calls[2][1]["action"], "verify_database_users_absent"
+        )
 
 
 class DeploymentLifecycleTests(unittest.TestCase):
@@ -281,7 +334,13 @@ class DeploymentLifecycleTests(unittest.TestCase):
         calls = []
 
         with (
-            patch.object(deployments, "apply_inventory", side_effect=lambda c, i, operation=None: calls.append(copy.deepcopy(i))),
+            patch.object(
+                deployments,
+                "apply_inventory",
+                side_effect=lambda c, i, operation=None: calls.append(
+                    copy.deepcopy(i)
+                ),
+            ),
             patch.object(deployments.kube, "get_json", return_value=None),
             patch.object(deployments.kube, "wait_sharded_cluster_ready"),
             patch.object(deployments.kube, "wait_phase"),
@@ -294,43 +353,136 @@ class DeploymentLifecycleTests(unittest.TestCase):
         self.assertEqual(sc["storage_shard_count"], 4)
         self.assertEqual(sc["members_per_shard"], 3)
 
-    def test_add_shard_prepares_storage_before_increasing_live_count(self):
+    def test_add_two_shards_prepares_storage_before_live_count(self):
         vault = FakeVault(
             deployment_inventory(deployment_type="ShardedCluster", name="SC9")
         )
         calls = []
+        lock = topology_lock(start=3, target=5)
 
         def apply_side_effect(config, inventory, operation=None):
             calls.append(copy.deepcopy(inventory["sc9"]))
 
         with (
+            patch.object(deployments, "read_deployment_lock", return_value=None),
             patch.object(deployments, "require_running"),
-            patch.object(deployments, "apply_inventory", side_effect=apply_side_effect),
+            patch.object(
+                deployments,
+                "acquire_deployment_lock",
+                return_value=lock,
+            ),
+            patch.object(
+                deployments,
+                "release_deployment_lock",
+            ),
+            patch.object(
+                deployments,
+                "apply_inventory",
+                side_effect=apply_side_effect,
+            ),
             patch.object(deployments.kube, "wait_sharded_cluster_ready"),
         ):
-            deployments.add_shard(self.config, vault, "SC9")
+            deployments.add_shard(self.config, vault, "SC9", 2)
 
         self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0]["storage_shard_count"], 4)
+        self.assertEqual(calls[0]["storage_shard_count"], 5)
         self.assertEqual(calls[0]["shard_count"], 3)
-        self.assertEqual(calls[1]["storage_shard_count"], 4)
-        self.assertEqual(calls[1]["shard_count"], 4)
+        self.assertEqual(calls[1]["storage_shard_count"], 5)
+        self.assertEqual(calls[1]["shard_count"], 5)
 
     def test_delete_shard_is_blocked_when_any_managed_database_exists(self):
         vault = FakeVault(
             deployment_inventory(
-                deployment_type="ShardedCluster", name="SC9", with_db=True
+                deployment_type="ShardedCluster",
+                name="SC9",
+                with_db=True,
             )
         )
         with (
+            patch.object(deployments, "read_deployment_lock", return_value=None),
             patch.object(deployments, "require_running"),
             patch.object(deployments, "apply_inventory") as apply_mock,
         ):
             with self.assertRaises(deployments.ControllerError) as ctx:
-                deployments.delete_shard(self.config, vault, "SC9", True)
+                deployments.delete_shard(
+                    self.config, vault, "SC9", 1, True
+                )
 
         self.assertIn("contains managed databases", str(ctx.exception))
         apply_mock.assert_not_called()
+
+    def test_delete_shards_cannot_reduce_cluster_below_one(self):
+        vault = FakeVault(
+            deployment_inventory(
+                deployment_type="ShardedCluster",
+                name="SC9",
+                shard_count=2,
+            )
+        )
+        with patch.object(
+            deployments, "read_deployment_lock", return_value=None
+        ):
+            with self.assertRaises(deployments.ControllerError) as ctx:
+                deployments.delete_shard(
+                    self.config, vault, "SC9", 2, True
+                )
+
+        self.assertIn("must retain at least 1 shard", str(ctx.exception))
+        self.assertIn("Maximum deletable now: 1", str(ctx.exception))
+
+    def test_global_list_shards_includes_all_sharded_clusters(self):
+        inventory = deployment_inventory(
+            deployment_type="ShardedCluster",
+            name="SC9",
+            shard_count=2,
+        )
+        inventory.update(
+            deployment_inventory(
+                deployment_type="ShardedCluster",
+                name="SC10",
+                shard_count=1,
+            )
+        )
+        vault = FakeVault(inventory)
+
+        def status(config, key, count):
+            return online_sc_status(count, key)
+
+        output = io.StringIO()
+        with (
+            patch.object(deployments, "read_deployment_lock", return_value=None),
+            patch.object(
+                deployments.kube,
+                "sharded_cluster_status",
+                side_effect=status,
+            ),
+            redirect_stdout(output),
+        ):
+            deployments.list_shards(self.config, vault)
+
+        text = output.getvalue()
+        self.assertIn("SC9", text)
+        self.assertIn("SC10", text)
+        self.assertIn("sc9-0", text)
+        self.assertIn("sc10-0", text)
+
+
+class CliTests(unittest.TestCase):
+    def test_add_shard_accepts_optional_count(self):
+        args = cli.build_parser().parse_args(["AddShard", "SC9", "2"])
+        self.assertEqual(args.deployment, "SC9")
+        self.assertEqual(args.count, 2)
+
+    def test_delete_shard_defaults_to_one(self):
+        args = cli.build_parser().parse_args(
+            ["DeleteShard", "SC9", "--confirm"]
+        )
+        self.assertEqual(args.count, 1)
+        self.assertTrue(args.confirm)
+
+    def test_list_shards_cluster_is_optional(self):
+        args = cli.build_parser().parse_args(["ListShards"])
+        self.assertIsNone(args.deployment)
 
 
 if __name__ == "__main__":
