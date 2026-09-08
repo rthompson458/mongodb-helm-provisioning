@@ -18,6 +18,7 @@ from .deployments import (
     require_running,
     resolve_deployment,
 )
+from .deployment_lock import protected_database_change, require_no_active_change
 from .logging_component import log_event
 from .terraform_runner import apply_inventory
 from .vault import VaultClient
@@ -147,6 +148,7 @@ def add_database(
     deployment_key, deployment, db_name = _resolve_database_args(
         config, inventory, deployment_or_database, database
     )
+    require_no_active_change(config, deployment_key, deployment)
     require_running(config, deployment_key, deployment)
 
     db_key, display = normalize_database(db_name)
@@ -164,38 +166,47 @@ def add_database(
         database=display,
     )
 
-    # Stage 1. Materialize the database before desired user/credential state is added.
-    apply_inventory(
+    with protected_database_change(
         config,
+        vault,
         inventory,
-        _operation("create_database", deployment_key, deployment, display),
-    )
+        deployment_key,
+        deployment,
+        "AddDatabase",
+        display,
+    ):
+        # Stage 1. Materialize the database before desired user/credential state is added.
+        apply_inventory(
+            config,
+            inventory,
+            _operation("create_database", deployment_key, deployment, display),
+        )
 
-    # Stage 2. Add desired lifecycle state only after materialization succeeds.
-    now = iso_utc(utc_now())
-    deployment["databases"][db_key] = {
-        "display_name": display,
-        "created_at": now,
-        "owner_disabled": False,
-        "owner_disabled_at": "",
-        "rotation_version": 1,
-        "rotated_at": now,
-    }
-    apply_inventory(config, inventory)
+        # Stage 2. Add desired lifecycle state only after materialization succeeds.
+        now = iso_utc(utc_now())
+        deployment["databases"][db_key] = {
+            "display_name": display,
+            "created_at": now,
+            "owner_disabled": False,
+            "owner_disabled_at": "",
+            "rotation_version": 1,
+            "rotated_at": now,
+        }
+        apply_inventory(config, inventory)
 
-    updated_inventory = vault.load_inventory()
-    updated_key, updated_deployment, updated_db_key, updated_db = require_db(
-        updated_inventory, deployment["display_name"], display
-    )
-    require_running(config, updated_key, updated_deployment)
-    _verify_database_accounts(
-        config,
-        updated_inventory,
-        updated_key,
-        updated_deployment,
-        updated_db_key,
-        updated_db,
-    )
+        updated_inventory = vault.load_inventory()
+        updated_key, updated_deployment, updated_db_key, updated_db = require_db(
+            updated_inventory, deployment["display_name"], display
+        )
+        require_running(config, updated_key, updated_deployment)
+        _verify_database_accounts(
+            config,
+            updated_inventory,
+            updated_key,
+            updated_deployment,
+            updated_db_key,
+            updated_db,
+        )
 
     dtype = deployment_type_label(updated_deployment)
     log_event(
@@ -219,7 +230,6 @@ def add_database(
         print(f"  {path}")
     print(f"\nPassword rotation interval: {config['rotation_days']} days")
     print("The Owner account is disabled at the first rotation at or after day 30.")
-
 
 def delete_database(
     config: dict[str, Any],
@@ -248,6 +258,7 @@ def delete_database(
             f"{deployment_type_label(deployment)} '{deployment['display_name']}'."
         )
     db = deployment["databases"][db_key]
+    require_no_active_change(config, deployment_key, deployment)
     require_running(config, deployment_key, deployment)
 
     log_event(
@@ -257,41 +268,50 @@ def delete_database(
         database=db["display_name"],
     )
 
-    # --confirm authorizes deletion of the database and all of its contents.
-    apply_inventory(
+    with protected_database_change(
         config,
+        vault,
         inventory,
-        _operation(
-            "delete_database", deployment_key, deployment, db["display_name"]
-        ),
-    )
-
-    del deployment["databases"][db_key]
-    apply_inventory(config, inventory)
-
-    timeout = (
-        config["sc_ready_timeout"]
-        if deployment_type_label(deployment) == "ShardedCluster"
-        else config["rs_ready_timeout"]
-    )
-    for account in ("owner", "readwrite", "read"):
-        kube.wait_absent(
+        deployment_key,
+        deployment,
+        "DeleteDatabase",
+        db["display_name"],
+    ):
+        # --confirm authorizes deletion of the database and all of its contents.
+        apply_inventory(
             config,
-            "mongodbuser",
-            account_resource_name(deployment_key, db_key, account),
-            timeout,
+            inventory,
+            _operation(
+                "delete_database", deployment_key, deployment, db["display_name"]
+            ),
         )
 
-    apply_inventory(
-        config,
-        inventory,
-        _operation(
-            "verify_database_users_absent",
-            deployment_key,
-            deployment,
-            db["display_name"],
-        ),
-    )
+        del deployment["databases"][db_key]
+        apply_inventory(config, inventory)
+
+        timeout = (
+            config["sc_ready_timeout"]
+            if deployment_type_label(deployment) == "ShardedCluster"
+            else config["rs_ready_timeout"]
+        )
+        for account in ("owner", "readwrite", "read"):
+            kube.wait_absent(
+                config,
+                "mongodbuser",
+                account_resource_name(deployment_key, db_key, account),
+                timeout,
+            )
+
+        apply_inventory(
+            config,
+            inventory,
+            _operation(
+                "verify_database_users_absent",
+                deployment_key,
+                deployment,
+                db["display_name"],
+            ),
+        )
 
     log_event(
         "database.delete.succeeded",
@@ -304,7 +324,6 @@ def delete_database(
         f"{deployment_type_label(deployment)} '{deployment['display_name']}'."
     )
     print("All three managed MongoDB accounts and their Vault credentials were deleted.")
-
 
 def rotate_passwords(
     config: dict[str, Any],
@@ -323,6 +342,7 @@ def rotate_passwords(
             f"{deployment_type_label(deployment)} '{deployment['display_name']}'."
         )
     db = deployment["databases"][db_key]
+    require_no_active_change(config, deployment_key, deployment)
     require_running(config, deployment_key, deployment)
 
     log_event(
@@ -330,59 +350,69 @@ def rotate_passwords(
         deployment=deployment["display_name"],
         database=db["display_name"],
     )
-    last_error: ControllerError | None = None
-    for attempt in range(2):
-        if attempt:
-            inventory = vault.load_inventory()
-            deployment_key, deployment, _, db = require_db(
-                inventory, deployment["display_name"], db_name
-            )
-            require_running(config, deployment_key, deployment)
-            print("Retrying password rotation with a fresh Terraform revision ...")
-            log_event(
-                "password.rotate.recovery_retry",
-                deployment=deployment["display_name"],
-                database=db["display_name"],
-            )
 
-        try:
-            apply_inventory(
-                config,
-                inventory,
-                _operation(
-                    "rotate_passwords",
-                    deployment_key,
-                    deployment,
-                    db["display_name"],
-                ),
-            )
-            last_error = None
-            break
-        except ControllerError as exc:
-            last_error = exc
-            if attempt == 0:
-                continue
-
-    if last_error is not None:
-        raise ControllerError(
-            "Password rotation did not converge after a recovery retry. "
-            "No success was reported. Run RotatePasswords again after correcting "
-            "the Terraform/Kubernetes/Vault error."
-        ) from last_error
-
-    updated_inventory = vault.load_inventory()
-    updated_key, updated_deployment, updated_db_key, updated_db = require_db(
-        updated_inventory, deployment["display_name"], db_name
-    )
-    require_running(config, updated_key, updated_deployment)
-    _verify_database_accounts(
+    with protected_database_change(
         config,
-        updated_inventory,
-        updated_key,
-        updated_deployment,
-        updated_db_key,
-        updated_db,
-    )
+        vault,
+        inventory,
+        deployment_key,
+        deployment,
+        "RotatePasswords",
+        db["display_name"],
+    ):
+        last_error: ControllerError | None = None
+        for attempt in range(2):
+            if attempt:
+                inventory = vault.load_inventory()
+                deployment_key, deployment, _, db = require_db(
+                    inventory, deployment["display_name"], db_name
+                )
+                require_running(config, deployment_key, deployment)
+                print("Retrying password rotation with a fresh Terraform revision ...")
+                log_event(
+                    "password.rotate.recovery_retry",
+                    deployment=deployment["display_name"],
+                    database=db["display_name"],
+                )
+
+            try:
+                apply_inventory(
+                    config,
+                    inventory,
+                    _operation(
+                        "rotate_passwords",
+                        deployment_key,
+                        deployment,
+                        db["display_name"],
+                    ),
+                )
+                last_error = None
+                break
+            except ControllerError as exc:
+                last_error = exc
+                if attempt == 0:
+                    continue
+
+        if last_error is not None:
+            raise ControllerError(
+                "Password rotation did not converge after a recovery retry. "
+                "No success was reported. Run RotatePasswords again after correcting "
+                "the Terraform/Kubernetes/Vault error."
+            ) from last_error
+
+        updated_inventory = vault.load_inventory()
+        updated_key, updated_deployment, updated_db_key, updated_db = require_db(
+            updated_inventory, deployment["display_name"], db_name
+        )
+        require_running(config, updated_key, updated_deployment)
+        _verify_database_accounts(
+            config,
+            updated_inventory,
+            updated_key,
+            updated_deployment,
+            updated_db_key,
+            updated_db,
+        )
 
     log_event(
         "password.rotate.succeeded",
@@ -403,7 +433,6 @@ def rotate_passwords(
         print("Owner status: Enabled.")
     print(f"Last rotated: {updated_db['rotated_at']}")
     print(f"Please go to Vault at {_vault_ui(config)} to get the current credentials.")
-
 
 def disable_owner(
     config: dict[str, Any],
@@ -430,6 +459,7 @@ def disable_owner(
             f"terraformController.py DisableOwner {deployment['display_name']} "
             f"{db['display_name']} --confirm"
         )
+    require_no_active_change(config, deployment_key, deployment)
     require_running(config, deployment_key, deployment)
 
     if db["owner_disabled"]:
@@ -441,36 +471,47 @@ def disable_owner(
         deployment=deployment["display_name"],
         database=db["display_name"],
     )
-    apply_inventory(
-        config,
-        inventory,
-        _operation(
-            "disable_owner", deployment_key, deployment, db["display_name"]
-        ),
-    )
 
-    updated_inventory = vault.load_inventory()
-    updated_key, updated_deployment, updated_db_key, updated_db = require_db(
-        updated_inventory, deployment["display_name"], db_name
-    )
-    require_running(config, updated_key, updated_deployment)
-    _verify_database_accounts(
+    with protected_database_change(
         config,
-        updated_inventory,
-        updated_key,
-        updated_deployment,
-        updated_db_key,
-        updated_db,
-    )
+        vault,
+        inventory,
+        deployment_key,
+        deployment,
+        "DisableOwner",
+        db["display_name"],
+    ):
+        apply_inventory(
+            config,
+            inventory,
+            _operation(
+                "disable_owner", deployment_key, deployment, db["display_name"]
+            ),
+        )
+
+        updated_inventory = vault.load_inventory()
+        updated_key, updated_deployment, updated_db_key, updated_db = require_db(
+            updated_inventory, deployment["display_name"], db_name
+        )
+        require_running(config, updated_key, updated_deployment)
+        _verify_database_accounts(
+            config,
+            updated_inventory,
+            updated_key,
+            updated_deployment,
+            updated_db_key,
+            updated_db,
+        )
 
     log_event(
         "owner.disable.succeeded",
         deployment=updated_deployment["display_name"],
         database=updated_db["display_name"],
     )
-    print(f"\nOwner account '{updated_db['display_name']}_owner' is now Disabled in MongoDB.")
+    print(
+        f"\nOwner account '{updated_db['display_name']}_owner' is now Disabled in MongoDB."
+    )
     print("Its current Vault credential remains present and will continue to rotate.")
-
 
 def list_databases(
     config: dict[str, Any], vault: VaultClient, deployment_name: str | None = None
