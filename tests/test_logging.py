@@ -6,6 +6,7 @@ import json
 import logging
 import tempfile
 import unittest
+from datetime import datetime as RealDatetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -60,11 +61,17 @@ class LoggingTests(unittest.TestCase):
                 "logging_filename_format": "Controller-%Y%m%d-%H%M.log",
             }
 
-            fake_now = logging_component.datetime(2026, 9, 8, 16, 7, 42)
+            class FixedDatetime:
+                """Minimal datetime stand-in with a deterministic now()."""
+
+                @classmethod
+                def now(cls, tz=None):
+                    return RealDatetime(2026, 9, 8, 16, 7, 42, tzinfo=tz)
+
             with patch.object(
-                logging_component.datetime,
-                "now",
-                return_value=fake_now,
+                logging_component,
+                "datetime",
+                FixedDatetime,
             ):
                 path = logging_component.configure_logging(config)
 
