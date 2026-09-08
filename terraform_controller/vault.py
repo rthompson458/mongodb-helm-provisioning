@@ -87,6 +87,7 @@ class VaultClient:
             "storage_node_name": str(meta.get("storage_node_name", self.default_storage_node_name)),
             "controller_password_version": int(meta.get("controller_password_version", 1)),
             "shard_count": int(meta.get("shard_count", self.default_shards if deployment_type == "ShardedCluster" else 0)),
+            "storage_shard_count": int(meta.get("storage_shard_count", meta.get("shard_count", self.default_shards if deployment_type == "ShardedCluster" else 0))),
             "members_per_shard": int(meta.get("members_per_shard", members if deployment_type == "ShardedCluster" else 0)),
             "mongos_count": int(meta.get("mongos_count", self.default_mongos if deployment_type == "ShardedCluster" else 0)),
             "config_server_count": int(meta.get("config_server_count", self.default_config_servers if deployment_type == "ShardedCluster" else 0)),
