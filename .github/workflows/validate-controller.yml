@@ -1,21 +1,13 @@
 name: Validate terraformController
 
+# This repository now contains only the current terraformController/DBaaS effort.
+# Run the complete validation suite for every pull request and every push to main
+# so structural/documentation/test changes cannot accidentally bypass validation.
 on:
   pull_request:
-    paths:
-      - "terraformController.py"
-      - "terraform_controller/**"
-      - "terraform-dbaas/**"
-      - "terraformController.config"
-      - ".github/workflows/validate-controller.yml"
   push:
     branches:
       - main
-    paths:
-      - "terraformController.py"
-      - "terraform_controller/**"
-      - "terraform-dbaas/**"
-      - "terraformController.config"
 
 jobs:
   validate:
