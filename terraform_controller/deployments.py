@@ -6,13 +6,13 @@ from . import kube
 from .common import ControllerError, iso_utc, normalize_deployment, print_table, utc_now
 from .logging_component import log_event
 from .terraform_runner import apply_inventory
-from .topology import (
-    acquire_topology_lock,
-    describe_topology_lock,
-    read_topology_lock,
-    release_topology_lock,
-    require_no_topology_change,
-    validate_resume,
+from .deployment_lock import (
+    acquire_deployment_lock,
+    describe_deployment_lock,
+    read_deployment_lock,
+    release_deployment_lock,
+    require_no_active_change,
+    validate_topology_resume,
 )
 from .vault import VaultClient
 
@@ -280,7 +280,7 @@ def _delete_deployment(
         )
     inventory = vault.load_inventory()
     key, item = require_deployment(inventory, name, expected_type)
-    require_no_topology_change(config, key, item)
+    require_no_active_change(config, key, item)
     require_running(config, key, item)
 
     if item["databases"]:
@@ -361,9 +361,9 @@ def _resume_or_acquire_lock(
     count: int,
     target: int,
 ) -> dict[str, Any]:
-    existing = read_topology_lock(config, key)
+    existing = read_deployment_lock(config, key)
     if existing:
-        validate_resume(item, existing, action, count)
+        validate_topology_resume(item, existing, action, count)
         print(
             f"Resuming {existing['action']} on ShardedCluster "
             f"'{item['display_name']}' ({existing['start_shards']} -> "
@@ -380,14 +380,15 @@ def _resume_or_acquire_lock(
         return existing
 
     require_running(config, key, item)
-    return acquire_topology_lock(
+    return acquire_deployment_lock(
         config,
         inventory,
         key,
         item,
-        action,
-        int(item["shard_count"]),
-        target,
+        category="topology",
+        action=action,
+        start_shards=int(item["shard_count"]),
+        target_shards=target,
     )
 
 
@@ -414,9 +415,9 @@ def add_shard(
     inventory = vault.load_inventory()
     key, item = require_deployment(inventory, name, "ShardedCluster")
 
-    existing = read_topology_lock(config, key)
+    existing = read_deployment_lock(config, key)
     if existing:
-        validate_resume(item, existing, "AddShard", count)
+        validate_topology_resume(item, existing, "AddShard", count)
         target = int(existing["target_shards"])
         start = int(existing["start_shards"])
         lock = existing
@@ -457,7 +458,7 @@ def add_shard(
             config, key, target, config["sc_ready_timeout"]
         )
 
-        release_topology_lock(config, inventory, key, item, lock)
+        release_deployment_lock(config, inventory, key, item, lock)
     except ControllerError as exc:
         _raise_topology_failure(item, "AddShard", count, exc)
 
@@ -493,10 +494,10 @@ def delete_shard(
 
     inventory = vault.load_inventory()
     key, item = require_deployment(inventory, name, "ShardedCluster")
-    existing = read_topology_lock(config, key)
+    existing = read_deployment_lock(config, key)
 
     if existing:
-        validate_resume(item, existing, "DeleteShard", count)
+        validate_topology_resume(item, existing, "DeleteShard", count)
         start = int(existing["start_shards"])
         target = int(existing["target_shards"])
         lock = existing
@@ -542,14 +543,15 @@ def delete_shard(
             },
         )
 
-        lock = acquire_topology_lock(
+        lock = acquire_deployment_lock(
             config,
             inventory,
             key,
             item,
-            "DeleteShard",
-            start,
-            target,
+            category="topology",
+            action="DeleteShard",
+            start_shards=start,
+            target_shards=target,
         )
 
     log_event(
@@ -581,7 +583,7 @@ def delete_shard(
             item["storage_shard_count"] = target
             apply_inventory(config, inventory)
 
-        release_topology_lock(config, inventory, key, item, lock)
+        release_deployment_lock(config, inventory, key, item, lock)
     except ControllerError as exc:
         _raise_topology_failure(item, "DeleteShard", count, exc)
 
@@ -692,7 +694,7 @@ def _shard_status(
     key: str,
     item: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    lock = read_topology_lock(config, key)
+    lock = read_deployment_lock(config, key)
     status = kube.sharded_cluster_status(
         config, key, _status_count(item, lock)
     )
@@ -730,7 +732,7 @@ def _print_shards(
     ]
     print_table(("SHARD", "STATUS", "READY", "DESIRED", "UPDATED"), rows)
     if lock:
-        print(f"Topology change: {describe_topology_lock(lock)}")
+        print(f"Topology change: {describe_deployment_lock(lock)}")
         if lock["started_at"]:
             print(f"Started:         {lock['started_at']}")
     else:
@@ -812,7 +814,7 @@ def list_shards(
     rows: list[tuple[str, ...]] = []
     for key, item in clusters:
         status, lock = _shard_status(config, key, item)
-        change = describe_topology_lock(lock) if lock else "-"
+        change = describe_deployment_lock(lock) if lock else "-"
         for shard in status["shards"]:
             rows.append(
                 (
