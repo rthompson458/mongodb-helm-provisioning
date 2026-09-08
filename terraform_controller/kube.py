@@ -1,3 +1,14 @@
+"""Read Kubernetes state and wait for MongoDB resources to converge.
+
+Important design boundary:
+- This module READS Kubernetes objects and waits for status changes.
+- It does not create or mutate managed MongoDB resources.
+- Managed changes remain Terraform/lifecycle-script owned.
+
+The status helpers translate raw Kubernetes fields into terms the CLI can show
+clearly: Running, Online, Creating, Degraded, Failed, and Absent.
+"""
+
 from __future__ import annotations
 
 import json
@@ -9,6 +20,7 @@ from .logging_component import log_event
 
 
 def base(config: dict[str, Any]) -> list[str]:
+    """Build the common kubectl command prefix for the configured environment."""
     command = ["kubectl", "--kubeconfig", config["kubeconfig"]]
     if config["kube_context"]:
         command += ["--context", config["kube_context"]]
@@ -16,6 +28,7 @@ def base(config: dict[str, Any]) -> list[str]:
 
 
 def get_json(config: dict[str, Any], resource: str, name: str) -> dict[str, Any] | None:
+    """Return one Kubernetes resource as JSON, or None when it does not exist."""
     result = run_process(
         base(config) + [
             "-n", config["mongodb_namespace"], "get", resource, name, "-o", "json"
@@ -53,6 +66,13 @@ def phase_message(config: dict[str, Any], deployment_key: str) -> str:
 def wait_phase(
     config: dict[str, Any], resource: str, name: str, wanted: str, timeout: int
 ) -> None:
+    """Wait until a resource reaches a requested status.phase.
+
+    A MongoDB resource entering Failed is treated as an immediate failure so the
+    user does not wait for the entire timeout when the Operator already knows
+    the deployment cannot converge.
+    """
+
     deadline = time.monotonic() + timeout
     last = ""
     while time.monotonic() < deadline:
@@ -86,6 +106,8 @@ def wait_phase(
 def wait_absent(
     config: dict[str, Any], resource: str, name: str, timeout: int = 180
 ) -> None:
+    """Wait until Kubernetes reports that a resource no longer exists."""
+
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if get_json(config, resource, name) is None:
@@ -109,6 +131,8 @@ def _statefulset_status(
     *,
     fallback_phase: str = "Unknown",
 ) -> dict[str, Any]:
+    """Translate StatefulSet replica counts into a DBaaS-friendly status."""
+
     obj = get_json(config, "statefulset", name)
     if not obj:
         status = "Failed" if fallback_phase == "Failed" else (
@@ -150,6 +174,13 @@ def sharded_cluster_status(
     deployment_key: str,
     shard_count: int,
 ) -> dict[str, Any]:
+    """Return one combined status snapshot for a ShardedCluster.
+
+    MongoDB creates separate StatefulSets for each shard, config servers, and
+    mongos.  The controller combines them so callers do not need to understand
+    every Kubernetes object name.
+    """
+
     overall = phase(config, deployment_key)
     shards = [
         {
@@ -179,6 +210,8 @@ def wait_sharded_cluster_ready(
     shard_count: int,
     timeout: int,
 ) -> None:
+    """Wait until the cluster and every required component are fully online."""
+
     deadline = time.monotonic() + timeout
     last_signature = ""
     while time.monotonic() < deadline:
