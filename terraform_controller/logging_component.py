@@ -96,7 +96,14 @@ def configure_logging(config: dict[str, Any]) -> Path | None:
     handler.setFormatter(JsonLineFormatter())
     logger.addHandler(handler)
     _LOG_PATH = path
-    log_event("logging.configured", path=str(path), mode=mode, level=level_name)
+    # "level" is the log_event severity argument, so store the configured
+    # textual level under a different structured field name.
+    log_event(
+        "logging.configured",
+        path=str(path),
+        mode=mode,
+        configured_level=level_name,
+    )
     return path
 
 
