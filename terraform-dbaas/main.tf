@@ -817,8 +817,8 @@ resource "terraform_data" "lifecycle_operation" {
     "verify_database_accounts",
     "verify_database_accounts_owner_disabled",
     "verify_database_users_absent",
-    "acquire_topology_lock",
-    "release_topology_lock"
+    "acquire_deployment_lock",
+    "release_deployment_lock"
   ], var.operation.action) ? 1 : 0
 
   input            = var.operation
@@ -833,7 +833,8 @@ resource "terraform_data" "lifecycle_operation" {
       TC_DEPLOYMENT_TYPE        = var.operation.deployment_type
       TC_DATABASE               = var.operation.database
       TC_MEMBERS                = tostring(var.operation.members > 0 ? var.operation.members : var.default_members)
-      TC_TOPOLOGY_ACTION        = var.operation.topology_action
+      TC_LOCK_CATEGORY      = var.operation.lock_category
+      TC_LOCK_ACTION        = var.operation.lock_action
       TC_OPERATION_ID           = var.operation.operation_id
       TC_START_SHARDS           = tostring(var.operation.start_shards)
       TC_TARGET_SHARDS          = tostring(var.operation.target_shards)
