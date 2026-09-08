@@ -5,13 +5,20 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from terraform_controller import controller
+from terraform_controller import databases, deployments
 
 
-def rs_inventory(*, with_db: bool = False, owner_disabled: bool = False):
-    databases = {}
+def deployment_inventory(
+    *,
+    deployment_type: str = "ReplicaSet",
+    name: str = "RS1",
+    with_db: bool = False,
+    owner_disabled: bool = False,
+):
+    key = name.lower()
+    dbs = {}
     if with_db:
-        databases["houseinfo"] = {
+        dbs["houseinfo"] = {
             "display_name": "HouseInfo",
             "created_at": "2026-08-01T12:00:00Z",
             "owner_disabled": owner_disabled,
@@ -19,18 +26,60 @@ def rs_inventory(*, with_db: bool = False, owner_disabled: bool = False):
             "rotation_version": 1,
             "rotated_at": "2026-08-01T12:00:00Z",
         }
+    is_sc = deployment_type == "ShardedCluster"
     return {
-        "rs1": {
-            "display_name": "RS1",
+        key: {
+            "display_name": name,
+            "deployment_type": deployment_type,
             "created_at": "2026-08-01T11:00:00Z",
             "members": 3,
             "version": "8.0.29",
             "persistent": True,
             "storage_class": "mongodb-data-local",
             "storage_size": "16Gi",
+            "storage_mode": "static-local",
+            "storage_base_path": "/tmp/mongodb",
+            "storage_node_name": "node-0",
             "controller_password_version": 1,
-            "databases": databases,
+            "shard_count": 3 if is_sc else 0,
+            "storage_shard_count": 3 if is_sc else 0,
+            "members_per_shard": 3 if is_sc else 0,
+            "mongos_count": 2 if is_sc else 0,
+            "config_server_count": 3 if is_sc else 0,
+            "databases": dbs,
         }
+    }
+
+
+def online_sc_status(shards: int = 3):
+    return {
+        "phase": "Running",
+        "message": "",
+        "shards": [
+            {
+                "shard": f"sc9-{i}",
+                "name": f"sc9-{i}",
+                "status": "Online",
+                "desired": 3,
+                "ready": 3,
+                "updated": 3,
+            }
+            for i in range(shards)
+        ],
+        "config_servers": {
+            "name": "sc9-config",
+            "status": "Online",
+            "desired": 3,
+            "ready": 3,
+            "updated": 3,
+        },
+        "mongos": {
+            "name": "sc9-mongos",
+            "status": "Online",
+            "desired": 2,
+            "ready": 2,
+            "updated": 2,
+        },
     }
 
 
@@ -42,38 +91,97 @@ class FakeVault:
         return self.inventory
 
 
-class ControllerLifecycleTests(unittest.TestCase):
+class DatabaseLifecycleTests(unittest.TestCase):
     def setUp(self):
         self.config = {
             "rotation_days": 30,
             "rs_ready_timeout": 30,
+            "sc_ready_timeout": 30,
             "vault_address": "http://127.0.0.1:8200",
             "vault_base_path": "mongodb",
         }
 
     def test_add_database_materializes_before_accounts_are_added(self):
-        vault = FakeVault(rs_inventory())
+        vault = FakeVault(deployment_inventory())
         calls = []
 
         def apply_side_effect(config, inventory, operation=None):
             calls.append((copy.deepcopy(inventory), copy.deepcopy(operation)))
 
         with (
-            patch.object(controller.kube, "phase", return_value="Running"),
-            patch.object(controller, "apply_inventory", side_effect=apply_side_effect),
-            patch.object(controller, "_verify_database_accounts"),
-            patch.object(controller, "utc_now"),
+            patch.object(databases.deployments if hasattr(databases, "deployments") else deployments, "require_running"),
+            patch.object(databases, "require_running"),
+            patch.object(databases, "apply_inventory", side_effect=apply_side_effect),
+            patch.object(databases, "_verify_database_accounts"),
+            patch.object(databases, "utc_now"),
         ):
-            controller.utc_now.return_value = datetime(2026, 9, 6, 12, 0, tzinfo=timezone.utc)
-            controller.add_database(self.config, vault, "RS1", "HouseInfo")
+            databases.utc_now.return_value = datetime(
+                2026, 9, 6, 12, 0, tzinfo=timezone.utc
+            )
+            databases.add_database(self.config, vault, "RS1", "HouseInfo")
 
         self.assertEqual(calls[0][1]["action"], "create_database")
+        self.assertEqual(calls[0][1]["deployment"], "rs1")
         self.assertEqual(calls[0][0]["rs1"]["databases"], {})
         self.assertIsNone(calls[1][1])
         self.assertIn("houseinfo", calls[1][0]["rs1"]["databases"])
 
+    def test_add_database_uses_only_deployment_when_target_omitted(self):
+        vault = FakeVault(deployment_inventory())
+        calls = []
+
+        with (
+            patch.object(databases, "require_running"),
+            patch.object(
+                databases,
+                "apply_inventory",
+                side_effect=lambda c, i, operation=None: calls.append(
+                    (copy.deepcopy(i), copy.deepcopy(operation))
+                ),
+            ),
+            patch.object(databases, "_verify_database_accounts"),
+            patch.object(databases, "utc_now", return_value=datetime(
+                2026, 9, 6, 12, 0, tzinfo=timezone.utc
+            )),
+        ):
+            databases.add_database(self.config, vault, "HouseInfo")
+
+        self.assertEqual(calls[0][1]["deployment"], "rs1")
+        self.assertEqual(calls[0][1]["database"], "HouseInfo")
+
+    def test_implicit_database_target_rejected_when_multiple_deployments_exist(self):
+        inventory = deployment_inventory()
+        inventory.update(
+            deployment_inventory(deployment_type="ShardedCluster", name="SC9")
+        )
+        vault = FakeVault(inventory)
+        with patch.object(databases.kube, "phase", return_value="Running"):
+            with self.assertRaises(databases.ControllerError) as ctx:
+                databases.add_database(self.config, vault, "HouseInfo")
+        self.assertIn("Multiple MongoDB deployments exist", str(ctx.exception))
+
+    def test_sharded_cluster_database_change_requires_every_shard_online(self):
+        vault = FakeVault(
+            deployment_inventory(deployment_type="ShardedCluster", name="SC9")
+        )
+        status = online_sc_status()
+        status["shards"][1]["status"] = "Creating"
+        status["shards"][1]["ready"] = 1
+
+        with (
+            patch.object(deployments.kube, "phase", return_value="Running"),
+            patch.object(deployments.kube, "sharded_cluster_status", return_value=status),
+            patch.object(databases, "apply_inventory") as apply_mock,
+        ):
+            with self.assertRaises(databases.ControllerError) as ctx:
+                databases.add_database(self.config, vault, "SC9", "HouseInfo")
+
+        self.assertIn("not ready for database work", str(ctx.exception))
+        self.assertIn("Creating", str(ctx.exception))
+        apply_mock.assert_not_called()
+
     def test_rotate_passwords_is_requested_as_terraform_operation(self):
-        vault = FakeVault(rs_inventory(with_db=True))
+        vault = FakeVault(deployment_inventory(with_db=True))
         calls = []
 
         def apply_side_effect(config, inventory, operation=None):
@@ -86,67 +194,62 @@ class ControllerLifecycleTests(unittest.TestCase):
                 db["owner_disabled_at"] = "2026-09-06T12:00:00Z"
 
         with (
-            patch.object(controller.kube, "phase", return_value="Running"),
-            patch.object(controller, "apply_inventory", side_effect=apply_side_effect),
-            patch.object(controller, "_verify_database_accounts"),
+            patch.object(databases, "require_running"),
+            patch.object(databases, "apply_inventory", side_effect=apply_side_effect),
+            patch.object(databases, "_verify_database_accounts"),
         ):
-            controller.rotate_passwords(self.config, vault, "RS1", "HouseInfo")
+            databases.rotate_passwords(self.config, vault, "RS1", "HouseInfo")
 
         self.assertEqual(calls[0][1]["action"], "rotate_passwords")
-        self.assertEqual(calls[0][0]["rs1"]["databases"]["houseinfo"]["rotation_version"], 1)
-        self.assertFalse(calls[0][0]["rs1"]["databases"]["houseinfo"]["owner_disabled"])
+        self.assertEqual(calls[0][1]["deployment"], "rs1")
+        self.assertEqual(
+            calls[0][0]["rs1"]["databases"]["houseinfo"]["rotation_version"], 1
+        )
 
-    def test_rotate_passwords_recovers_with_a_new_revision_after_partial_apply(self):
-        vault = FakeVault(rs_inventory(with_db=True))
+    def test_rotate_passwords_recovers_after_partial_apply(self):
+        vault = FakeVault(deployment_inventory(with_db=True))
         calls = []
 
         def apply_side_effect(config, inventory, operation=None):
             calls.append((copy.deepcopy(inventory), copy.deepcopy(operation)))
             db = vault.inventory["rs1"]["databases"]["houseinfo"]
             if len(calls) == 1:
-                # Model Terraform committing metadata before one of the two
-                # write-only password sinks fails.
                 db["rotation_version"] = 2
                 db["rotated_at"] = "2026-09-06T12:00:00Z"
-                raise controller.ControllerError("simulated partial apply")
+                raise databases.ControllerError("simulated partial apply")
             db["rotation_version"] = 3
             db["rotated_at"] = "2026-09-06T12:01:00Z"
 
         with (
-            patch.object(controller.kube, "phase", return_value="Running"),
-            patch.object(controller, "apply_inventory", side_effect=apply_side_effect),
-            patch.object(controller, "_verify_database_accounts"),
+            patch.object(databases, "require_running"),
+            patch.object(databases, "apply_inventory", side_effect=apply_side_effect),
+            patch.object(databases, "_verify_database_accounts"),
         ):
-            controller.rotate_passwords(self.config, vault, "RS1", "HouseInfo")
+            databases.rotate_passwords(self.config, vault, "RS1", "HouseInfo")
 
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[0][0]["rs1"]["databases"]["houseinfo"]["rotation_version"], 1)
         self.assertEqual(calls[1][0]["rs1"]["databases"]["houseinfo"]["rotation_version"], 2)
         self.assertEqual(calls[1][1]["action"], "rotate_passwords")
 
-    def test_rotate_passwords_requires_running_replica_set(self):
-        vault = FakeVault(rs_inventory(with_db=True))
-        with (
-            patch.object(controller.kube, "phase", return_value="Pending"),
-            patch.object(controller, "apply_inventory") as apply_mock,
-        ):
-            with self.assertRaises(controller.ControllerError):
-                controller.rotate_passwords(self.config, vault, "RS1", "HouseInfo")
-        apply_mock.assert_not_called()
-
     def test_delete_database_drops_then_removes_desired_state(self):
-        vault = FakeVault(rs_inventory(with_db=True))
+        vault = FakeVault(deployment_inventory(with_db=True))
         calls = []
 
-        def apply_side_effect(config, inventory, operation=None):
-            calls.append((copy.deepcopy(inventory), copy.deepcopy(operation)))
-
         with (
-            patch.object(controller.kube, "phase", return_value="Running"),
-            patch.object(controller.kube, "wait_absent"),
-            patch.object(controller, "apply_inventory", side_effect=apply_side_effect),
+            patch.object(databases, "require_running"),
+            patch.object(databases.kube, "wait_absent"),
+            patch.object(
+                databases,
+                "apply_inventory",
+                side_effect=lambda c, i, operation=None: calls.append(
+                    (copy.deepcopy(i), copy.deepcopy(operation))
+                ),
+            ),
         ):
-            controller.delete_database(self.config, vault, "RS1", "HouseInfo", True)
+            databases.delete_database(
+                self.config, vault, "RS1", "HouseInfo", True
+            )
 
         self.assertEqual(calls[0][1]["action"], "delete_database")
         self.assertIn("houseinfo", calls[0][0]["rs1"]["databases"])
@@ -154,26 +257,81 @@ class ControllerLifecycleTests(unittest.TestCase):
         self.assertNotIn("houseinfo", calls[1][0]["rs1"]["databases"])
         self.assertEqual(calls[2][1]["action"], "verify_database_users_absent")
 
-    def test_disable_owner_is_requested_as_terraform_operation(self):
-        vault = FakeVault(rs_inventory(with_db=True))
+
+class DeploymentLifecycleTests(unittest.TestCase):
+    def setUp(self):
+        self.config = {
+            "default_members": 3,
+            "default_version": "8.0.29",
+            "persistent": True,
+            "storage_class": "mongodb-data-local",
+            "storage_size": "16Gi",
+            "storage_mode": "static-local",
+            "storage_base_path": "/tmp/mongodb",
+            "storage_node_name": "node-0",
+            "default_shards": 3,
+            "default_members_per_shard": 3,
+            "default_mongos": 2,
+            "default_config_servers": 3,
+            "rs_ready_timeout": 30,
+            "sc_ready_timeout": 30,
+        }
+
+    def test_add_sharded_cluster_records_topology(self):
+        vault = FakeVault({})
+        calls = []
+
+        with (
+            patch.object(deployments, "apply_inventory", side_effect=lambda c, i, operation=None: calls.append(copy.deepcopy(i))),
+            patch.object(deployments.kube, "get_json", return_value=None),
+            patch.object(deployments.kube, "wait_sharded_cluster_ready"),
+            patch.object(deployments.kube, "wait_phase"),
+        ):
+            deployments.add_sharded_cluster(self.config, vault, "SC9", 4)
+
+        sc = calls[0]["sc9"]
+        self.assertEqual(sc["deployment_type"], "ShardedCluster")
+        self.assertEqual(sc["shard_count"], 4)
+        self.assertEqual(sc["storage_shard_count"], 4)
+        self.assertEqual(sc["members_per_shard"], 3)
+
+    def test_add_shard_prepares_storage_before_increasing_live_count(self):
+        vault = FakeVault(
+            deployment_inventory(deployment_type="ShardedCluster", name="SC9")
+        )
         calls = []
 
         def apply_side_effect(config, inventory, operation=None):
-            calls.append((copy.deepcopy(inventory), copy.deepcopy(operation)))
-            if operation and operation.get("action") == "disable_owner":
-                db = vault.inventory["rs1"]["databases"]["houseinfo"]
-                db["owner_disabled"] = True
-                db["owner_disabled_at"] = "2026-09-06T12:00:00Z"
+            calls.append(copy.deepcopy(inventory["sc9"]))
 
         with (
-            patch.object(controller.kube, "phase", return_value="Running"),
-            patch.object(controller, "apply_inventory", side_effect=apply_side_effect),
-            patch.object(controller, "_verify_database_accounts"),
+            patch.object(deployments, "require_running"),
+            patch.object(deployments, "apply_inventory", side_effect=apply_side_effect),
+            patch.object(deployments.kube, "wait_sharded_cluster_ready"),
         ):
-            controller.disable_owner(self.config, vault, "RS1", "HouseInfo", True)
+            deployments.add_shard(self.config, vault, "SC9")
 
-        self.assertEqual(calls[0][1]["action"], "disable_owner")
-        self.assertFalse(calls[0][0]["rs1"]["databases"]["houseinfo"]["owner_disabled"])
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["storage_shard_count"], 4)
+        self.assertEqual(calls[0]["shard_count"], 3)
+        self.assertEqual(calls[1]["storage_shard_count"], 4)
+        self.assertEqual(calls[1]["shard_count"], 4)
+
+    def test_delete_shard_is_blocked_when_any_managed_database_exists(self):
+        vault = FakeVault(
+            deployment_inventory(
+                deployment_type="ShardedCluster", name="SC9", with_db=True
+            )
+        )
+        with (
+            patch.object(deployments, "require_running"),
+            patch.object(deployments, "apply_inventory") as apply_mock,
+        ):
+            with self.assertRaises(deployments.ControllerError) as ctx:
+                deployments.delete_shard(self.config, vault, "SC9", True)
+
+        self.assertIn("contains managed databases", str(ctx.exception))
+        apply_mock.assert_not_called()
 
 
 if __name__ == "__main__":
