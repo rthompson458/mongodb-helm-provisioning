@@ -12,8 +12,18 @@ from terraform_controller import kube
 from .runner import HarnessRunner
 
 
-def _wait_for_lock(runner: HarnessRunner, deployment_key: str, seconds: int = 30) -> bool:
-    """Poll Kubernetes until the Terraform-created deployment lock appears."""
+def _wait_for_lock(
+    runner: HarnessRunner,
+    deployment_key: str,
+    process: subprocess.Popen[str],
+    seconds: int = 300,
+) -> bool:
+    """Poll until the Terraform-created lock appears or AddShard exits.
+
+    Terraform may need to refresh the repository and initialize providers before
+    it reaches the lock operation, so this timeout is intentionally longer than
+    a simple Kubernetes polling timeout.
+    """
 
     config = load_config(runner.context.config_path)
     command = kube.base(config) + [
@@ -28,6 +38,9 @@ def _wait_for_lock(runner: HarnessRunner, deployment_key: str, seconds: int = 30
 
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return False
+
         result = subprocess.run(
             command,
             cwd=runner.context.repo_root,
@@ -63,7 +76,7 @@ def run(runner: HarnessRunner) -> None:
     # AddShard runs in the background so the harness can issue a second command
     # while the first operation owns the Terraform-created deployment lock.
     process = runner.start_controller("AddShard", sc, "1")
-    lock_seen = _wait_for_lock(runner, sc.lower())
+    lock_seen = _wait_for_lock(runner, sc.lower(), process)
     runner.check(
         "Observe Terraform-created deployment lock",
         lock_seen,
