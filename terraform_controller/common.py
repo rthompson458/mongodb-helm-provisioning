@@ -7,7 +7,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-REPLICA_SET_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,28}[A-Za-z0-9])?$")
+DEPLOYMENT_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,28}[A-Za-z0-9])?$")
+REPLICA_SET_RE = DEPLOYMENT_RE
 DATABASE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,47}$")
 ACCOUNT_TYPES = {
     "owner": {"display": "Owner", "suffix": "owner"},
@@ -15,6 +16,7 @@ ACCOUNT_TYPES = {
     "readwrite": {"display": "ReadWrite", "suffix": "readWrite"},
 }
 SYSTEM_DATABASES = {"admin", "config", "local"}
+DEPLOYMENT_TYPES = {"ReplicaSet", "ShardedCluster"}
 
 
 class ControllerError(RuntimeError):
@@ -37,14 +39,18 @@ def parse_utc(value: str) -> datetime:
     return (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
 
 
-def normalize_replica_set(name: str) -> tuple[str, str]:
+def normalize_deployment(name: str) -> tuple[str, str]:
     display = name.strip()
-    if not display or not REPLICA_SET_RE.fullmatch(display):
+    if not display or not DEPLOYMENT_RE.fullmatch(display):
         raise ControllerError(
-            "ReplicaSet name must be 1-30 characters, use only letters, numbers, or hyphens, "
+            "Deployment name must be 1-30 characters, use only letters, numbers, or hyphens, "
             "and start/end with a letter or number."
         )
     return display.lower(), display
+
+
+def normalize_replica_set(name: str) -> tuple[str, str]:
+    return normalize_deployment(name)
 
 
 def normalize_database(name: str) -> tuple[str, str]:
@@ -104,20 +110,22 @@ def print_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> None:
         print("  ".join(row[i].ljust(widths[i]) for i in range(len(row))))
 
 
-def account_resource_name(rs_key: str, db_key: str, account_key: str) -> str:
+def account_resource_name(deployment_key: str, db_key: str, account_key: str) -> str:
     import hashlib
-    digest = hashlib.md5(f"{rs_key}/{db_key}/{account_key}".encode()).hexdigest()[:6]
-    return f"tc-{rs_key[:8]}-{db_key[:10]}-{account_key}-{digest}"
+    digest = hashlib.md5(f"{deployment_key}/{db_key}/{account_key}".encode()).hexdigest()[:6]
+    return f"tc-{deployment_key[:8]}-{db_key[:10]}-{account_key}-{digest}"
 
 
-def database_rows(rs: dict[str, Any], db: dict[str, Any], rotation_days: int) -> list[tuple[str, ...]]:
+def database_rows(
+    deployment: dict[str, Any], db: dict[str, Any], rotation_days: int
+) -> list[tuple[str, ...]]:
     rotates = rotation_remaining(db["rotated_at"], rotation_days)
     rows = []
     for key in ("owner", "readwrite", "read"):
         account = ACCOUNT_TYPES[key]
         status = "Disabled" if key == "owner" and db["owner_disabled"] else "Enabled"
         rows.append((
-            rs["display_name"], db["display_name"],
+            deployment["display_name"], db["display_name"],
             f"{db['display_name']}_{account['suffix']}", account["display"], status, rotates,
         ))
     return rows
