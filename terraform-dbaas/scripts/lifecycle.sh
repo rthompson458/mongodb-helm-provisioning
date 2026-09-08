@@ -301,13 +301,14 @@ EOF
     cleanup_local_pv "${TC_PV_NAME}"
     ;;
 
-  acquire_topology_lock)
-    : "${TC_TOPOLOGY_ACTION:?TC_TOPOLOGY_ACTION is required}"
+  acquire_deployment_lock)
+    : "${TC_LOCK_CATEGORY:?TC_LOCK_CATEGORY is required}"
+    : "${TC_LOCK_ACTION:?TC_LOCK_ACTION is required}"
     : "${TC_OPERATION_ID:?TC_OPERATION_ID is required}"
     : "${TC_START_SHARDS:?TC_START_SHARDS is required}"
     : "${TC_TARGET_SHARDS:?TC_TARGET_SHARDS is required}"
 
-    lock="tc-topology-lock-${TC_DEPLOYMENT}"
+    lock="tc-deployment-lock-${TC_DEPLOYMENT}"
     started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
     cat <<EOF | "${K[@]}" -n "${TC_NAMESPACE}" create -f - >/dev/null
@@ -319,19 +320,20 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: terraformController
     dbaas.deployment: ${TC_DEPLOYMENT}
-    dbaas.lock: topology
+    dbaas.lock: deployment
 data:
   operation_id: "${TC_OPERATION_ID}"
-  action: "${TC_TOPOLOGY_ACTION}"
+  category: "${TC_LOCK_CATEGORY}"
+  action: "${TC_LOCK_ACTION}"
   start_shards: "${TC_START_SHARDS}"
   target_shards: "${TC_TARGET_SHARDS}"
   started_at: "${started_at}"
 EOF
     ;;
 
-  release_topology_lock)
+  release_deployment_lock)
     : "${TC_OPERATION_ID:?TC_OPERATION_ID is required}"
-    lock="tc-topology-lock-${TC_DEPLOYMENT}"
+    lock="tc-deployment-lock-${TC_DEPLOYMENT}"
     current_id=$("${K[@]}" -n "${TC_NAMESPACE}" get configmap "${lock}" -o jsonpath='{.data.operation_id}' 2>/dev/null || true)
 
     if [[ -z "${current_id}" ]]; then
