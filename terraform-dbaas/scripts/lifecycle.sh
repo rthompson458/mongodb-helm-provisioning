@@ -2,9 +2,13 @@
 set -euo pipefail
 
 : "${TC_ACTION:?TC_ACTION is required}"
-: "${TC_REPLICA_SET:?TC_REPLICA_SET is required}"
 : "${TC_NAMESPACE:?TC_NAMESPACE is required}"
 : "${TC_KUBECONFIG:?TC_KUBECONFIG is required}"
+
+# ReplicaSet storage resources created by older Terraform state still pass
+# TC_REPLICA_SET. All new generic lifecycle operations pass TC_DEPLOYMENT.
+TC_DEPLOYMENT="${TC_DEPLOYMENT:-${TC_REPLICA_SET:-}}"
+: "${TC_DEPLOYMENT:?TC_DEPLOYMENT or TC_REPLICA_SET is required}"
 
 K=(kubectl --kubeconfig "${TC_KUBECONFIG}")
 if [[ -n "${TC_KUBE_CONTEXT:-}" ]]; then
@@ -12,8 +16,8 @@ if [[ -n "${TC_KUBE_CONTEXT:-}" ]]; then
 fi
 
 run_mongo_job() {
-  local connection_secret="${1:-tc-${TC_REPLICA_SET}-admin-connection}"
-  local job="tc-runtime-${TC_REPLICA_SET:0:12}-$(date +%s)-${RANDOM}"
+  local connection_secret="${1:-tc-${TC_DEPLOYMENT}-admin-connection}"
+  local job="tc-runtime-${TC_DEPLOYMENT:0:12}-$(date +%s)-${RANDOM}"
   local manifest
 
   manifest=$(cat <<EOF
@@ -24,7 +28,7 @@ metadata:
   namespace: ${TC_NAMESPACE}
   labels:
     app.kubernetes.io/managed-by: terraformController
-    dbaas.replica-set: ${TC_REPLICA_SET}
+    dbaas.deployment: ${TC_DEPLOYMENT}
 spec:
   backoffLimit: 0
   ttlSecondsAfterFinished: 120
@@ -32,7 +36,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/managed-by: terraformController
-        dbaas.replica-set: ${TC_REPLICA_SET}
+        dbaas.deployment: ${TC_DEPLOYMENT}
     spec:
       restartPolicy: Never
       containers:
@@ -89,8 +93,8 @@ account_resource_name() {
   local account="$1"
   local db_key="${TC_DATABASE,,}"
   local digest
-  digest=$(python3 -c 'import hashlib,sys; print(hashlib.md5(sys.argv[1].encode()).hexdigest()[:6])' "${TC_REPLICA_SET}/${db_key}/${account}")
-  printf 'tc-%s-%s-%s-%s' "${TC_REPLICA_SET:0:8}" "${db_key:0:10}" "${account}" "${digest}"
+  digest=$(python3 -c 'import hashlib,sys; print(hashlib.md5(sys.argv[1].encode()).hexdigest()[:6])' "${TC_DEPLOYMENT}/${db_key}/${account}")
+  printf 'tc-%s-%s-%s-%s' "${TC_DEPLOYMENT:0:8}" "${db_key:0:10}" "${account}" "${digest}"
 }
 
 verify_account() {
@@ -164,6 +168,65 @@ verify_owner_absent() {
   return 1
 }
 
+prepare_local_pv() {
+  local pv="$1"
+  local component="$2"
+  : "${TC_STORAGE_BASE_PATH:?TC_STORAGE_BASE_PATH is required}"
+  : "${TC_STORAGE_NODE_NAME:?TC_STORAGE_NODE_NAME is required}"
+  : "${TC_STORAGE_CLASS:?TC_STORAGE_CLASS is required}"
+  : "${TC_STORAGE_SIZE:?TC_STORAGE_SIZE is required}"
+
+  local path="${TC_STORAGE_BASE_PATH%/}/${pv}"
+  docker exec "${TC_STORAGE_NODE_NAME}" mkdir -p "$path"
+
+  cat <<EOF | "${K[@]}" apply -f - >/dev/null
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ${pv}
+  labels:
+    app.kubernetes.io/managed-by: terraformController
+    dbaas.deployment: ${TC_DEPLOYMENT}
+    dbaas.sharded-cluster: ${TC_DEPLOYMENT}
+    dbaas.component: ${component}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  capacity:
+    storage: ${TC_STORAGE_SIZE}
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ${TC_STORAGE_CLASS}
+  volumeMode: Filesystem
+  local:
+    path: ${path}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values:
+                - ${TC_STORAGE_NODE_NAME}
+EOF
+}
+
+cleanup_local_pv() {
+  local pv="$1"
+  : "${TC_STORAGE_BASE_PATH:?TC_STORAGE_BASE_PATH is required}"
+  : "${TC_STORAGE_NODE_NAME:?TC_STORAGE_NODE_NAME is required}"
+
+  local claim claim_ns
+  claim=$("${K[@]}" get pv "$pv" -o jsonpath='{.spec.claimRef.name}' 2>/dev/null || true)
+  claim_ns=$("${K[@]}" get pv "$pv" -o jsonpath='{.spec.claimRef.namespace}' 2>/dev/null || true)
+  claim_ns="${claim_ns:-${TC_NAMESPACE}}"
+
+  if [[ -n "$claim" ]]; then
+    "${K[@]}" -n "$claim_ns" delete pvc "$claim" --ignore-not-found=true --wait=true >/dev/null
+  fi
+  "${K[@]}" delete pv "$pv" --ignore-not-found=true --wait=true >/dev/null
+  docker exec "${TC_STORAGE_NODE_NAME}" rm -rf "${TC_STORAGE_BASE_PATH%/}/${pv}"
+}
+
 case "${TC_ACTION}" in
   prepare_replica_set_storage)
     : "${TC_STORAGE_BASE_PATH:?TC_STORAGE_BASE_PATH is required}"
@@ -173,7 +236,7 @@ case "${TC_ACTION}" in
     : "${TC_MEMBERS:?TC_MEMBERS is required}"
 
     for ((i=0; i<TC_MEMBERS; i++)); do
-      pv="${TC_REPLICA_SET}-${i}"
+      pv="${TC_DEPLOYMENT}-${i}"
       path="${TC_STORAGE_BASE_PATH%/}/${pv}"
       docker exec "${TC_STORAGE_NODE_NAME}" mkdir -p "$path"
 
@@ -184,7 +247,7 @@ metadata:
   name: ${pv}
   labels:
     app.kubernetes.io/managed-by: terraformController
-    dbaas.replica-set: ${TC_REPLICA_SET}
+    dbaas.replica-set: ${TC_DEPLOYMENT}
     dbaas.member: "${i}"
 spec:
   accessModes:
@@ -214,13 +277,28 @@ EOF
     : "${TC_MEMBERS:?TC_MEMBERS is required}"
 
     for ((i=0; i<TC_MEMBERS; i++)); do
-      "${K[@]}" -n "${TC_NAMESPACE}" delete pvc "data-${TC_REPLICA_SET}-${i}" --ignore-not-found=true --wait=true >/dev/null 2>&1 || true
+      "${K[@]}" -n "${TC_NAMESPACE}" delete pvc "data-${TC_DEPLOYMENT}-${i}" --ignore-not-found=true --wait=true >/dev/null 2>&1 || true
     done
     for ((i=0; i<TC_MEMBERS; i++)); do
-      pv="${TC_REPLICA_SET}-${i}"
+      pv="${TC_DEPLOYMENT}-${i}"
       "${K[@]}" delete pv "$pv" --ignore-not-found=true --wait=true >/dev/null 2>&1 || true
       docker exec "${TC_STORAGE_NODE_NAME}" rm -rf "${TC_STORAGE_BASE_PATH%/}/${pv}" || true
     done
+    ;;
+
+  prepare_sharded_cluster_volume)
+    : "${TC_PV_NAME:?TC_PV_NAME is required}"
+    : "${TC_COMPONENT:?TC_COMPONENT is required}"
+    if [[ "${TC_COMPONENT}" != "shard" && "${TC_COMPONENT}" != "config" ]]; then
+      echo "TC_COMPONENT must be shard or config." >&2
+      exit 2
+    fi
+    prepare_local_pv "${TC_PV_NAME}" "${TC_COMPONENT}"
+    ;;
+
+  cleanup_sharded_cluster_volume)
+    : "${TC_PV_NAME:?TC_PV_NAME is required}"
+    cleanup_local_pv "${TC_PV_NAME}"
     ;;
 
   create_database)
@@ -245,7 +323,7 @@ EOF
     run_mongo_job
     ;;
 
-  validate_replica_set_empty)
+  validate_deployment_empty)
     : "${TC_MONGO_IMAGE:?TC_MONGO_IMAGE is required}"
     js="const p=new Set(['admin','config','local']);const n=db.adminCommand({listDatabases:1,nameOnly:true}).databases.map(x=>x.name).filter(x=>!p.has(x)).sort();if(n.length){print('TC_BLOCKED='+JSON.stringify(n));quit(42);}print('TC_RESULT=EMPTY');"
     export TC_JS_JSON
