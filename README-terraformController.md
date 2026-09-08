@@ -590,25 +590,127 @@ Logging is implemented by:
 terraform_controller/logging_component.py
 ```
 
-Deployment locking is implemented by:
+Business/lifecycle code sends events to the logging component. Passwords, Vault
+tokens, and secret values are not intentionally logged.
 
-```text
-terraform_controller/deployment_lock.py
-```
+The controller reads all log-file behavior from `terraformController.config`.
 
-Business/lifecycle code sends events to the logging component. Passwords, Vault tokens, and secret values are not intentionally logged.
-
-Default logging:
+Default configuration:
 
 ```ini
 [Logging]
 enabled = true
 level = INFO
-directory = ~/.local/state/terraformController/logs
-mode = per-run
-filename_pattern = terraformController-%Y%m%d-%H%M%S-{pid}.jsonl
-retention_days = 30
+directory = logs
+mode = append
+filename_format =
 ```
+
+### Logging directory
+
+`directory` may be relative or absolute.
+
+Relative example:
+
+```ini
+directory = logs
+```
+
+A relative path is resolved from the directory containing
+`terraformController.config`, not from the shell's current working directory.
+With the repository's default config, the log directory is therefore:
+
+```text
+<repository>/logs
+```
+
+Absolute example:
+
+```ini
+directory = /var/log/terraformController
+```
+
+The directory is created automatically when logging starts.
+
+### Append versus overwrite
+
+Supported values:
+
+```text
+append
+overwrite
+```
+
+`append` preserves an existing selected log file and writes new JSON log events
+at the end.
+
+`overwrite` truncates the selected log file when the controller starts and
+writes a fresh run to that file.
+
+### Log file name
+
+If `filename_format` is blank:
+
+```ini
+filename_format =
+```
+
+the controller uses:
+
+```text
+Controller.log
+```
+
+If a format is supplied, standard Python/Unix `strftime` tokens are expanded
+when the controller starts.
+
+Common tokens:
+
+```text
+%Y = four-digit year
+%m = two-digit month
+%d = two-digit day
+%H = hour on a 24-hour clock
+%M = minute
+%S = second
+```
+
+Important:
+
+```text
+%m = MONTH
+%M = MINUTE
+```
+
+Example:
+
+```ini
+filename_format = Controller-%Y%m%d-%H%M.log
+```
+
+could produce:
+
+```text
+Controller-20260908-1607.log
+```
+
+Another example:
+
+```ini
+filename_format = %Y%m%d-%H%M%S-Controller.log
+```
+
+could produce:
+
+```text
+20260908-160742-Controller.log
+```
+
+`filename_format` is a file name only. Directory information belongs in
+`directory`.
+
+The log content remains structured JSON Lines: one JSON object per log event,
+even when the configured file name uses a normal `.log` extension.
 
 ## Local static storage
 
