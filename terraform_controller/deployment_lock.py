@@ -185,6 +185,7 @@ def validate_topology_resume(
 @contextmanager
 def protected_database_change(
     config: dict[str, Any],
+    vault: Any,
     inventory: dict[str, dict[str, Any]],
     deployment_key: str,
     deployment: dict[str, Any],
@@ -210,10 +211,12 @@ def protected_database_change(
     try:
         yield
     finally:
+        latest_inventory = vault.load_inventory()
+        latest_deployment = latest_inventory.get(deployment_key, deployment)
         release_deployment_lock(
             config,
-            inventory,
+            latest_inventory,
             deployment_key,
-            deployment,
+            latest_deployment,
             lock,
         )
