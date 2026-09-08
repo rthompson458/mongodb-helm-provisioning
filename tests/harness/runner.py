@@ -82,8 +82,7 @@ class HarnessRunner:
             if expect_success
             else completed.returncode != 0
         )
-        combined = f"{completed.stdout}
-{completed.stderr}"
+        combined = completed.stdout + "\n" + completed.stderr
         text_ok = expected_text is None or expected_text in combined
         passed = exit_ok and text_ok
 
@@ -179,8 +178,7 @@ class HarnessRunner:
                 )
             )
 
-        combined = f"{stdout}
-{stderr}"
+        combined = stdout + "\n" + stderr
         passed = process.returncode == 0 and (
             expected_text is None or expected_text in combined
         )
