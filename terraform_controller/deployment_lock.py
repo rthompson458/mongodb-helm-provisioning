@@ -1,3 +1,17 @@
+"""Serialize mutating operations on one ShardedCluster.
+
+Why this exists:
+Kubernetes can still report a ShardedCluster as Running while Terraform is
+preparing storage or changing shardCount.  A simple phase check therefore does
+not prevent two shells from starting conflicting operations at the same time.
+
+The lock is a Kubernetes ConfigMap, but Python NEVER creates or deletes it
+directly.  Python requests acquire/release actions through Terraform, and
+terraform-dbaas/scripts/lifecycle.sh performs the atomic kubectl create/delete.
+
+Read-only commands do not take this lock.
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -13,12 +27,15 @@ LOCK_PREFIX = "tc-deployment-lock-"
 
 
 def lock_name(deployment_key: str) -> str:
+    """Return the deterministic ConfigMap name used for one deployment lock."""
     return f"{LOCK_PREFIX}{deployment_key}"
 
 
 def read_deployment_lock(
     config: dict[str, Any], deployment_key: str
 ) -> dict[str, Any] | None:
+    """Read and validate the current lock ConfigMap, if one exists."""
+
     obj = kube.get_json(config, "configmap", lock_name(deployment_key))
     if not obj:
         return None
@@ -41,6 +58,7 @@ def read_deployment_lock(
 
 
 def describe_deployment_lock(lock: dict[str, Any]) -> str:
+    """Return a short description suitable for status/error messages."""
     if lock["category"] == "topology":
         return (
             f"{lock['action']} {lock['start_shards']} -> "
@@ -56,6 +74,8 @@ def require_no_active_change(
     deployment_key: str,
     deployment: dict[str, Any],
 ) -> None:
+    """Block a new SC mutation when another managed change owns the lock."""
+
     if deployment.get("deployment_type", "ReplicaSet") != "ShardedCluster":
         return
     lock = read_deployment_lock(config, deployment_key)
@@ -81,6 +101,13 @@ def acquire_deployment_lock(
     start_shards: int = 0,
     target_shards: int = 0,
 ) -> dict[str, Any]:
+    """Ask Terraform to atomically create and then verify the deployment lock.
+
+    kubectl create is intentionally used by the lifecycle script.  It fails
+    when another process already created the same ConfigMap, which gives us
+    cross-process mutual exclusion.
+    """
+
     operation_id = uuid.uuid4().hex
     log_event(
         "deployment_lock.acquire.requested",
@@ -131,6 +158,8 @@ def release_deployment_lock(
     deployment: dict[str, Any],
     lock: dict[str, Any],
 ) -> None:
+    """Ask Terraform to release only the lock owned by this operation ID."""
+
     apply_inventory(
         config,
         inventory,
@@ -169,6 +198,8 @@ def validate_topology_resume(
     action: str,
     requested_count: int,
 ) -> None:
+    """Allow resume only when command type and requested count match the lock."""
+
     expected_count = abs(int(lock["target_shards"]) - int(lock["start_shards"]))
     if (
         lock["category"] != "topology"
@@ -192,6 +223,13 @@ def protected_database_change(
     action: str,
     database: str,
 ) -> Iterator[None]:
+    """Protect one SC database/credential mutation with acquire/finally-release.
+
+    The finally block is important: ordinary command failures should not leave
+    a stale lock.  Release uses freshly reloaded Vault state so it does not
+    accidentally re-apply an old inventory snapshot.
+    """
+
     if deployment.get("deployment_type", "ReplicaSet") != "ShardedCluster":
         yield
         return
