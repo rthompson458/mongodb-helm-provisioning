@@ -1,3 +1,12 @@
+"""Shared low-level helpers used by the terraformController package.
+
+An intern reading this project should think of this file as the "toolbox."
+It contains validation, date/time formatting, subprocess execution, table
+printing, and resource-name helpers.  It must not contain MongoDB lifecycle
+policy.  Higher-level modules such as deployments.py and databases.py decide
+*what* should happen; helpers here only perform small reusable operations.
+"""
+
 from __future__ import annotations
 
 import json
@@ -20,6 +29,8 @@ DEPLOYMENT_TYPES = {"ReplicaSet", "ShardedCluster"}
 
 
 class ControllerError(RuntimeError):
+    """Expected controller failure that should be shown cleanly to the user."""
+
     pass
 
 
@@ -40,6 +51,11 @@ def parse_utc(value: str) -> datetime:
 
 
 def normalize_deployment(name: str) -> tuple[str, str]:
+    """Validate a deployment name and return (lowercase_key, display_name).
+
+    Kubernetes resource names are stored using the lowercase key.  We also keep
+    the user's original capitalization for friendly command output.
+    """
     display = name.strip()
     if not display or not DEPLOYMENT_RE.fullmatch(display):
         raise ControllerError(
@@ -54,6 +70,7 @@ def normalize_replica_set(name: str) -> tuple[str, str]:
 
 
 def normalize_database(name: str) -> tuple[str, str]:
+    """Validate a database name and return its key and display form."""
     display = name.strip()
     if not display or not DATABASE_RE.fullmatch(display):
         raise ControllerError(
@@ -73,6 +90,12 @@ def run_process(
     command: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None,
     input_text: str | None = None, capture: bool = False, check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
+    """Run an external command and convert common failures to ControllerError.
+
+    Most real work eventually reaches tools such as terraform, kubectl, git, or
+    docker.  Centralizing subprocess handling keeps error behavior consistent.
+    """
+
     try:
         result = subprocess.run(
             command, cwd=cwd, env=env, input=input_text, text=True,
@@ -89,6 +112,7 @@ def run_process(
 
 
 def rotation_remaining(rotated_at: str, rotation_days: int) -> str:
+    """Return a user-friendly countdown until the next password rotation."""
     remaining = parse_utc(rotated_at) + timedelta(days=rotation_days) - utc_now()
     seconds = int(remaining.total_seconds())
     if seconds <= 0:
@@ -101,6 +125,7 @@ def rotation_remaining(rotated_at: str, rotation_days: int) -> str:
 
 
 def print_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> None:
+    """Print a simple aligned text table without adding external dependencies."""
     if not rows:
         return
     widths = [max(len(headers[i]), max(len(row[i]) for row in rows)) for i in range(len(headers))]
@@ -111,6 +136,7 @@ def print_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> None:
 
 
 def account_resource_name(deployment_key: str, db_key: str, account_key: str) -> str:
+    """Build the stable Kubernetes resource name for a managed DB account."""
     import hashlib
     digest = hashlib.md5(f"{deployment_key}/{db_key}/{account_key}".encode()).hexdigest()[:6]
     return f"tc-{deployment_key[:8]}-{db_key[:10]}-{account_key}-{digest}"
@@ -119,6 +145,8 @@ def account_resource_name(deployment_key: str, db_key: str, account_key: str) ->
 def database_rows(
     deployment: dict[str, Any], db: dict[str, Any], rotation_days: int
 ) -> list[tuple[str, ...]]:
+    """Build the three display rows used by ListDatabase/ListDatabases."""
+
     rotates = rotation_remaining(db["rotated_at"], rotation_days)
     rows = []
     for key in ("owner", "readwrite", "read"):

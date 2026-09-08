@@ -1,3 +1,13 @@
+"""Reconcile all Vault-backed desired state through Terraform.
+
+Reconcile is the repair/convergence command.  It does not invent new desired
+state; it reloads the state already recorded in Vault, asks Terraform to apply
+it, then verifies Kubernetes resources converge.
+
+A live ShardedCluster mutation lock blocks Reconcile because a broad Terraform
+apply must not race with an AddShard/DeleteShard/database operation.
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -12,12 +22,14 @@ from .vault import VaultClient
 
 
 def reconcile(config: dict[str, Any], vault: VaultClient) -> None:
-    """Reapply complete Vault-backed desired state through Terraform."""
+    """Reapply complete Vault-backed desired state and verify convergence."""
     inventory = vault.load_inventory()
     if not inventory:
         print("No terraformController-managed MongoDB deployments exist. Nothing to reconcile.")
         return
 
+    # Reconcile touches the complete inventory.  Refuse to start while any
+    # ShardedCluster has a protected mutation in flight.
     active = []
     for key in sorted(inventory):
         deployment = inventory[key]
@@ -37,6 +49,8 @@ def reconcile(config: dict[str, Any], vault: VaultClient) -> None:
         )
 
     log_event("reconcile.requested", deployments=len(inventory))
+    # From this point forward Terraform owns the mutation.  Python only waits
+    # for the resulting Kubernetes state and reports it.
     apply_inventory(config, inventory)
     print("\nWaiting for managed deployments and accounts to converge ...")
 

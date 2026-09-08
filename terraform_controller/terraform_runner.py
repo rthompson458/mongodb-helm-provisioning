@@ -1,3 +1,15 @@
+"""Prepare and execute the Terraform module used by terraformController.
+
+This file is the bridge between Python orchestration and Terraform.  Python
+builds desired-state JSON and a small one-shot operation description, then this
+module runs Terraform.  The lifecycle resource/script inside Terraform performs
+imperative MongoDB/storage/lock work when needed.
+
+Important rule for maintainers:
+    Do not add direct MongoDB, Vault, or Kubernetes mutations here.
+    This module should only prepare Terraform inputs and execute Terraform.
+"""
+
 from __future__ import annotations
 
 import json
@@ -13,12 +25,14 @@ from .logging_component import log_event
 
 
 def _require(*names: str) -> None:
+    """Fail early if an external executable needed by Terraform is missing."""
     missing = [name for name in names if not shutil.which(name)]
     if missing:
         raise ControllerError("Required executable(s) not found in PATH: " + ", ".join(missing))
 
 
 def _check_version() -> None:
+    """Require the Terraform version needed for ephemeral/write-only features."""
     result = run_process(["terraform", "version", "-json"], capture=True)
     try:
         version = json.loads(result.stdout)["terraform_version"]
@@ -32,6 +46,11 @@ def _check_version() -> None:
 
 
 def _sync(config: dict[str, Any]) -> Path:
+    """Clone or hard-refresh the configured Terraform source repository.
+
+    The cache is disposable by design.  A hard reset prevents stale local edits
+    from silently becoming part of a controller operation.
+    """
     cache: Path = config["terraform_cache"]
     branch = config["terraform_branch"]
     repo = config["terraform_repo"]
@@ -56,6 +75,11 @@ def _sync(config: dict[str, Any]) -> Path:
 
 
 def _operation_payload(operation: dict[str, Any] | None) -> dict[str, Any]:
+    """Return a complete Terraform operation object with safe defaults.
+
+    A random nonce forces terraform_data.lifecycle_operation to execute again
+    even when the action name and target happen to match a previous command.
+    """
     payload: dict[str, Any] = {
         "action": "none",
         "deployment": "",
@@ -81,7 +105,18 @@ def apply_inventory(
     inventory: dict[str, dict[str, Any]],
     operation: dict[str, Any] | None = None,
 ) -> None:
-    """Apply desired deployment state and an optional lifecycle operation through Terraform."""
+    """Apply desired deployment state and an optional one-shot operation.
+
+    High-level sequence:
+      1. Check local tools and Terraform version.
+      2. Refresh the Terraform module from GitHub.
+      3. Pass environment/config values as TF_VAR_* variables.
+      4. Write desired state to a temporary .tfvars.json file.
+      5. Run terraform init and terraform apply.
+      6. Delete the temporary input file even if apply fails.
+
+    Password values are never written into this temporary JSON by Python.
+    """
     _require("terraform", "git", "kubectl", "bash", "python3")
     op = _operation_payload(operation)
     if config["storage_mode"] == "static-local":
@@ -134,6 +169,8 @@ def apply_inventory(
     run_process(init, cwd=tfdir, env=env)
     log_event("terraform.init.succeeded", directory=str(tfdir))
 
+    # The inventory file is temporary because desired state is reconstructed
+    # from Vault for each command.  Keeping it around would invite stale state.
     temp: Path | None = None
     try:
         payload = {

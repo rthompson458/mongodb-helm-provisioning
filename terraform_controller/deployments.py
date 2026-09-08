@@ -1,3 +1,18 @@
+"""ReplicaSet, ShardedCluster, and shard lifecycle orchestration.
+
+This module owns deployment-level policy:
+- validate deployment names/types,
+- require healthy resources before changes,
+- create/delete ReplicaSets and ShardedClusters through Terraform,
+- add/delete shard counts through Terraform,
+- enforce the one-shard minimum,
+- block unsafe shard deletion,
+- format deployment/shard status.
+
+Python does not edit MongoDB CRs or persistent volumes directly.  Every managed
+change is expressed as desired state and passed to apply_inventory().
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -18,6 +33,7 @@ from .vault import VaultClient
 
 
 def deployment_type_label(deployment: dict[str, Any]) -> str:
+    """Return the normalized deployment type, defaulting legacy state to ReplicaSet."""
     return deployment.get("deployment_type", "ReplicaSet")
 
 
@@ -26,6 +42,8 @@ def require_deployment(
     name: str,
     expected_type: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
+    """Find one managed deployment and optionally require a specific type."""
+
     key, _ = normalize_deployment(name)
     if key not in inventory:
         raise ControllerError(
@@ -46,6 +64,12 @@ def resolve_deployment(
     inventory: dict[str, dict[str, Any]],
     name: str | None,
 ) -> tuple[str, dict[str, Any]]:
+    """Resolve an explicit target or the sole managed deployment.
+
+    This implements the convenience rule used by database commands: omission is
+    allowed only when exactly one deployment exists.
+    """
+
     if name:
         return require_deployment(inventory, name)
     if not inventory:
@@ -75,6 +99,12 @@ def require_running(
     deployment_key: str,
     deployment: dict[str, Any],
 ) -> None:
+    """Require a deployment to be ready before database/topology work.
+
+    ReplicaSet readiness is the MongoDB phase.  ShardedCluster readiness is
+    stricter: overall Running plus every shard, config server, and mongos Online.
+    """
+
     label = deployment_type_label(deployment)
     current = kube.phase(config, deployment_key)
     if current != "Running":
@@ -167,6 +197,7 @@ def _check_new_name(
 
 
 def add_replica_set(config: dict[str, Any], vault: VaultClient, name: str) -> None:
+    """Create one empty managed ReplicaSet and wait until it is usable."""
     key, display = normalize_deployment(name)
     inventory = vault.load_inventory()
     _check_new_name(config, inventory, key, display, "ReplicaSet")
@@ -207,6 +238,8 @@ def add_replica_set(config: dict[str, Any], vault: VaultClient, name: str) -> No
 def add_sharded_cluster(
     config: dict[str, Any], vault: VaultClient, name: str, shards: int | None
 ) -> None:
+    """Create one empty managed ShardedCluster and wait for every component."""
+
     key, display = normalize_deployment(name)
     inventory = vault.load_inventory()
     _check_new_name(config, inventory, key, display, "ShardedCluster")
@@ -329,6 +362,8 @@ def _delete_deployment(
 def delete_replica_set(
     config: dict[str, Any], vault: VaultClient, name: str, confirmed: bool
 ) -> None:
+    """Delete an empty ReplicaSet after managed and live DB checks pass."""
+
     _delete_deployment(
         config, vault, name, confirmed, "ReplicaSet", "DeleteReplicaSet"
     )
@@ -337,6 +372,8 @@ def delete_replica_set(
 def delete_sharded_cluster(
     config: dict[str, Any], vault: VaultClient, name: str, confirmed: bool
 ) -> None:
+    """Delete an empty ShardedCluster after safety and lock checks pass."""
+
     _delete_deployment(
         config,
         vault,
@@ -411,6 +448,12 @@ def _raise_topology_failure(
 def add_shard(
     config: dict[str, Any], vault: VaultClient, name: str, count: int = 1
 ) -> None:
+    """Add COUNT shards with a resume-safe, two-stage Terraform workflow.
+
+    Stage 1 prepares all required persistent storage.  Stage 2 raises shardCount.
+    A deployment lock prevents concurrent mutations until the target is Online.
+    """
+
     _require_positive_shard_count(count)
     inventory = vault.load_inventory()
     key, item = require_deployment(inventory, name, "ShardedCluster")
@@ -485,6 +528,13 @@ def delete_shard(
     count: int = 1,
     confirmed: bool = False,
 ) -> None:
+    """Delete COUNT highest-numbered shards while always retaining at least one.
+
+    For this first implementation the cluster must contain no application
+    databases.  MongoDB shard draining policy will be designed later with the
+    customer rather than guessed here.
+    """
+
     _require_positive_shard_count(count)
     if not confirmed:
         raise ControllerError(
@@ -625,6 +675,7 @@ def _deployment_row(
 
 
 def list_deployments(config: dict[str, Any], vault: VaultClient) -> None:
+    """List all managed ReplicaSets and ShardedClusters."""
     inventory = vault.load_inventory()
     if not inventory:
         print("No terraformController-managed MongoDB deployments exist.")
@@ -792,6 +843,8 @@ def list_shards(
     vault: VaultClient,
     name: str | None = None,
 ) -> None:
+    """List shard status globally or for one targeted ShardedCluster."""
+
     inventory = vault.load_inventory()
 
     if name:

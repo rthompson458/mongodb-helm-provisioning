@@ -1,3 +1,15 @@
+"""Database, account, credential, and rotation lifecycle orchestration.
+
+Every managed database gets exactly three fixed accounts:
+    <DB>_owner      -> dbOwner
+    <DB>_readWrite  -> readWrite
+    <DB>_read       -> read
+
+This module validates target/readiness, builds desired state, calls Terraform,
+waits for MongoDBUser reconciliation, and verifies authentication.  It does not
+directly create users, write Vault secrets, or change MongoDB.
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -25,6 +37,7 @@ from .vault import VaultClient
 
 
 def _vault_ui(config: dict[str, Any]) -> str:
+    """Return the human-facing Vault UI root used in success messages."""
     return f"{config['vault_address'].rstrip('/')}/ui/"
 
 
@@ -59,6 +72,8 @@ def require_db(
     deployment_name: str,
     db_name: str,
 ) -> tuple[str, dict[str, Any], str, dict[str, Any]]:
+    """Find one managed database inside one deployment or fail clearly."""
+
     deployment_key, deployment = require_deployment(inventory, deployment_name)
     db_key, _ = normalize_database(db_name)
     if db_key not in deployment["databases"]:
@@ -80,6 +95,8 @@ def _operation(
     deployment: dict[str, Any],
     database: str = "",
 ) -> dict[str, Any]:
+    """Build the small one-shot operation object consumed by Terraform."""
+
     members = (
         int(deployment["members_per_shard"])
         if deployment_type_label(deployment) == "ShardedCluster"
@@ -102,6 +119,13 @@ def _verify_database_accounts(
     db_key: str,
     db: dict[str, Any],
 ) -> None:
+    """Wait for expected MongoDBUser state, then ask Terraform to test login.
+
+    Kubernetes phase Updated proves reconciliation, but not necessarily that the
+    credentials actually authenticate.  The final Terraform lifecycle action
+    performs a real mongosh ping using each current connection secret.
+    """
+
     if db["owner_disabled"]:
         kube.wait_absent(
             config,
@@ -144,6 +168,12 @@ def add_database(
     deployment_or_database: str,
     database: str | None = None,
 ) -> None:
+    """Create one logical MongoDB database plus its three managed accounts.
+
+    The database is materialized first because MongoDB does not keep a truly
+    empty database.  Only after that succeeds do we commit desired account state.
+    """
+
     inventory = vault.load_inventory()
     deployment_key, deployment, db_name = _resolve_database_args(
         config, inventory, deployment_or_database, database
@@ -238,6 +268,8 @@ def delete_database(
     database: str | None,
     confirmed: bool,
 ) -> None:
+    """Drop one database and remove all three managed accounts/credentials."""
+
     inventory = vault.load_inventory()
     deployment_key, deployment, db_name = _resolve_database_args(
         config, inventory, deployment_or_database, database
@@ -331,6 +363,13 @@ def rotate_passwords(
     deployment_or_database: str,
     database: str | None = None,
 ) -> None:
+    """Rotate all three credentials through Terraform and verify convergence.
+
+    A partial multi-provider apply gets one controlled retry with fresh Vault
+    metadata so password revisions move forward instead of reusing uncertain
+    credential state.
+    """
+
     inventory = vault.load_inventory()
     deployment_key, deployment, db_name = _resolve_database_args(
         config, inventory, deployment_or_database, database
@@ -441,6 +480,8 @@ def disable_owner(
     database: str | None,
     confirmed: bool,
 ) -> None:
+    """Disable the Owner MongoDBUser while retaining its rotating Vault secret."""
+
     inventory = vault.load_inventory()
     deployment_key, deployment, db_name = _resolve_database_args(
         config, inventory, deployment_or_database, database
@@ -516,6 +557,8 @@ def disable_owner(
 def list_databases(
     config: dict[str, Any], vault: VaultClient, deployment_name: str | None = None
 ) -> None:
+    """List managed databases on one deployment or across all deployments."""
+
     inventory = vault.load_inventory()
     rows: list[tuple[str, ...]] = []
 
@@ -556,6 +599,8 @@ def list_database(
     deployment_or_database: str,
     database: str | None = None,
 ) -> None:
+    """Show one database, its three accounts, rotation state, and Vault URL."""
+
     inventory = vault.load_inventory()
     _, deployment, db_name = _resolve_database_args(
         config, inventory, deployment_or_database, database

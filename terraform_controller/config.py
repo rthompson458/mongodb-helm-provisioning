@@ -1,3 +1,14 @@
+"""Read and validate terraformController.config.
+
+The configuration file is intentionally the single place where environment
+specific values live: Vault address, Kubernetes context, Terraform repository,
+MongoDB defaults, sharding defaults, storage, timeouts, and logging.
+
+This module converts text from the INI file into a typed Python dictionary.
+It fails early on invalid values so later lifecycle code does not need to keep
+re-checking basic configuration rules.
+"""
+
 from __future__ import annotations
 
 import configparser
@@ -9,6 +20,7 @@ from .common import ControllerError
 
 
 def _bool(value: str, label: str) -> bool:
+    """Parse a human-friendly true/false value from the INI file."""
     v = value.strip().lower()
     if v in {"true", "yes", "1", "on"}:
         return True
@@ -18,6 +30,7 @@ def _bool(value: str, label: str) -> bool:
 
 
 def _integer(parser: configparser.ConfigParser, section: str, key: str, minimum: int) -> int:
+    """Read an integer and enforce the minimum allowed value."""
     try:
         value = parser.getint(section, key)
     except ValueError as exc:
@@ -28,11 +41,21 @@ def _integer(parser: configparser.ConfigParser, section: str, key: str, minimum:
 
 
 def load_config(path: Path) -> dict[str, Any]:
+    """Load, validate, normalize, and return all controller configuration.
+
+    The returned dictionary is the internal configuration contract used by the
+    rest of the package.  Paths and environment variables are expanded here so
+    downstream modules receive ready-to-use values.
+    """
     if not path.exists():
         raise ControllerError(f"Configuration file does not exist: {path}")
 
-    p = configparser.ConfigParser()
+    # Disable ConfigParser's old-style % interpolation.  Our logging filename
+    # pattern legitimately contains strftime tokens such as %Y%m%d.
+    p = configparser.ConfigParser(interpolation=None)
     p.read(path, encoding="utf-8")
+    # Keep the required-field list in one place.  Missing configuration is
+    # easier to diagnose here than after Terraform has already started.
     required = {
         "Vault": ["address", "token_environment_variable", "mount", "base_path"],
         "Terraform": [
@@ -76,6 +99,8 @@ def load_config(path: Path) -> dict[str, Any]:
     sc_ready_timeout = _integer(p, "Runtime", "sharded_cluster_ready_timeout_seconds", 30)
     retention_days = _integer(p, "Logging", "retention_days", 0)
 
+    # Storage has two supported models.  static-local needs a host path and
+    # node name; dynamic delegates volume provisioning to a StorageClass.
     storage_mode = p.get("Storage", "mode").strip().lower()
     if storage_mode not in {"static-local", "dynamic"}:
         raise ControllerError("Storage mode must be 'static-local' or 'dynamic'.")
@@ -86,6 +111,7 @@ def load_config(path: Path) -> dict[str, Any]:
                     f"Storage '{key}' is required when mode is static-local."
                 )
 
+    # Validate logging choices before any command attempts to open a file.
     logging_mode = p.get("Logging", "mode").strip().lower()
     if logging_mode not in {"per-run", "append", "replace"}:
         raise ControllerError("Logging mode must be 'per-run', 'append', or 'replace'.")

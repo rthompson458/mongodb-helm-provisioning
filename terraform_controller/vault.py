@@ -1,3 +1,18 @@
+"""Read terraformController desired-state metadata and credentials from Vault.
+
+Vault is the durable metadata source used to reconstruct Terraform input.  The
+controller does not directly write lifecycle state here; Terraform owns those
+writes.  This client is intentionally read-focused.
+
+Current hierarchy:
+    mongodb/<Deployment>/_metadata
+    mongodb/<Deployment>/<Database>/_metadata
+    mongodb/<Deployment>/<Database>/<Username>
+
+A legacy ReplicaSet hierarchy is still readable so older POC state can migrate
+without being silently lost.
+"""
+
 from __future__ import annotations
 
 import json
@@ -12,7 +27,9 @@ from .logging_component import log_event
 
 
 class VaultClient:
+    """Small read-only Vault KV v2 client used by controller orchestration."""
     def __init__(self, config: dict[str, Any]):
+        """Capture Vault/config defaults and require the token environment variable."""
         self.address = config["vault_address"]
         self.mount = config["vault_mount"]
         self.base = config["vault_base_path"]
@@ -29,6 +46,7 @@ class VaultClient:
             raise ControllerError(f"Vault token environment variable '{env_name}' is not set.")
 
     def _request(self, api_path: str, *, list_request: bool = False) -> dict[str, Any] | None:
+        """Perform one authenticated Vault GET/LIST-style request."""
         url = f"{self.address}/v1/{urllib.parse.quote(api_path.strip('/'), safe='/')}"
         if list_request:
             url += "?list=true"
@@ -59,6 +77,7 @@ class VaultClient:
         return self.read_secret(f"{self.base}/{deployment_display}/{db_display}/{username}")
 
     def _new_database(self, dbm: dict[str, Any]) -> dict[str, Any]:
+        """Convert Vault string metadata into the typed database state Terraform expects."""
         return {
             "display_name": str(dbm["display_name"]),
             "created_at": str(dbm["created_at"]),
@@ -69,6 +88,7 @@ class VaultClient:
         }
 
     def _new_deployment(self, meta: dict[str, Any]) -> dict[str, Any]:
+        """Convert one deployment metadata secret into Terraform desired state."""
         deployment_type = str(meta.get("deployment_type", "ReplicaSet"))
         if deployment_type not in DEPLOYMENT_TYPES:
             raise ControllerError(f"Unsupported deployment_type '{deployment_type}' in Vault metadata.")
@@ -95,6 +115,7 @@ class VaultClient:
         }
 
     def _load_current_layout(self) -> dict[str, dict[str, Any]]:
+        """Walk the current Deployment/Database Vault hierarchy."""
         inventory: dict[str, dict[str, Any]] = {}
         for item in self.list_keys(self.base):
             if not item.endswith("/") or item == "replica-sets/":
@@ -134,7 +155,11 @@ class VaultClient:
         return inventory
 
     def _load_legacy_layout(self) -> dict[str, dict[str, Any]]:
-        """Read the pre-redesign mongodb/replica-sets/... layout for safe migration."""
+        """Read the pre-redesign mongodb/replica-sets/... layout for safe migration.
+
+        Legacy data is read only.  load_inventory() merges it underneath the new
+        layout so a current record always wins when both describe the same key.
+        """
         inventory: dict[str, dict[str, Any]] = {}
         root = f"{self.base}/replica-sets"
         for item in self.list_keys(root):
