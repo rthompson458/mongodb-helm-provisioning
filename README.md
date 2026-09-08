@@ -143,6 +143,33 @@ Database work on a ShardedCluster is blocked until:
 - mongos is `Online`,
 - no conflicting managed operation holds the ShardedCluster deployment lock.
 
+## Controller logging
+
+Logging is configured in `terraformController.config`:
+
+```ini
+[Logging]
+enabled = true
+level = INFO
+directory = logs
+mode = append
+filename_format =
+```
+
+With a blank `filename_format`, the controller writes `Controller.log`.
+A relative `directory` is resolved from the location of the config file, so
+the default `logs` value means `<repository>/logs`.
+
+`mode` may be `append` or `overwrite`.
+
+A formatted name can use standard `strftime` tokens, for example:
+
+```ini
+filename_format = Controller-%Y%m%d-%H%M.log
+```
+
+where `%m` is month and `%M` is minute.
+
 ## Documentation
 
 See [README-terraformController.md](README-terraformController.md) for the complete command reference, lifecycle rules, logging configuration, storage model, Vault behavior, deployment locking, and Terraform architecture.
