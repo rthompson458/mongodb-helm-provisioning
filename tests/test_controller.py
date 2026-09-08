@@ -109,7 +109,6 @@ class DatabaseLifecycleTests(unittest.TestCase):
             calls.append((copy.deepcopy(inventory), copy.deepcopy(operation)))
 
         with (
-            patch.object(databases.deployments if hasattr(databases, "deployments") else deployments, "require_running"),
             patch.object(databases, "require_running"),
             patch.object(databases, "apply_inventory", side_effect=apply_side_effect),
             patch.object(databases, "_verify_database_accounts"),
