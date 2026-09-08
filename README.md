@@ -1,6 +1,6 @@
 # MongoDB DBaaS Provisioning
 
-Terraform-driven MongoDB DBaaS proof of concept for ReplicaSet and ShardedCluster deployments managed through the MongoDB Kubernetes Operator, Ops Manager, Vault, and Kubernetes.
+Terraform-driven MongoDB DBaaS proof of concept for ReplicaSet and ShardedCluster deployments managed through the MongoDB Kubernetes Operator, Ops Manager, Vault, Kubernetes, and Terraform-owned lifecycle scripts.
 
 ## Start here
 
@@ -59,21 +59,90 @@ mongodb/SC9/HouseInfo/HouseInfo_readWrite
 mongodb/SC9/HouseInfo/HouseInfo_read
 ```
 
-## ShardedCluster first-pass scope
+## ShardedCluster support
 
-The controller provisions and manages ShardedCluster infrastructure, including shard count, members per shard, mongos routers, config servers, status, and safe lifecycle checks.
+The controller provisions and manages ShardedCluster infrastructure, including shard count, members per shard, mongos routers, config servers, status, persistent storage, and safe lifecycle checks.
 
-Collection shard-key design and collection-level sharding policy are intentionally deferred until customer requirements are defined.
+Collection shard-key design and collection-level sharding policy remain intentionally deferred until customer requirements are defined.
+
+### Shard status
+
+All shards across all managed ShardedClusters:
+
+```bash
+python3 terraformController.py ListShards
+```
+
+One ShardedCluster:
+
+```bash
+python3 terraformController.py ListShards SC9
+```
+
+The targeted view also reports config-server, mongos, and active managed-change status.
+
+### Add shards
+
+Add one shard:
+
+```bash
+python3 terraformController.py AddShard SC9
+```
+
+Add two shards:
+
+```bash
+python3 terraformController.py AddShard SC9 2
+```
+
+### Delete shards
+
+Delete one shard:
+
+```bash
+python3 terraformController.py DeleteShard SC9 --confirm
+```
+
+Delete two shards:
+
+```bash
+python3 terraformController.py DeleteShard SC9 2 --confirm
+```
+
+A ShardedCluster can never be reduced below **one shard**.
+
+For this first pass, shard deletion is allowed only when the ShardedCluster has zero managed application databases and a live MongoDB check also finds zero non-system application databases.
+
+### Managed-change locking
+
+Each ShardedCluster uses one atomic deployment lock for mutating operations.
+
+While a shard add/delete or database/credential mutation is active on SC9, conflicting changes on SC9 are blocked. Read-only commands remain available.
+
+Examples of blocked concurrent mutations include:
+
+```text
+AddDatabase
+DeleteDatabase
+RotatePasswords
+DisableOwner
+AddShard
+DeleteShard
+Reconcile
+```
+
+The lock itself is created and released by the Terraform lifecycle script. Python only requests the Terraform operation and reads lock/status information.
+
+## Readiness
 
 Database work on a ShardedCluster is blocked until:
 
 - the MongoDB resource phase is `Running`,
 - every expected shard is `Online`,
 - config servers are `Online`,
-- mongos is `Online`.
-
-For this first pass, deleting a shard is allowed only when the ShardedCluster has zero managed application databases and a live MongoDB check also finds zero application databases.
+- mongos is `Online`,
+- no conflicting managed operation holds the ShardedCluster deployment lock.
 
 ## Documentation
 
-See [README-terraformController.md](README-terraformController.md) for the complete command reference, lifecycle rules, logging configuration, storage model, Vault behavior, and Terraform architecture.
+See [README-terraformController.md](README-terraformController.md) for the complete command reference, lifecycle rules, logging configuration, storage model, Vault behavior, deployment locking, and Terraform architecture.
