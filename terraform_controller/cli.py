@@ -110,7 +110,8 @@ Database commands can omit the deployment only when exactly one managed
 deployment exists. If multiple deployments exist, the deployment is required.
 
 ShardedCluster database work is blocked until the MongoDB resource is Running,
-all expected shards are Online, config servers are Online, and mongos is Online.
+all expected shards are Online, config servers are Online, mongos is Online,
+and no other managed change holds the ShardedCluster deployment lock.
 
 Use '<command> --help' for detailed help.
 """,
@@ -123,6 +124,7 @@ ReplicaSet:
 ShardedCluster:
   terraformController.py AddShardedCluster SC9 --shards 3
   terraformController.py ListShards SC9
+  terraformController.py AddShard SC9 2
   terraformController.py AddDatabase SC9 HouseInfo
 
 Only one deployment exists:
@@ -241,28 +243,49 @@ Inventory:
         sp,
         "ListShards",
         "List shard creation/readiness status.",
-        "Shows each expected shard as Online, Creating, Degraded, Failed, or Unknown and reports ready/desired member counts.",
-        "  terraformController.py ListShards SC9",
+        "With no cluster name, shows shards across all managed ShardedClusters. With a cluster name, shows detailed shard, config-server, mongos, and active-change status for that ShardedCluster.",
+        "  terraformController.py ListShards\n  terraformController.py ListShards SC9",
     )
-    _deployment(x, "SHARDED_CLUSTER")
+    x.add_argument(
+        "deployment",
+        metavar="SHARDED_CLUSTER",
+        nargs="?",
+        help="Optional ShardedCluster name. Omit to list shards across all clusters.",
+    )
 
     x = _sub(
         sp,
         "AddShard",
-        "Add one shard to a Running ShardedCluster.",
-        "The ShardedCluster must already be fully Running. Terraform increases the shard count by one and the command waits for the new shard and complete cluster to become online.",
-        "  terraformController.py AddShard SC9",
+        "Add one or more shards to a Running ShardedCluster.",
+        "COUNT defaults to 1. Terraform acquires the ShardedCluster deployment lock, prepares storage, changes shardCount, waits for the requested shard total to become fully online, then releases the lock. Rerun the same command to resume an interrupted shard addition.",
+        "  terraformController.py AddShard SC9\n  terraformController.py AddShard SC9 2",
     )
     _deployment(x, "SHARDED_CLUSTER")
+    x.add_argument(
+        "count",
+        metavar="COUNT",
+        nargs="?",
+        type=int,
+        default=1,
+        help="Number of shards to add. Default: 1.",
+    )
 
     x = _sub(
         sp,
         "DeleteShard",
-        "Remove one shard from an empty ShardedCluster.",
-        "Requires --confirm. For this first-pass implementation, shard deletion is allowed only when the ShardedCluster contains zero managed and zero live application databases. The highest-numbered shard is removed. This conservative rule prevents removal of a shard that may contain application data.",
-        "  terraformController.py DeleteShard SC9 --confirm",
+        "Remove one or more shards from an empty ShardedCluster.",
+        "COUNT defaults to 1 and --confirm is required. The operation can never reduce the cluster below one shard. For this first-pass implementation, shard deletion is allowed only when the ShardedCluster contains zero managed and zero live application databases. The highest-numbered shards are removed first. Rerun the same command to resume an interrupted deletion.",
+        "  terraformController.py DeleteShard SC9 --confirm\n  terraformController.py DeleteShard SC9 2 --confirm",
     )
     _deployment(x, "SHARDED_CLUSTER")
+    x.add_argument(
+        "count",
+        metavar="COUNT",
+        nargs="?",
+        type=int,
+        default=1,
+        help="Number of shards to delete. Default: 1.",
+    )
     _confirm(x)
 
     x = _sub(
@@ -367,9 +390,11 @@ def main(argv: list[str] | None = None) -> int:
                 config, vault, args.deployment
             ),
             "ListShards": lambda: list_shards(config, vault, args.deployment),
-            "AddShard": lambda: add_shard(config, vault, args.deployment),
+            "AddShard": lambda: add_shard(
+                config, vault, args.deployment, args.count
+            ),
             "DeleteShard": lambda: delete_shard(
-                config, vault, args.deployment, args.confirm
+                config, vault, args.deployment, args.count, args.confirm
             ),
             "AddDatabase": lambda: add_database(
                 config, vault, args.deployment_or_database, args.database
