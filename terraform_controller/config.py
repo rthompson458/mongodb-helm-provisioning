@@ -10,38 +10,72 @@ from .common import ControllerError
 
 def _bool(value: str, label: str) -> bool:
     v = value.strip().lower()
-    if v in {"true", "yes", "1", "on"}: return True
-    if v in {"false", "no", "0", "off"}: return False
+    if v in {"true", "yes", "1", "on"}:
+        return True
+    if v in {"false", "no", "0", "off"}:
+        return False
     raise ControllerError(f"{label} must be true or false.")
+
+
+def _integer(parser: configparser.ConfigParser, section: str, key: str, minimum: int) -> int:
+    try:
+        value = parser.getint(section, key)
+    except ValueError as exc:
+        raise ControllerError(f"'{key}' in [{section}] must be an integer.") from exc
+    if value < minimum:
+        raise ControllerError(f"'{key}' in [{section}] must be at least {minimum}.")
+    return value
 
 
 def load_config(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise ControllerError(f"Configuration file does not exist: {path}")
+
     p = configparser.ConfigParser()
     p.read(path, encoding="utf-8")
     required = {
         "Vault": ["address", "token_environment_variable", "mount", "base_path"],
-        "Terraform": ["repository_url", "branch", "subdirectory", "cache_directory", "backend_namespace", "backend_secret_suffix"],
+        "Terraform": [
+            "repository_url", "branch", "subdirectory", "cache_directory",
+            "backend_namespace", "backend_secret_suffix",
+        ],
         "Kubernetes": ["kubeconfig", "context", "namespace"],
-        "MongoDB": ["ops_manager_config_map", "ops_manager_credentials_secret", "auth_database", "default_version", "default_members", "persistent", "storage_class", "storage_size"],
+        "MongoDB": [
+            "ops_manager_config_map", "ops_manager_credentials_secret", "auth_database",
+            "default_version", "default_members", "persistent", "storage_class", "storage_size",
+        ],
+        "Sharding": [
+            "default_shards", "default_members_per_shard", "default_mongos",
+            "default_config_servers",
+        ],
         "Storage": ["mode"],
         "Rotation": ["days"],
-        "Runtime": ["mongo_image", "placeholder_collection", "job_timeout_seconds", "replica_set_ready_timeout_seconds"],
+        "Runtime": [
+            "mongo_image", "placeholder_collection", "job_timeout_seconds",
+            "replica_set_ready_timeout_seconds", "sharded_cluster_ready_timeout_seconds",
+        ],
+        "Logging": [
+            "enabled", "level", "directory", "mode", "filename_pattern", "retention_days",
+        ],
     }
     for section, keys in required.items():
-        if not p.has_section(section): raise ControllerError(f"Missing [{section}] section in {path}.")
+        if not p.has_section(section):
+            raise ControllerError(f"Missing [{section}] section in {path}.")
         for key in keys:
-            if not p.get(section, key, fallback="").strip(): raise ControllerError(f"Missing '{key}' in [{section}].")
-    try:
-        members = p.getint("MongoDB", "default_members")
-        rotation = p.getint("Rotation", "days")
-        job_timeout = p.getint("Runtime", "job_timeout_seconds")
-        ready_timeout = p.getint("Runtime", "replica_set_ready_timeout_seconds")
-    except ValueError as exc:
-        raise ControllerError("Configured numeric values must be integers.") from exc
-    if members < 1 or rotation < 1 or job_timeout < 30 or ready_timeout < 30:
-        raise ControllerError("Members/rotation must be >=1 and runtime timeouts must be >=30 seconds.")
+            if not p.get(section, key, fallback="").strip():
+                raise ControllerError(f"Missing '{key}' in [{section}].")
+
+    members = _integer(p, "MongoDB", "default_members", 1)
+    default_shards = _integer(p, "Sharding", "default_shards", 1)
+    members_per_shard = _integer(p, "Sharding", "default_members_per_shard", 1)
+    default_mongos = _integer(p, "Sharding", "default_mongos", 1)
+    default_config_servers = _integer(p, "Sharding", "default_config_servers", 1)
+    rotation = _integer(p, "Rotation", "days", 1)
+    job_timeout = _integer(p, "Runtime", "job_timeout_seconds", 30)
+    rs_ready_timeout = _integer(p, "Runtime", "replica_set_ready_timeout_seconds", 30)
+    sc_ready_timeout = _integer(p, "Runtime", "sharded_cluster_ready_timeout_seconds", 30)
+    retention_days = _integer(p, "Logging", "retention_days", 0)
+
     storage_mode = p.get("Storage", "mode").strip().lower()
     if storage_mode not in {"static-local", "dynamic"}:
         raise ControllerError("Storage mode must be 'static-local' or 'dynamic'.")
@@ -51,6 +85,14 @@ def load_config(path: Path) -> dict[str, Any]:
                 raise ControllerError(
                     f"Storage '{key}' is required when mode is static-local."
                 )
+
+    logging_mode = p.get("Logging", "mode").strip().lower()
+    if logging_mode not in {"per-run", "append", "replace"}:
+        raise ControllerError("Logging mode must be 'per-run', 'append', or 'replace'.")
+    logging_level = p.get("Logging", "level").strip().upper()
+    if logging_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+        raise ControllerError("Logging level must be DEBUG, INFO, WARNING, ERROR, or CRITICAL.")
+
     expand = lambda v: os.path.expandvars(os.path.expanduser(v.strip()))
     return {
         "vault_address": p.get("Vault", "address").strip().rstrip("/"),
@@ -74,6 +116,10 @@ def load_config(path: Path) -> dict[str, Any]:
         "persistent": _bool(p.get("MongoDB", "persistent"), "persistent"),
         "storage_class": p.get("MongoDB", "storage_class").strip(),
         "storage_size": p.get("MongoDB", "storage_size").strip(),
+        "default_shards": default_shards,
+        "default_members_per_shard": members_per_shard,
+        "default_mongos": default_mongos,
+        "default_config_servers": default_config_servers,
         "storage_mode": storage_mode,
         "storage_base_path": expand(p.get("Storage", "base_path", fallback="")),
         "storage_node_name": p.get("Storage", "node_name", fallback="").strip(),
@@ -81,5 +127,12 @@ def load_config(path: Path) -> dict[str, Any]:
         "mongo_image": p.get("Runtime", "mongo_image").strip(),
         "placeholder_collection": p.get("Runtime", "placeholder_collection").strip(),
         "job_timeout": job_timeout,
-        "rs_ready_timeout": ready_timeout,
+        "rs_ready_timeout": rs_ready_timeout,
+        "sc_ready_timeout": sc_ready_timeout,
+        "logging_enabled": _bool(p.get("Logging", "enabled"), "Logging.enabled"),
+        "logging_level": logging_level,
+        "logging_directory": expand(p.get("Logging", "directory")),
+        "logging_mode": logging_mode,
+        "logging_filename_pattern": p.get("Logging", "filename_pattern").strip(),
+        "logging_retention_days": retention_days,
     }
