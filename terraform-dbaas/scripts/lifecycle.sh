@@ -325,6 +325,7 @@ data:
   operation_id: "${TC_OPERATION_ID}"
   category: "${TC_LOCK_CATEGORY}"
   action: "${TC_LOCK_ACTION}"
+  database: "${TC_DATABASE:-}"
   start_shards: "${TC_START_SHARDS}"
   target_shards: "${TC_TARGET_SHARDS}"
   started_at: "${started_at}"
