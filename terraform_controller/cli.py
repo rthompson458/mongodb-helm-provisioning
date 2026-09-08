@@ -1,3 +1,16 @@
+"""End-user command-line interface for terraformController.
+
+This module owns command parsing, help text, configuration loading, logging
+startup, and dispatch to lifecycle functions.  It should remain thin: business
+rules belong in deployments.py/databases.py and real mutations belong to
+Terraform.
+
+When adding a new command:
+  1. Add clear argparse help and at least one example.
+  2. Dispatch to a focused lifecycle function.
+  3. Keep success/error formatting understandable without Kubernetes knowledge.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -36,6 +49,7 @@ DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "terraformController.c
 
 
 def _confirm(parser: argparse.ArgumentParser) -> None:
+    """Add the standard --confirm guard used by destructive commands."""
     parser.add_argument(
         "--confirm",
         action="store_true",
@@ -44,6 +58,7 @@ def _confirm(parser: argparse.ArgumentParser) -> None:
 
 
 def _deployment(parser: argparse.ArgumentParser, label: str = "DEPLOYMENT") -> None:
+    """Add a required deployment-name positional argument."""
     parser.add_argument(
         "deployment",
         metavar=label,
@@ -52,6 +67,12 @@ def _deployment(parser: argparse.ArgumentParser, label: str = "DEPLOYMENT") -> N
 
 
 def _database_target(parser: argparse.ArgumentParser) -> None:
+    """Add the one-or-two argument database target syntax.
+
+    With one argument, it is treated as DATABASE and is legal only when exactly
+    one managed deployment exists.  With two arguments, they are
+    DEPLOYMENT DATABASE.
+    """
     parser.add_argument(
         "deployment_or_database",
         metavar="DEPLOYMENT_OR_DATABASE",
@@ -75,6 +96,8 @@ def _sub(
     description: str,
     examples: str,
 ) -> argparse.ArgumentParser:
+    """Create one subcommand parser with consistent examples/help formatting."""
+
     return subparsers.add_parser(
         name,
         help=help_text,
@@ -85,6 +108,11 @@ def _sub(
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the complete public CLI contract.
+
+    Keeping command definitions together makes it easy to audit exactly what an
+    end user can do and which destructive commands require --confirm.
+    """
     parser = argparse.ArgumentParser(
         prog="terraformController.py",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -361,6 +389,12 @@ Inventory:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Parse one command, initialize shared services, and execute it.
+
+    Expected ControllerError failures are printed without a traceback.  Truly
+    unexpected exceptions are logged with a traceback so developers have enough
+    detail to debug them while the user still gets a concise ERROR line.
+    """
     args = build_parser().parse_args(argv)
     logging_ready = False
     try:
@@ -370,6 +404,8 @@ def main(argv: list[str] | None = None) -> int:
         log_event("command.started", command=args.command)
 
         vault = VaultClient(config)
+        # The dispatch table keeps main() simple.  Each command maps to one
+        # focused lifecycle function; the CLI itself does not mutate resources.
         actions = {
             "AddReplicaSet": lambda: add_replica_set(config, vault, args.deployment),
             "AddShardedCluster": lambda: add_sharded_cluster(
