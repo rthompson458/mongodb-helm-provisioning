@@ -372,7 +372,7 @@ def _resume_or_acquire_lock(
         log_event(
             "shard.operation.resumed",
             deployment=item["display_name"],
-            topology_action=existing["action"],
+            lock_action=existing["action"],
             start_shards=existing["start_shards"],
             target_shards=existing["target_shards"],
             operation_id=existing["operation_id"],
@@ -400,7 +400,7 @@ def _raise_topology_failure(
 ) -> None:
     raise ControllerError(
         f"{action} did not complete for ShardedCluster '{item['display_name']}'. "
-        "The topology lock remains in place to prevent conflicting changes. "
+        "The deployment lock remains in place to prevent conflicting changes. "
         f"Correct the reported problem, then rerun '{action} "
         f"{item['display_name']} {count}'"
         + (" --confirm" if action == "DeleteShard" else "")
@@ -732,11 +732,11 @@ def _print_shards(
     ]
     print_table(("SHARD", "STATUS", "READY", "DESIRED", "UPDATED"), rows)
     if lock:
-        print(f"Topology change: {describe_deployment_lock(lock)}")
+        print(f"Active change:   {describe_deployment_lock(lock)}")
         if lock["started_at"]:
             print(f"Started:         {lock['started_at']}")
     else:
-        print("Topology change: None")
+        print("Active change:   None")
     print(
         f"Config servers: {status['config_servers']['status']} "
         f"({status['config_servers']['ready']}/"
@@ -836,7 +836,7 @@ def list_shards(
             "READY",
             "DESIRED",
             "UPDATED",
-            "TOPOLOGY CHANGE",
+            "ACTIVE CHANGE",
         ),
         rows,
     )
