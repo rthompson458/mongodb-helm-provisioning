@@ -1,0 +1,39 @@
+# ---------------------------------------------------------------------------
+# Python generated files
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---------------------------------------------------------------------------
+# terraformController runtime logs
+# ---------------------------------------------------------------------------
+logs/
+*.log
+
+# ---------------------------------------------------------------------------
+# Terraform local working/cache/state files
+#
+# This project intentionally does not commit Terraform's generated provider
+# cache, dependency lock file, local state artifacts, or transient var files.
+# The controller recreates these as needed.
+# ---------------------------------------------------------------------------
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.*
+.terraform.tfstate.lock.info
+.tc.*.tfvars.json
+
+# ---------------------------------------------------------------------------
+# Common local editor / OS artifacts
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
