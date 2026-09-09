@@ -102,7 +102,7 @@ The harness verifies:
 - Targeted and global shard status.
 - Adding multiple shards in one command.
 - Deleting multiple shards in one command.
-- Blocking shard deletion while a database exists.
+- Deleting a shard while a managed database remains on the ShardedCluster, then verifying database lifecycle operations still work.
 - Preventing shard count from going below one.
 - Concurrent-operation locking during a real AddShard operation.
 - Readability of the cluster again after the lock is released.

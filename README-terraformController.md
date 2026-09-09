@@ -357,9 +357,11 @@ Safety rules:
 1. COUNT must be at least 1.
 2. The ShardedCluster must retain at least **one shard**.
 3. The cluster must initially be fully ready.
-4. Managed inventory must contain zero application databases.
-5. Terraform performs a live MongoDB check and must find zero non-system application databases.
-6. The SC deployment lock must be acquired before topology changes begin.
+4. The SC deployment lock must be acquired before topology changes begin.
+5. Application databases may remain on the ShardedCluster during shard removal.
+6. Terraform lowers the managed MongoDB ShardedCluster `spec.shardCount`; Python does not directly remove shards.
+7. The MongoDB Kubernetes Operator/Ops Manager reconciles the supported ShardedCluster scale-down.
+8. The controller waits for the remaining cluster to become fully ready and for removed shard StatefulSets to disappear before Terraform cleans the old shard storage.
 
 For example, if SC9 has 3 shards:
 
@@ -371,11 +373,13 @@ DeleteShard SC9 3 --confirm  -> BLOCKED
 
 The highest-numbered shards are removed first.
 
-For `DeleteShard SC9 2 --confirm` from five shards, Terraform changes the desired shard count from 5 to 3, waits for shards `sc9-3` and `sc9-4` to disappear, verifies the remaining cluster is fully ready, and only then removes the old persistent storage.
+For `DeleteShard SC9 2 --confirm` from five shards, Terraform changes the desired shard count from 5 to 3. The MongoDB Kubernetes Operator/Ops Manager then reconciles the supported ShardedCluster scale-down. The controller waits for shards `sc9-3` and `sc9-4` to disappear and verifies the remaining cluster is fully ready. Only after those checks pass does Terraform remove the old persistent storage.
+
+Existing application databases are **not** a reason to block DeleteShard. Their managed database/account/Vault inventory remains unchanged while the ShardedCluster topology is reduced.
+
+Python does not issue `removeShard`, `movePrimary`, `moveCollection`, direct `kubectl delete`, or other topology mutations for this operation. The desired topology change is expressed through Terraform, preserving the project's Terraform-driven architecture.
 
 If an operation is interrupted after the deployment lock is acquired, rerun the **same** DeleteShard command to resume safely.
-
-This first-pass implementation remains intentionally conservative: if any application database exists on the ShardedCluster, shard deletion is blocked. More advanced shard draining/data-distribution behavior will be designed with the customer.
 
 ## Database targeting
 
@@ -730,7 +734,7 @@ ShardedCluster local storage is Terraform-managed per persistent volume:
 
 For shard addition, storage is increased before `shardCount`.
 
-For shard deletion, `shardCount` is reduced and the removed shard StatefulSets disappear before old shard storage is cleaned up.
+For shard deletion, Terraform reduces `shardCount`. The MongoDB Kubernetes Operator/Ops Manager reconciles the supported scale-down, the removed shard StatefulSets disappear, and the remaining cluster must be fully ready before Terraform cleans the old shard storage. This ordering is the same whether or not application databases exist on the ShardedCluster.
 
 ## Ops Manager project isolation
 
@@ -812,8 +816,8 @@ python3 tests/run_harness.py \
 
 The full profile exercises ReplicaSet lifecycle, database/account lifecycle,
 ShardedCluster lifecycle, count-based shard add/delete, final-shard protection,
-database-based shard-deletion blocking, global/targeted shard status, and an
-actual concurrent-process deployment-lock test.
+shard deletion while a managed database remains present, global/targeted shard
+status, and an actual concurrent-process deployment-lock test.
 
 See `tests/README.md` for scenario details.
 

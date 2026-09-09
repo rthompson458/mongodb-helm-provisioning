@@ -111,7 +111,9 @@ python3 terraformController.py DeleteShard SC9 2 --confirm
 
 A ShardedCluster can never be reduced below **one shard**.
 
-For this first pass, shard deletion is allowed only when the ShardedCluster has zero managed application databases and a live MongoDB check also finds zero non-system application databases.
+Shard deletion is supported while application databases remain on the ShardedCluster. The operation remains Terraform-driven: Terraform lowers the managed ShardedCluster `shardCount`, the MongoDB Kubernetes Operator/Ops Manager reconciles the supported scale-down, and Terraform cleans the removed shard storage only after the remaining cluster is fully ready and the removed shard StatefulSets are gone.
+
+Python does not directly issue MongoDB shard-removal commands or directly delete MongoDB/Kubernetes topology resources.
 
 ### Managed-change locking
 
@@ -202,7 +204,6 @@ python3 tests/run_harness.py \
 
 The live harness creates temporary resources with `TH...` names and covers
 ReplicaSet lifecycle, ShardedCluster lifecycle, multi-shard add/delete,
-database/account lifecycle, password rotation, Owner disable, shard safety
-guards, global/targeted shard status, and concurrent ShardedCluster locking.
+database/account lifecycle, password rotation, Owner disable, shard removal while a database remains on the cluster, final-shard safety, global/targeted shard status, and concurrent ShardedCluster locking.
 
 See [tests/README.md](tests/README.md) for the complete test map and safety rules.

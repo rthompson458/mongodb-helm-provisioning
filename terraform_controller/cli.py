@@ -301,8 +301,8 @@ Inventory:
     x = _sub(
         sp,
         "DeleteShard",
-        "Remove one or more shards from an empty ShardedCluster.",
-        "COUNT defaults to 1 and --confirm is required. The operation can never reduce the cluster below one shard. For this first-pass implementation, shard deletion is allowed only when the ShardedCluster contains zero managed and zero live application databases. The highest-numbered shards are removed first. Rerun the same command to resume an interrupted deletion.",
+        "Remove one or more shards from a ShardedCluster.",
+        "COUNT defaults to 1 and --confirm is required. The operation can never reduce the cluster below one shard. Application databases may remain on the ShardedCluster. Terraform lowers the managed ShardedCluster shardCount, the MongoDB Kubernetes Operator/Ops Manager reconciles the supported scale-down, and Terraform cleans old shard storage only after the removed shard StatefulSets are gone and the remaining cluster is fully ready. The highest-numbered shards are removed first. Rerun the same command to resume an interrupted deletion.",
         "  terraformController.py DeleteShard SC9 --confirm\n  terraformController.py DeleteShard SC9 2 --confirm",
     )
     _deployment(x, "SHARDED_CLUSTER")
