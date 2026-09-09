@@ -223,20 +223,20 @@ python3 tests/run_harness.py \
 
 The ShardedCluster profile performs a real sharded lifecycle:
 
-1. Create a temporary ShardedCluster with two shards.
+1. Create a temporary ShardedCluster with **three shards**.
 2. Wait for the cluster, shards, config servers, and mongos to become ready.
 3. Verify the hidden controller administrator can authenticate.
 4. Verify targeted shard status.
 5. Verify global shard status.
-6. Add two shards in one command.
-7. Verify the resulting four-shard topology.
+6. Add two shards in one command (**3 -> 5**).
+7. Verify the resulting five-shard topology.
 8. Create a database on the ShardedCluster.
 9. Create and authenticate the Owner/ReadWrite/Read accounts.
-10. Delete one shard **while the database still exists**.
+10. Delete one shard **while the database still exists** (**5 -> 4**).
 11. Verify database credential rotation still works after topology change.
 12. Disable the Owner account.
 13. Delete the database.
-14. Delete two more shards, leaving exactly one.
+14. Delete three more shards in one command (**4 -> 1**).
 15. Verify deletion of the final shard is blocked.
 16. Delete the ShardedCluster.
 
@@ -530,6 +530,35 @@ python3 tests/run_harness.py \
 
 ---
 
+
+# Live harness behavior for asynchronous commands
+
+The product CLI returns promptly for long-running deployment/topology commands, but the live harness still verifies completion before advancing.
+
+For an asynchronous test step the harness:
+
+1. submits the public controller command;
+2. extracts the returned Operation ID;
+3. polls `ListOperation OPERATION_ID` every few seconds;
+4. prints a `[WAIT]` line at least once per minute while the result is still `In Progress`;
+5. records `PASS` only when the expected terminal result is observed;
+6. records `FAIL` on an unexpected `Failed`, `Interrupted`, or timeout result;
+7. only then advances to the next dependent test.
+
+This means the user-facing CLI remains asynchronous while the acceptance harness remains deterministic.
+
+Example output:
+
+```text
+[RUN ] Test 21 of 33 - Delete a shard while database exists
+       Operation 7c1349abc123 accepted; polling for completion.
+[WAIT] Test 21 of 33 - Delete a shard while database exists - elapsed 00:01:00 - operation 7c1349abc123 still In Progress
+[WAIT] Test 21 of 33 - Delete a shard while database exists - elapsed 00:02:00 - operation 7c1349abc123 still In Progress
+[PASS] Test 21 of 33 - Delete a shard while database exists (00:02:41)
+```
+
+The selected profile determines the `X of Y` total. The `all` profile currently contains **33** PASS/FAIL checks.
+
 # 15. Fail-fast behavior
 
 The live harness is intentionally **fail-fast**.
@@ -602,13 +631,20 @@ If a failed run physically materialized a database but did not finish recording 
 
 # 17. Reading the result
 
-A successful run ends with a summary similar to:
+A successful full run ends with a summary similar to:
 
 ```text
 ====================================================================
-HARNESS SUMMARY: 20 passed / 0 failed
+HARNESS SUMMARY: 33 passed / 0 failed
+Preflight:         00:00:08
+ReplicaSet:        00:11:42
+ShardedCluster:    00:28:17
+Locking:           00:07:16
+Total elapsed:     00:47:23
 ====================================================================
 ```
+
+Every individual result also includes elapsed time, and long asynchronous tests emit periodic `[WAIT]` progress.
 
 A failure ends with something similar to:
 
