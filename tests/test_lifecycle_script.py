@@ -114,5 +114,86 @@ exit 1
             self.assertIn("name: tc-test-rs-admin-connection", manifest)
 
 
+    def test_account_connection_secret_names_replace_database_underscores(self) -> None:
+        """Account verification must use the same DNS-safe names as Terraform."""
+
+        repo_root = Path(__file__).resolve().parent.parent
+        lifecycle = repo_root / "terraform-dbaas" / "scripts" / "lifecycle.sh"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            fake_kubectl = temp / "kubectl"
+            manifest_path = temp / "jobs.yaml"
+
+            fake_kubectl.write_text(
+                """#!/usr/bin/env bash
+set -eu
+
+: "${FAKE_MANIFEST:?FAKE_MANIFEST is required}"
+args=" $* "
+
+if [[ "$args" == *" apply -f -"* ]]; then
+  cat >> "$FAKE_MANIFEST"
+  printf '\\n---\\n' >> "$FAKE_MANIFEST"
+  exit 0
+fi
+
+if [[ "$args" == *" get job "* ]]; then
+  if [[ "$args" == *".status.succeeded"* ]]; then
+    printf '1'
+  else
+    printf '0'
+  fi
+  exit 0
+fi
+
+if [[ "$args" == *" logs job/"* ]]; then
+  echo "TC_RESULT=AUTH_OK"
+  exit 0
+fi
+
+if [[ "$args" == *" delete job "* ]]; then
+  exit 0
+fi
+
+echo "Unexpected fake kubectl invocation: $*" >&2
+exit 1
+""",
+                encoding="utf-8",
+            )
+            fake_kubectl.chmod(0o755)
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{temp}{os.pathsep}{env['PATH']}",
+                    "FAKE_MANIFEST": str(manifest_path),
+                    "TC_ACTION": "verify_database_accounts",
+                    "TC_NAMESPACE": "mongodb",
+                    "TC_KUBECONFIG": "/tmp/fake-kubeconfig",
+                    "TC_DEPLOYMENT": "test-rs",
+                    "TC_DATABASE": "House_Info",
+                    "TC_AUTH_DATABASE": "admin",
+                    "TC_MONGO_IMAGE": "mongo:8.0",
+                }
+            )
+
+            result = subprocess.run(
+                ["bash", str(lifecycle)],
+                cwd=lifecycle.parent,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            manifests = manifest_path.read_text(encoding="utf-8")
+            self.assertNotIn("house_info", manifests)
+            self.assertIn("tc-test-rs-house-info-owner-", manifests)
+            self.assertIn("tc-test-rs-house-info-readwrite-", manifests)
+            self.assertIn("tc-test-rs-house-info-read-", manifests)
+
+
 if __name__ == "__main__":
     unittest.main()
