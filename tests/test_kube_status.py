@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from terraform_controller import kube
@@ -17,6 +18,38 @@ class KubeStatusTests(unittest.TestCase):
             "kube_context": "test",
             "mongodb_namespace": "mongodb",
         }
+
+    def test_list_json_cluster_scoped_resource_omits_namespace_flag(self) -> None:
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout='{"items": []}',
+            stderr="",
+        )
+        with patch.object(kube, "run_process", return_value=completed) as run_mock:
+            kube.list_json(
+                self.config,
+                "pv",
+                label_selector="app.kubernetes.io/managed-by=terraformController",
+                namespaced=False,
+            )
+
+        command = run_mock.call_args.args[0]
+        self.assertNotIn("-n", command)
+        self.assertIn("pv", command)
+        self.assertIn("-l", command)
+
+    def test_list_json_namespaced_resource_uses_configured_namespace(self) -> None:
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout='{"items": []}',
+            stderr="",
+        )
+        with patch.object(kube, "run_process", return_value=completed) as run_mock:
+            kube.list_json(self.config, "pvc")
+
+        command = run_mock.call_args.args[0]
+        self.assertIn("-n", command)
+        self.assertIn("mongodb", command)
 
     def test_phase_returns_absent_for_missing_mongodb_resource(self) -> None:
         with patch.object(kube, "get_json", return_value=None):

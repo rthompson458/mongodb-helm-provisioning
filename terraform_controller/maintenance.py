@@ -25,6 +25,109 @@ from .terraform_runner import apply_inventory
 from .vault import VaultClient
 
 
+MANAGED_BY_SELECTOR = "app.kubernetes.io/managed-by=terraformController"
+DEPLOYMENT_LOCK_PREFIX = "tc-deployment-lock-"
+
+
+def _kubernetes_names(items: list[dict[str, Any]]) -> list[str]:
+    """Return stable Kubernetes resource names for administrator reporting."""
+
+    names = [
+        str(item.get("metadata", {}).get("name", "<unknown>"))
+        for item in items
+    ]
+    return sorted(names)
+
+
+def managed_resource_inventory(
+    config: dict[str, Any],
+    vault: VaultClient,
+) -> dict[str, list[str]]:
+    """Return the controller's deployment-level managed resource inventory.
+
+    This function is intentionally read-only. It combines the Vault-backed
+    desired deployment inventory with the Kubernetes resources used during the
+    controller zero-state check: managed MongoDB custom resources, managed PVCs,
+    managed PVs, and terraformController deployment-lock ConfigMaps.
+    """
+
+    inventory = vault.load_inventory()
+    deployments = sorted(
+        str(inventory[key].get("display_name", key))
+        for key in inventory
+    )
+
+    mongodb_resources = kube.list_json(
+        config,
+        "mongodb",
+        label_selector=MANAGED_BY_SELECTOR,
+    )
+    pvcs = kube.list_json(
+        config,
+        "pvc",
+        label_selector=MANAGED_BY_SELECTOR,
+    )
+    pvs = kube.list_json(
+        config,
+        "pv",
+        label_selector=MANAGED_BY_SELECTOR,
+        namespaced=False,
+    )
+    configmaps = kube.list_json(config, "configmap")
+    locks = [
+        item
+        for item in configmaps
+        if str(item.get("metadata", {}).get("name", "")).startswith(
+            DEPLOYMENT_LOCK_PREFIX
+        )
+    ]
+
+    return {
+        "managed_deployments": deployments,
+        "mongodb_resources": _kubernetes_names(mongodb_resources),
+        "pvcs": _kubernetes_names(pvcs),
+        "pvs": _kubernetes_names(pvs),
+        "deployment_locks": _kubernetes_names(locks),
+    }
+
+
+def list_managed_resources(
+    config: dict[str, Any],
+    vault: VaultClient,
+) -> None:
+    """Print a concise read-only administrator inventory and zero-state result."""
+
+    resources = managed_resource_inventory(config, vault)
+    labels = [
+        ("Managed deployments", "managed_deployments"),
+        ("MongoDB resources", "mongodb_resources"),
+        ("PVCs", "pvcs"),
+        ("PVs", "pvs"),
+        ("Deployment locks", "deployment_locks"),
+    ]
+    clean = all(not resources[key] for _, key in labels)
+
+    print("terraformController Managed Resource Inventory")
+    print()
+    for label, key in labels:
+        print(f"{label + ':':<21} {len(resources[key])}")
+
+    print()
+    print(f"Status: {'CLEAN' if clean else 'ATTENTION REQUIRED'}")
+
+    if clean:
+        return
+
+    for label, key in labels:
+        names = resources[key]
+        if not names:
+            continue
+        print()
+        print(f"{label}:")
+        for name in names:
+            print(f"  {name}")
+
+
 def reconcile(config: dict[str, Any], vault: VaultClient) -> None:
     """Reapply complete Vault-backed desired state and verify convergence."""
     inventory = vault.load_inventory()
@@ -131,7 +234,7 @@ def recover_deployment_lock(
     if not confirmed:
         raise ControllerError(
             "RecoverDeploymentLock is a recovery action and requires '--confirm'. "
-            f"Example: terraformController.py RecoverDeploymentLock {name} --confirm"
+            f"Example: terraformControllerAdmin.py RecoverDeploymentLock {name} --confirm"
         )
 
     inventory = vault.load_inventory()
@@ -249,7 +352,7 @@ def recover_orphaned_resources(
     if not confirmed:
         raise ControllerError(
             "RecoverOrphanedResources is destructive and requires '--confirm'. "
-            "Example: terraformController.py RecoverOrphanedResources --confirm"
+            "Example: terraformControllerAdmin.py RecoverOrphanedResources --confirm"
         )
 
     inventory = vault.load_inventory()

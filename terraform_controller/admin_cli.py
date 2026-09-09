@@ -34,6 +34,7 @@ from .async_operations import (
 from .common import ControllerError
 from .config import load_config
 from .controller import (
+    list_managed_resources,
     reconcile,
     recover_deployment_lock,
     recover_orphaned_resources,
@@ -91,6 +92,7 @@ Use terraformController.py for normal:
   - service status
 
 Use this administrator program for:
+  - managed resource inventory and zero-state verification
   - asynchronous operation diagnostics
   - controlled recovery after interrupted lifecycle work
   - controller-wide Terraform reconciliation
@@ -101,6 +103,9 @@ controller can prove their safety prerequisites.
 Use '<command> --help' for detailed command-specific help.
 """,
         epilog="""Common administrator workflow:
+
+Verify controller-managed resource state:
+  terraformControllerAdmin.py ListManagedResources
 
 Inspect recent background work:
   terraformControllerAdmin.py ListOperations
@@ -133,6 +138,17 @@ Normal DBaaS users should use:
     )
 
     sp = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
+
+    _sub(
+        sp,
+        "ListManagedResources",
+        "List controller-managed deployment resources and zero-state status.",
+        "Read-only administrator inventory of Vault-backed managed deployments, "
+        "terraformController-managed MongoDB custom resources, persistent volume "
+        "claims, persistent volumes, and deployment-lock ConfigMaps. Reports CLEAN "
+        "only when all five categories are empty.",
+        "  terraformControllerAdmin.py ListManagedResources",
+    )
 
     x = _sub(
         sp,
@@ -234,6 +250,14 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "ListOperations":
             print_operations(config_path)
+            log_event("admin.command.succeeded", command=args.command)
+            return 0
+
+        # ListManagedResources needs Vault desired-state inventory plus read-only
+        # Kubernetes queries. It performs no Terraform or Kubernetes mutation.
+        if args.command == "ListManagedResources":
+            vault = VaultClient(config)
+            list_managed_resources(config, vault)
             log_event("admin.command.succeeded", command=args.command)
             return 0
 

@@ -56,20 +56,19 @@ def list_json(
     resource: str,
     *,
     label_selector: str = "",
+    namespaced: bool = True,
 ) -> list[dict[str, Any]]:
-    """Return Kubernetes resources as JSON items, optionally filtered by label.
+    """Return Kubernetes resources as JSON items without mutating the cluster.
 
-    This is read-only and is used by recovery validation to prove that no live
-    terraformController-managed MongoDB deployment exists before Terraform is
-    allowed to converge an empty desired-state inventory.
+    Most controller resources live in the configured MongoDB namespace. Cluster-
+    scoped resources such as PersistentVolumes pass namespaced=False so kubectl
+    is not given a namespace flag that does not apply to that resource type.
     """
 
-    command = base(config) + [
-        "-n",
-        config["mongodb_namespace"],
-        "get",
-        resource,
-    ]
+    command = base(config)
+    if namespaced:
+        command += ["-n", config["mongodb_namespace"]]
+    command += ["get", resource]
     if label_selector:
         command += ["-l", label_selector]
     command += ["-o", "json"]

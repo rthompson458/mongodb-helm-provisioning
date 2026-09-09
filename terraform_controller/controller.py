@@ -3,7 +3,7 @@
 The implementation is intentionally split by responsibility:
 - deployments.py: ReplicaSet, ShardedCluster, and shard lifecycle/status
 - databases.py: database, account, Vault credential, and rotation lifecycle
-- maintenance.py: reconciliation
+- maintenance.py: administrator inventory, reconciliation, and recovery
 """
 
 from .databases import (
@@ -29,7 +29,12 @@ from .deployments import (
     list_sharded_clusters,
     list_shards,
 )
-from .maintenance import reconcile, recover_deployment_lock, recover_orphaned_resources
+from .maintenance import (
+    list_managed_resources,
+    reconcile,
+    recover_deployment_lock,
+    recover_orphaned_resources,
+)
 
 __all__ = [
     "add_database",
@@ -50,6 +55,7 @@ __all__ = [
     "list_sharded_cluster",
     "list_sharded_clusters",
     "list_shards",
+    "list_managed_resources",
     "reconcile",
     "recover_deployment_lock",
     "recover_orphaned_resources",
