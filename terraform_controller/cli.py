@@ -460,6 +460,27 @@ def _async_worker_arguments(args: argparse.Namespace) -> list[str]:
     raise ControllerError(f"Command '{command}' is not configured for asynchronous execution.")
 
 
+
+def _validate_async_submission(args: argparse.Namespace) -> None:
+    """Reject obvious invalid async requests before assigning an Operation ID."""
+
+    if args.command in {"DeleteReplicaSet", "DeleteShardedCluster", "DeleteShard"}:
+        if not getattr(args, "confirm", False):
+            raise ControllerError(
+                f"{args.command} is destructive and requires '--confirm'."
+            )
+
+    if args.command in {"AddShard", "DeleteShard"} and int(args.count) < 1:
+        raise ControllerError("Shard COUNT must be at least 1.")
+
+    if (
+        args.command == "AddShardedCluster"
+        and args.shards is not None
+        and int(args.shards) < 1
+    ):
+        raise ControllerError("--shards must be at least 1.")
+
+
 def _async_deployment(args: argparse.Namespace) -> str:
     """Return the deployment name associated with an asynchronous command."""
 
@@ -503,6 +524,7 @@ def main(argv: list[str] | None = None) -> int:
         # hidden operation ID and therefore executes the normal synchronous
         # Terraform lifecycle rather than spawning another worker.
         if args.command in ASYNC_COMMANDS and not operation_id:
+            _validate_async_submission(args)
             state = launch_operation(
                 config_path,
                 DEFAULT_CONFIG.parent,
