@@ -67,8 +67,9 @@ RecoverOrphanedResources --confirm
 Administrator help text explicitly identifies these commands as operator/recovery tools.
 
 `ListManagedResources` is the read-only administrator inventory used to verify
-that Vault-backed deployment inventory, managed MongoDB resources, managed PVCs,
-managed PVs, and deployment locks are all empty before a clean test or handoff.
+that Vault-backed deployment inventory, managed MongoDB resources, managed MongoDBUser
+resources, managed PVCs, managed PVs, and deployment locks are all empty before a clean
+test or handoff.
 The shorter name `ListResources` is intentionally not supported because it
 could imply a cluster-wide resource listing.
 
