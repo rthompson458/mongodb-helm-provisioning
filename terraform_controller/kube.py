@@ -51,6 +51,42 @@ def get_json(config: dict[str, Any], resource: str, name: str) -> dict[str, Any]
         ) from exc
 
 
+def list_json(
+    config: dict[str, Any],
+    resource: str,
+    *,
+    label_selector: str = "",
+) -> list[dict[str, Any]]:
+    """Return Kubernetes resources as JSON items, optionally filtered by label.
+
+    This is read-only and is used by recovery validation to prove that no live
+    terraformController-managed MongoDB deployment exists before Terraform is
+    allowed to converge an empty desired-state inventory.
+    """
+
+    command = base(config) + [
+        "-n",
+        config["mongodb_namespace"],
+        "get",
+        resource,
+    ]
+    if label_selector:
+        command += ["-l", label_selector]
+    command += ["-o", "json"]
+
+    result = run_process(command, capture=True, check=False)
+    if result.returncode:
+        error = (result.stderr or result.stdout or "kubectl get failed").strip()
+        raise ControllerError(error)
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise ControllerError(
+            f"kubectl returned invalid JSON while listing {resource} resources."
+        ) from exc
+    return list(data.get("items", []) or [])
+
+
 def phase(config: dict[str, Any], deployment_key: str) -> str:
     obj = get_json(config, "mongodb", deployment_key)
     return str(obj.get("status", {}).get("phase", "Unknown")) if obj else "Absent"
