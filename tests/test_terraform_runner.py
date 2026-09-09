@@ -82,7 +82,7 @@ from terraform_controller.terraform_runner import _terraform_execution_lock
 cache = Path(sys.argv[2])
 marker = Path(sys.argv[3])
 with _terraform_execution_lock({"terraform_cache": cache}):
-    marker.write_text("acquired\n", encoding="utf-8")
+    marker.write_text("acquired", encoding="utf-8")
 """
 
             with terraform_runner._terraform_execution_lock(
@@ -115,7 +115,7 @@ with _terraform_execution_lock({"terraform_cache": cache}):
                 0,
                 msg=f"stdout:\n{stdout}\nstderr:\n{stderr}",
             )
-            self.assertEqual(marker.read_text(encoding="utf-8"), "acquired\n")
+            self.assertEqual(marker.read_text(encoding="utf-8"), "acquired")
 
 
 if __name__ == "__main__":
