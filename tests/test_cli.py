@@ -43,5 +43,26 @@ class CliTests(unittest.TestCase):
         self.assertIsNone(args.database)
 
 
+    def test_list_operation_accepts_operation_id(self) -> None:
+        args = cli.build_parser().parse_args(["ListOperation", "abc123"])
+        self.assertEqual(args.operation_id, "abc123")
+
+    def test_async_worker_arguments_preserve_delete_confirmation(self) -> None:
+        args = cli.build_parser().parse_args(
+            ["DeleteShard", "SC9", "3", "--confirm"]
+        )
+        self.assertEqual(
+            cli._async_worker_arguments(args),
+            ["DeleteShard", "SC9", "3", "--confirm"],
+        )
+
+    def test_internal_operation_worker_flag_is_hidden_but_parseable(self) -> None:
+        args = cli.build_parser().parse_args(
+            ["--_operation-worker", "abc123", "AddShard", "SC9", "2"]
+        )
+        self.assertEqual(args._operation_worker, "abc123")
+        self.assertEqual(args.command, "AddShard")
+
+
 if __name__ == "__main__":
     unittest.main()
