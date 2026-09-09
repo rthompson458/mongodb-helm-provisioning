@@ -51,8 +51,13 @@ The user explicitly creates and names a deployment:
 
 ```bash
 python3 terraformController.py AddReplicaSet RS1
-python3 terraformController.py AddShardedCluster SC9 --shards 3
+python3 terraformController.py AddShardedCluster SC9
 ```
+
+For `AddShardedCluster`, the initial shard count is optional. The current
+configured default is **3 shards**, and the controller reads that default from
+its configuration. Use `--shards N` to override the configured value for one
+request.
 
 ## Managed hierarchy
 
@@ -111,7 +116,13 @@ AddShard SHARDED_CLUSTER [COUNT]
 DeleteShard SHARDED_CLUSTER [COUNT] --confirm
 ```
 
-`COUNT` defaults to 1.
+Defaults:
+
+- `AddShardedCluster SHARDED_CLUSTER` uses the initial shard count stored in
+  controller configuration. The current configured default is **3**.
+- `AddShard SHARDED_CLUSTER` defaults to **1 shard** when `COUNT` is omitted.
+- `DeleteShard SHARDED_CLUSTER --confirm` defaults to **1 shard** when
+  `COUNT` is omitted.
 
 Examples:
 
@@ -351,8 +362,16 @@ The command returns after the request is accepted. Use `ListReplicaSet RS1` or `
 
 ## AddShardedCluster
 
+Use the configured default shard count:
+
 ```bash
-python3 terraformController.py AddShardedCluster SC9 --shards 3
+python3 terraformController.py AddShardedCluster SC9
+```
+
+Override the configured default for one request:
+
+```bash
+python3 terraformController.py AddShardedCluster SC9 --shards 5
 ```
 
 Default topology:
@@ -365,7 +384,10 @@ Config servers:     3
 MongoDB:            8.0.29
 ```
 
-The shard count can be overridden with `--shards N`.
+The initial shard count is read from controller configuration when `--shards`
+is omitted. The current configured default is **3 shards**. The CLI help reads
+and displays the configured value dynamically so the help text stays aligned
+with configuration changes. Use `--shards N` to override it for one request.
 
 The command returns after the request is accepted. Use `ListShardedCluster SC9` and `ListShards SC9` to monitor readiness. The deployment is ready only when the ShardedCluster, shards, config servers, and mongos components are online.
 
@@ -383,6 +405,8 @@ Examples:
 python3 terraformController.py AddShard SC9
 python3 terraformController.py AddShard SC9 2
 ```
+
+If `COUNT` is omitted, `AddShard` adds **1 shard** by default.
 
 For `AddShard SC9 2`, if SC9 starts with 3 shards, the target is 5 shards.
 
@@ -415,6 +439,9 @@ Examples:
 python3 terraformController.py DeleteShard SC9 --confirm
 python3 terraformController.py DeleteShard SC9 2 --confirm
 ```
+
+If `COUNT` is omitted, `DeleteShard` removes **1 shard** by default.
+`--confirm` is still required.
 
 Safety rules:
 
