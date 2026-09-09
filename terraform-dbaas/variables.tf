@@ -113,6 +113,7 @@ variable "operation" {
       "verify_database_accounts",
       "verify_database_accounts_owner_disabled",
       "verify_database_users_absent",
+      "verify_controller_admin",
       "acquire_deployment_lock",
       "release_deployment_lock"
     ], var.operation.action)
