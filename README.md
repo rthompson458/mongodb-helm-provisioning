@@ -179,21 +179,67 @@ See [README-terraformController.md](README-terraformController.md) for the compl
 
 ## Testing
 
-Tests are split by responsibility instead of being kept in one large Python file.
+The project has two testing layers:
 
-Fast unit/regression suite:
+1. fast unit/regression tests that do not require a live MongoDB environment;
+2. a live end-to-end harness that drives the real `terraformController.py` CLI against the configured development environment.
+
+### Fast unit/regression suite
 
 ```bash
 python3 -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-Safe read-only live preflight:
+### Live harness help
+
+Show every supported harness option:
+
+```bash
+python3 tests/run_harness.py --help
+```
+
+### Live harness profiles
+
+Safe read-only preflight, which is also the default:
 
 ```bash
 python3 tests/run_harness.py
 ```
 
-Full live lifecycle test against the configured development environment:
+or:
+
+```bash
+python3 tests/run_harness.py --profile preflight
+```
+
+ReplicaSet lifecycle only:
+
+```bash
+python3 tests/run_harness.py \
+  --profile replicaset \
+  --allow-mutations \
+  --allow-destructive
+```
+
+ShardedCluster and shard lifecycle only:
+
+```bash
+python3 tests/run_harness.py \
+  --profile sharded \
+  --allow-mutations \
+  --allow-destructive
+```
+
+Concurrent ShardedCluster deployment-lock test only:
+
+```bash
+python3 tests/run_harness.py \
+  --profile locking \
+  --allow-mutations \
+  --allow-destructive
+```
+
+Complete live acceptance run:
 
 ```bash
 python3 tests/run_harness.py \
@@ -202,8 +248,74 @@ python3 tests/run_harness.py \
   --allow-destructive
 ```
 
-The live harness creates temporary resources with `TH...` names and covers
-ReplicaSet lifecycle, ShardedCluster lifecycle, multi-shard add/delete,
-database/account lifecycle, password rotation, Owner disable, shard removal while a database remains on the cluster, final-shard safety, global/targeted shard status, and concurrent ShardedCluster locking.
+The mutating profiles intentionally require both safety flags:
 
-See [tests/README.md](tests/README.md) for the complete test map and safety rules.
+```text
+--allow-mutations
+--allow-destructive
+```
+
+### Useful harness options
+
+Print stdout/stderr for passing steps as well as failures:
+
+```bash
+python3 tests/run_harness.py \
+  --profile all \
+  --allow-mutations \
+  --allow-destructive \
+  --verbose
+```
+
+Use a different controller configuration file:
+
+```bash
+python3 tests/run_harness.py \
+  --profile preflight \
+  --config /path/to/terraformController.config
+```
+
+Use a specific Python interpreter when the harness launches `terraformController.py`:
+
+```bash
+python3 tests/run_harness.py \
+  --profile preflight \
+  --python /usr/bin/python3
+```
+
+Use a predictable suffix for temporary test resources:
+
+```bash
+python3 tests/run_harness.py \
+  --profile replicaset \
+  --suffix RSDEBUG01 \
+  --allow-mutations \
+  --allow-destructive
+```
+
+The default suffix is generated from the current time as `MMDDHHMMSS` and is used in temporary names such as:
+
+```text
+THRS-<suffix>
+THSC-<suffix>
+THDB_<suffix>
+```
+
+### What the full harness covers
+
+The complete `all` profile runs:
+
+```text
+preflight
+  -> ReplicaSet lifecycle
+  -> ShardedCluster lifecycle
+  -> deployment-lock/concurrency lifecycle
+```
+
+Coverage includes ReplicaSet and ShardedCluster creation/deletion, real controller-admin authentication readiness, database creation/deletion, Owner/ReadWrite/Read accounts, password rotation, Owner disable, blocking deployment deletion while databases exist, targeted/global shard status, multi-shard add/delete, deleting a shard while a database remains, one-shard minimum enforcement, and concurrent mutation locking.
+
+The harness is **fail-fast**. If a prerequisite step fails, dependent steps and later profiles are not started. This keeps the first meaningful defect visible instead of producing a cascade of secondary failures.
+
+Successful live profiles clean up their temporary resources. After a failed run, temporary resources may remain so the failed state can be inspected. Use normal `terraformController.py`/Terraform lifecycle commands to clean controller-managed resources rather than manually deleting them from Kubernetes.
+
+See [tests/README.md](tests/README.md) for the full harness operator guide, including profile-by-profile behavior, all option combinations, cleanup guidance, result interpretation, and recommended testing workflows.
