@@ -82,6 +82,7 @@ class CliTests(unittest.TestCase):
     def test_public_parser_does_not_expose_administrator_commands(self) -> None:
         parser = cli.build_parser()
         admin_commands = {
+            "ListManagedResources",
             "ListOperation",
             "ListOperations",
             "RecoverDeploymentLock",
@@ -104,6 +105,7 @@ class CliTests(unittest.TestCase):
     def test_public_help_is_customer_facing(self) -> None:
         help_text = cli.build_parser().format_help()
         self.assertIn("Terraform-driven MongoDB DBaaS controller", help_text)
+        self.assertNotIn("ListManagedResources", help_text)
         self.assertNotIn("ListOperation", help_text)
         self.assertNotIn("RecoverDeploymentLock", help_text)
         self.assertNotIn("RecoverOrphanedResources", help_text)
