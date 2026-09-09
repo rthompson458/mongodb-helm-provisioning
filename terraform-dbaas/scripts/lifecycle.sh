@@ -53,7 +53,7 @@ spec:
           command:
             - /bin/bash
             - -lc
-            - 'mongosh "$MONGODB_URI" --quiet --eval "$TC_JS"'
+            - 'mongosh "\$MONGODB_URI" --quiet --eval "\$TC_JS"'
 EOF
 )
 
