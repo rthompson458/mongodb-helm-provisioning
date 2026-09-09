@@ -136,10 +136,16 @@ def print_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> None:
 
 
 def account_resource_name(deployment_key: str, db_key: str, account_key: str) -> str:
-    """Build the stable Kubernetes resource name for a managed DB account."""
+    """Build the stable Kubernetes resource name for a managed DB account.
+
+    MongoDB database names may contain underscores, but Kubernetes object
+    names must be RFC 1123 compatible. Only the Kubernetes-facing database
+    segment is changed; the inventory key and digest input remain unchanged.
+    """
     import hashlib
     digest = hashlib.md5(f"{deployment_key}/{db_key}/{account_key}".encode()).hexdigest()[:6]
-    return f"tc-{deployment_key[:8]}-{db_key[:10]}-{account_key}-{digest}"
+    db_resource_key = db_key.lower().replace("_", "-")
+    return f"tc-{deployment_key.lower()[:8]}-{db_resource_key[:10]}-{account_key.lower()}-{digest}"
 
 
 def database_rows(

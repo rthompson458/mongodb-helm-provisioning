@@ -108,7 +108,10 @@ locals {
           enabled          = account_key != "owner" || !database.owner_disabled
           rotation_version = database.rotation_version
           rotated_at       = database.rotated_at
-          resource_name    = "tc-${substr(database.deployment_key, 0, 8)}-${substr(database.database_key, 0, 10)}-${account_key}-${substr(md5("${database_key}/${account_key}"), 0, 6)}"
+          # MongoDB database names may contain underscores, but Kubernetes
+          # object names may not. Keep the MongoDB/Vault display name unchanged
+          # while converting only the Kubernetes resource-name segment.
+          resource_name = "tc-${substr(database.deployment_key, 0, 8)}-${substr(replace(database.database_key, "_", "-"), 0, 10)}-${account_key}-${substr(md5("${database_key}/${account_key}"), 0, 6)}"
         }
       ]
     ]) : account.key => account
