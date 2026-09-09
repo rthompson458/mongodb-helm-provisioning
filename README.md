@@ -16,9 +16,13 @@ Examples:
 
 ```bash
 python3 terraformController.py AddReplicaSet RS1
-python3 terraformController.py AddShardedCluster SC9 --shards 3
+python3 terraformController.py AddShardedCluster SC9
 python3 terraformController.py ListDeployments
 ```
+
+`AddShardedCluster` uses the initial shard count stored in controller
+configuration when `--shards` is omitted. The current configured default is
+**3 shards**. Use `--shards N` to override it for one request.
 
 After a deployment is fully ready:
 
@@ -135,6 +139,8 @@ The targeted view also reports config-server, mongos, and active managed-change 
 
 ### Add shards
 
+If no count is supplied, `AddShard` defaults to **1 shard**.
+
 Add one shard:
 
 ```bash
@@ -148,6 +154,9 @@ python3 terraformController.py AddShard SC9 2
 ```
 
 ### Delete shards
+
+If no count is supplied, `DeleteShard` defaults to **1 shard**.
+`--confirm` remains required.
 
 Delete one shard:
 

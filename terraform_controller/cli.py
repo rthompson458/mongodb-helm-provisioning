@@ -55,6 +55,39 @@ from .vault import VaultClient
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "terraformController.config"
 
 
+def _config_path_from_argv(argv: list[str]) -> Path:
+    """Return the configuration path selected on the command line.
+
+    The public help screen displays live configuration-backed defaults. We must
+    therefore know which config file the caller selected *before* argparse
+    renders --help. This small pre-scan handles both "--config FILE" and
+    "--config=FILE" without performing any controller mutation.
+    """
+
+    for index, value in enumerate(argv):
+        if value == "--config" and index + 1 < len(argv):
+            return Path(argv[index + 1]).expanduser()
+        if value.startswith("--config="):
+            return Path(value.split("=", 1)[1]).expanduser()
+    return DEFAULT_CONFIG
+
+
+def _configured_default_shards(config_path: Path) -> int | None:
+    """Read the configured AddShardedCluster default for customer help text.
+
+    If the configuration cannot be loaded, normal command execution will later
+    report the real configuration error. Help remains available and clearly
+    states that the default is configuration-backed.
+    """
+
+    try:
+        return int(load_config(config_path)["default_shards"])
+    except (ControllerError, OSError, KeyError, TypeError, ValueError):
+        return None
+
+
+
+
 def _confirm(parser: argparse.ArgumentParser) -> None:
     """Add the standard --confirm guard used by destructive commands."""
     parser.add_argument(
@@ -114,16 +147,24 @@ def _sub(
     )
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(config_path: Path | None = None) -> argparse.ArgumentParser:
     """Build the complete public CLI contract.
 
     Keeping command definitions together makes it easy to audit exactly what an
     end user can do and which destructive commands require --confirm.
     """
+    help_config_path = (config_path or DEFAULT_CONFIG).expanduser()
+    configured_default_shards = _configured_default_shards(help_config_path)
+    configured_shards_text = (
+        str(configured_default_shards)
+        if configured_default_shards is not None
+        else "configured value unavailable"
+    )
+
     parser = argparse.ArgumentParser(
         prog="terraformController.py",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="""Terraform-driven MongoDB DBaaS controller.
+        description=f"""Terraform-driven MongoDB DBaaS controller.
 
 A fresh installation starts with zero user-facing MongoDB deployments.
 Create and name a ReplicaSet or ShardedCluster before creating databases.
@@ -148,6 +189,12 @@ ShardedCluster database work is accepted only when the deployment is fully
 available: the MongoDB resource is Running, all expected shards are Online,
 config servers are Online, and mongos is Online.
 
+Configured defaults:
+  AddShardedCluster initial shards = {configured_shards_text}
+    (read from controller configuration)
+  AddShard count                  = 1
+  DeleteShard count               = 1
+
 Use '<command> --help' for detailed help.
 """,
         epilog="""Typical flows:
@@ -157,7 +204,7 @@ ReplicaSet:
   terraformController.py AddDatabase RS1 HouseInfo
 
 ShardedCluster:
-  terraformController.py AddShardedCluster SC9 --shards 3
+  terraformController.py AddShardedCluster SC9
   terraformController.py ListShards SC9
   terraformController.py AddShard SC9 2
   terraformController.py AddDatabase SC9 HouseInfo
@@ -199,14 +246,17 @@ Inventory:
         "AddShardedCluster",
         "Create an empty managed ShardedCluster.",
         "Requests creation of a MongoDB ShardedCluster and returns promptly while provisioning continues in the background. Use the ShardedCluster status commands to monitor readiness.",
-        "  terraformController.py AddShardedCluster SC9\n  terraformController.py AddShardedCluster SC9 --shards 3",
+        f"  terraformController.py AddShardedCluster SC9    # uses configured default: {configured_shards_text} shard(s)\n  terraformController.py AddShardedCluster SC9 --shards 5    # override",
     )
     _deployment(x, "SHARDED_CLUSTER")
     x.add_argument(
         "--shards",
         type=int,
         metavar="N",
-        help="Initial shard count. Omit to use [Sharding] default_shards.",
+        help=(
+            f"Initial shard count. Optional. Default: {configured_shards_text} "
+            "(read from controller configuration). Use --shards N to override."
+        ),
     )
 
     x = _sub(
@@ -308,7 +358,7 @@ Inventory:
         nargs="?",
         type=int,
         default=1,
-        help="Number of shards to add. Default: 1.",
+        help="Number of shards to add. Optional. Default: 1.",
     )
 
     x = _sub(
@@ -325,7 +375,7 @@ Inventory:
         nargs="?",
         type=int,
         default=1,
-        help="Number of shards to delete. Default: 1.",
+        help="Number of shards to delete. Optional. Default: 1.",
     )
     _confirm(x)
 
@@ -502,7 +552,9 @@ def main(argv: list[str] | None = None) -> int:
     this customer-facing interface.
     """
 
-    args = build_parser().parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    help_config_path = _config_path_from_argv(raw_argv)
+    args = build_parser(help_config_path).parse_args(raw_argv)
     logging_ready = False
     config_path = Path(args.config).expanduser().resolve()
     operation_id = getattr(args, "_operation_worker", None)
