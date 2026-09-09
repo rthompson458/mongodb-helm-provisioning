@@ -15,8 +15,9 @@ from terraform_controller.async_operations import (
     mark_failed,
     mark_running,
     mark_succeeded,
+    admin_submission_instructions,
     operation_directory,
-    submission_instructions,
+    public_submission_instructions,
 )
 from terraform_controller.common import ControllerError
 
@@ -88,7 +89,7 @@ class AsyncOperationTests(unittest.TestCase):
         self.assertEqual(failed["result"], "Failed")
         self.assertIn("retain at least 1 shard", failed["message"])
 
-    def test_submission_tells_user_exactly_how_to_check_result(self) -> None:
+    def test_public_submission_hides_operation_internals(self) -> None:
         with self._patch_state_home():
             state = create_operation(
                 self.config_path,
@@ -96,15 +97,32 @@ class AsyncOperationTests(unittest.TestCase):
                 deployment="SC9",
                 worker_arguments=["AddShard", "SC9", "2"],
             )
-            text = submission_instructions(
+            text = public_submission_instructions(
                 self.config_path,
                 state,
-                shard_status=True,
+                resource_label="ShardedCluster",
+                status_text="Topology change requested",
+                status_arguments=["ListShards", "SC9"],
             )
-        self.assertIn("Check positive/negative result with:", text)
-        self.assertIn("ListOperation", text)
-        self.assertIn(state["operation_id"], text)
+        self.assertIn("AddShard request accepted.", text)
         self.assertIn("ListShards SC9", text)
+        self.assertNotIn("ListOperation", text)
+        self.assertNotIn(state["operation_id"], text)
+        self.assertNotIn("Worker PID", text)
+
+    def test_admin_submission_exposes_exact_operation_diagnostics(self) -> None:
+        with self._patch_state_home():
+            state = create_operation(
+                self.config_path,
+                command="RecoverOrphanedResources",
+                deployment="controller-state",
+                worker_arguments=["RecoverOrphanedResources", "--confirm"],
+            )
+            text = admin_submission_instructions(self.config_path, state)
+        self.assertIn("Operation ID:", text)
+        self.assertIn(state["operation_id"], text)
+        self.assertIn("terraformControllerAdmin.py", text)
+        self.assertIn("ListOperation", text)
 
     def test_duplicate_in_progress_deployment_submission_is_blocked(self) -> None:
         with self._patch_state_home():
