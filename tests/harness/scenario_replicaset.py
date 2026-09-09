@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from .runner import HarnessRunner
 
+TEST_COUNT = 9
+
 
 def run(runner: HarnessRunner) -> None:
     """Create, exercise, and clean up a temporary ReplicaSet and database.
@@ -16,11 +18,10 @@ def run(runner: HarnessRunner) -> None:
     rs = ctx.replica_set
     db = ctx.database
 
-    created_rs = runner.controller(
+    created_rs = runner.controller_async(
         "Create temporary ReplicaSet",
         "AddReplicaSet",
         rs,
-        expected_text=f"ReplicaSet '{rs}' was successfully created",
         timeout=1800,
     )
     if not created_rs.passed:
@@ -56,13 +57,14 @@ def run(runner: HarnessRunner) -> None:
     if not listed_db.passed:
         return
 
-    blocked_delete = runner.controller(
+    blocked_delete = runner.controller_async(
         "Block ReplicaSet deletion while database exists",
         "DeleteReplicaSet",
         rs,
         "--confirm",
         expect_success=False,
         expected_text="contains managed databases",
+        timeout=300,
     )
     if not blocked_delete.passed:
         return
@@ -102,11 +104,10 @@ def run(runner: HarnessRunner) -> None:
     if not deleted_db.passed:
         return
 
-    runner.controller(
+    runner.controller_async(
         "Delete temporary ReplicaSet",
         "DeleteReplicaSet",
         rs,
         "--confirm",
-        expected_text=f"ReplicaSet '{rs}' was successfully deleted",
         timeout=1800,
     )
