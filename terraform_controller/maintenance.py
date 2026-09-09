@@ -234,7 +234,7 @@ def recover_deployment_lock(
     if not confirmed:
         raise ControllerError(
             "RecoverDeploymentLock is a recovery action and requires '--confirm'. "
-            f"Example: terraformController.py RecoverDeploymentLock {name} --confirm"
+            f"Example: terraformControllerAdmin.py RecoverDeploymentLock {name} --confirm"
         )
 
     inventory = vault.load_inventory()
@@ -352,7 +352,7 @@ def recover_orphaned_resources(
     if not confirmed:
         raise ControllerError(
             "RecoverOrphanedResources is destructive and requires '--confirm'. "
-            "Example: terraformController.py RecoverOrphanedResources --confirm"
+            "Example: terraformControllerAdmin.py RecoverOrphanedResources --confirm"
         )
 
     inventory = vault.load_inventory()
