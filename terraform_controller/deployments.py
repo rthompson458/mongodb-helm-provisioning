@@ -519,6 +519,8 @@ def add_shard(
     print(f"Previous shards: {start}")
     print(f"Total shards:    {target}")
     print("Status:          Running")
+    if item["databases"]:
+        print(f"Databases:       {len(item['databases'])} preserved")
 
 
 def delete_shard(
@@ -530,9 +532,11 @@ def delete_shard(
 ) -> None:
     """Delete COUNT highest-numbered shards while always retaining at least one.
 
-    For this first implementation the cluster must contain no application
-    databases.  MongoDB shard draining policy will be designed later with the
-    customer rather than guessed here.
+    Shard removal is allowed while application databases exist. Python owns
+    validation, locking, waiting, and reporting only. The topology mutation is
+    still Terraform-driven: Terraform lowers the MongoDB ShardedCluster
+    spec.shardCount and the MongoDB Kubernetes Operator/Ops Manager reconciles
+    the supported scale-down before Terraform removes old storage.
     """
 
     _require_positive_shard_count(count)
@@ -569,29 +573,6 @@ def delete_shard(
 
         require_running(config, key, item)
 
-        if item["databases"]:
-            names = "\n".join(
-                f"  {item['databases'][x]['display_name']}"
-                for x in sorted(item["databases"])
-            )
-            raise ControllerError(
-                f"Shard deletion is blocked because ShardedCluster "
-                f"'{item['display_name']}' contains managed databases:\n"
-                f"{names}\nFor this first-pass implementation, remove all "
-                "application databases before removing shards."
-            )
-
-        apply_inventory(
-            config,
-            inventory,
-            {
-                "action": "validate_deployment_empty",
-                "deployment": key,
-                "deployment_type": "ShardedCluster",
-                "database": "",
-                "members": int(item["members_per_shard"]),
-            },
-        )
 
         lock = acquire_deployment_lock(
             config,
@@ -615,6 +596,15 @@ def delete_shard(
 
     try:
         if int(item["shard_count"]) > target:
+            print(
+                f"Scaling ShardedCluster '{item['display_name']}' from "
+                f"{start} to {target} shard(s) through Terraform ..."
+            )
+            if item["databases"]:
+                print(
+                    "Existing databases will be preserved while the MongoDB "
+                    "Kubernetes Operator/Ops Manager reconciles the shard scale-down."
+                )
             item["shard_count"] = target
             apply_inventory(config, inventory)
 
