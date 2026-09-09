@@ -45,5 +45,31 @@ class TerraformContractTests(unittest.TestCase):
         )
 
 
+    def test_static_sharded_storage_records_deterministic_pvc_names(self) -> None:
+        """Each Terraform PV must identify the exact MongoDB PVC it may delete."""
+
+        repo_root = Path(__file__).resolve().parent.parent
+        main_text = (repo_root / "terraform-dbaas" / "main.tf").read_text(
+            encoding="utf-8"
+        )
+        lifecycle_text = (
+            repo_root / "terraform-dbaas" / "scripts" / "lifecycle.sh"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            'pvc_name          = "data-${key}-${floor(ordinal / cluster.members_per_shard)}-${ordinal % cluster.members_per_shard}"',
+            main_text,
+        )
+        self.assertIn(
+            'pvc_name          = "data-${key}-config-${ordinal}"',
+            main_text,
+        )
+        self.assertIn("TC_PVC_NAME", main_text)
+        self.assertIn("claimRef:", lifecycle_text)
+        self.assertIn("dbaas.pvc-name:", lifecycle_text)
+        self.assertIn("Refusing storage cleanup", lifecycle_text)
+        self.assertIn('TC_STORAGE_CLEANUP_TIMEOUT:-180s', lifecycle_text)
+
+
 if __name__ == "__main__":
     unittest.main()
