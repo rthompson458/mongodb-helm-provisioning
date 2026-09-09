@@ -363,6 +363,7 @@ exit 1
                     "TC_PVC_NAME": "",
                     "TC_STORAGE_BASE_PATH": "/tmp/storage",
                     "TC_STORAGE_NODE_NAME": "fake-node",
+                    "TC_STORAGE_CLEANUP_TIMEOUT": "0s",
                 }
             )
 
@@ -376,9 +377,130 @@ exit 1
             )
 
             self.assertEqual(result.returncode, 42, msg=result.stderr)
-            self.assertIn("still used by pod(s): test-sc-2-0", result.stderr)
+            self.assertIn("still used by pod(s) from the removed shard: test-sc-2-0", result.stderr)
+            self.assertIn("Timed out waiting 0s", result.stderr)
             self.assertIn("No PVC/PV was deleted", result.stderr)
             self.assertFalse(delete_marker.exists())
+
+
+    def test_live_shard_cleanup_waits_for_terminating_pod_to_release_pvc(self) -> None:
+        """Live shard contraction waits for terminating pods before deleting storage."""
+
+        repo_root = Path(__file__).resolve().parent.parent
+        lifecycle = repo_root / "terraform-dbaas" / "scripts" / "lifecycle.sh"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            fake_kubectl = temp / "kubectl"
+            fake_docker = temp / "docker"
+            pod_checks = temp / "pod-checks"
+            pvc_deleted = temp / "pvc-deleted"
+            pv_deleted = temp / "pv-deleted"
+
+            fake_kubectl.write_text(
+                """#!/usr/bin/env bash
+set -eu
+
+: "${FAKE_POD_CHECKS:?}"
+: "${FAKE_PVC_DELETED:?}"
+: "${FAKE_PV_DELETED:?}"
+args=" $* "
+
+if [[ "$args" == *" get mongodb test-sc"* ]]; then
+  exit 0
+fi
+
+if [[ "$args" == *" get pv test-sc-shard-11 -o jsonpath={.spec.claimRef.name}"* ]]; then
+  printf 'data-test-sc-2-0'
+  exit 0
+fi
+
+if [[ "$args" == *" get pv test-sc-shard-11 -o jsonpath={.spec.claimRef.namespace}"* ]]; then
+  printf 'mongodb'
+  exit 0
+fi
+
+if [[ "$args" == *" get pvc data-test-sc-2-0 -o jsonpath={.spec.volumeName}"* ]]; then
+  printf 'test-sc-shard-11'
+  exit 0
+fi
+
+if [[ "$args" == *" get pvc data-test-sc-2-0"* ]]; then
+  [[ -f "$FAKE_PVC_DELETED" ]] && exit 1
+  exit 0
+fi
+
+if [[ "$args" == *" get pods -o json"* ]]; then
+  n=0
+  [[ -f "$FAKE_POD_CHECKS" ]] && n=$(cat "$FAKE_POD_CHECKS")
+  n=$((n + 1))
+  printf '%s' "$n" > "$FAKE_POD_CHECKS"
+  if [[ "$n" -eq 1 ]]; then
+    printf '{"items":[{"metadata":{"name":"test-sc-2-0"},"spec":{"volumes":[{"persistentVolumeClaim":{"claimName":"data-test-sc-2-0"}}]}}]}'
+  else
+    printf '{"items":[]}'
+  fi
+  exit 0
+fi
+
+if [[ "$args" == *" delete pvc data-test-sc-2-0"* ]]; then
+  touch "$FAKE_PVC_DELETED"
+  exit 0
+fi
+
+if [[ "$args" == *" delete pv test-sc-shard-11"* ]]; then
+  touch "$FAKE_PV_DELETED"
+  exit 0
+fi
+
+if [[ "$args" == *" get pv test-sc-shard-11"* ]]; then
+  [[ -f "$FAKE_PV_DELETED" ]] && exit 1
+  exit 0
+fi
+
+echo "Unexpected fake kubectl invocation: $*" >&2
+exit 1
+""",
+                encoding="utf-8",
+            )
+            fake_kubectl.chmod(0o755)
+            fake_docker.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+            fake_docker.chmod(0o755)
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{temp}{os.pathsep}{env['PATH']}",
+                    "FAKE_POD_CHECKS": str(pod_checks),
+                    "FAKE_PVC_DELETED": str(pvc_deleted),
+                    "FAKE_PV_DELETED": str(pv_deleted),
+                    "TC_ACTION": "cleanup_sharded_cluster_volume",
+                    "TC_NAMESPACE": "mongodb",
+                    "TC_KUBECONFIG": "/tmp/fake-kubeconfig",
+                    "TC_DEPLOYMENT": "test-sc",
+                    "TC_PV_NAME": "test-sc-shard-11",
+                    "TC_PVC_NAME": "data-test-sc-2-0",
+                    "TC_STORAGE_BASE_PATH": "/tmp/storage",
+                    "TC_STORAGE_NODE_NAME": "fake-node",
+                    "TC_STORAGE_CLEANUP_TIMEOUT": "5s",
+                }
+            )
+
+            result = subprocess.run(
+                ["bash", str(lifecycle)],
+                cwd=lifecycle.parent,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertIn("still used by pod(s) from the removed shard", result.stderr)
+            self.assertIn("Waiting up to 5s", result.stderr)
+            self.assertGreaterEqual(int(pod_checks.read_text(encoding="utf-8")), 2)
+            self.assertTrue(pvc_deleted.exists())
+            self.assertTrue(pv_deleted.exists())
 
 
     def test_legacy_storage_mismatch_is_cleaned_only_after_cluster_is_absent(self) -> None:
