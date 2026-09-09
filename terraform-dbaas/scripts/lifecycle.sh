@@ -121,6 +121,27 @@ verify_account() {
   return 1
 }
 
+verify_controller_admin() {
+  # A MongoDBUser CR can report Updated slightly before the new SCRAM
+  # credential is usable by a real client. Treat successful authentication,
+  # not only Kubernetes phase, as the final deployment-readiness signal.
+  local js="const r=db.runCommand({ping:1});if(!r||r.ok!==1)quit(42);print('TC_RESULT=CONTROLLER_AUTH_OK');"
+  export TC_JS_JSON
+  TC_JS_JSON=$(json_string "$js")
+
+  local output=""
+  for _ in {1..30}; do
+    if output=$(run_mongo_job 2>&1); then
+      printf '%s\n' "$output"
+      return 0
+    fi
+    sleep 2
+  done
+  printf '%s\n' "$output" >&2
+  echo "Timed out waiting for controller administrator authentication." >&2
+  return 1
+}
+
 verify_users_absent() {
   local owner="${TC_DATABASE}_owner"
   local readwrite="${TC_DATABASE}_readWrite"
@@ -400,6 +421,11 @@ EOF
   verify_database_users_absent)
     : "${TC_DATABASE:?TC_DATABASE is required}"
     verify_users_absent
+    ;;
+
+  verify_controller_admin)
+    : "${TC_MONGO_IMAGE:?TC_MONGO_IMAGE is required}"
+    verify_controller_admin
     ;;
 
   *)

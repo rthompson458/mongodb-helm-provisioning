@@ -34,6 +34,46 @@ class DeploymentLifecycleTests(unittest.TestCase):
             "sc_ready_timeout": 30,
         }
 
+    def test_add_replica_set_verifies_controller_auth_before_success(self) -> None:
+        vault = FakeVault({})
+        calls = []
+
+        def apply_side_effect(config, inventory, operation=None):
+            calls.append(copy.deepcopy(operation))
+
+        with (
+            patch.object(deployments, "apply_inventory", side_effect=apply_side_effect),
+            patch.object(deployments.kube, "get_json", return_value=None),
+            patch.object(deployments.kube, "wait_phase"),
+        ):
+            deployments.add_replica_set(self.config, vault, "RS1")
+
+        self.assertIsNone(calls[0])
+        self.assertEqual(calls[1]["action"], "verify_controller_admin")
+        self.assertEqual(calls[1]["deployment"], "rs1")
+        self.assertEqual(calls[1]["deployment_type"], "ReplicaSet")
+
+    def test_add_sharded_cluster_verifies_controller_auth_before_success(self) -> None:
+        vault = FakeVault({})
+        calls = []
+
+        def apply_side_effect(config, inventory, operation=None):
+            calls.append(copy.deepcopy(operation))
+
+        with (
+            patch.object(deployments, "apply_inventory", side_effect=apply_side_effect),
+            patch.object(deployments.kube, "get_json", return_value=None),
+            patch.object(deployments.kube, "wait_sharded_cluster_ready"),
+            patch.object(deployments.kube, "wait_phase"),
+        ):
+            deployments.add_sharded_cluster(self.config, vault, "SC9", 2)
+
+        self.assertIsNone(calls[0])
+        self.assertEqual(calls[1]["action"], "verify_controller_admin")
+        self.assertEqual(calls[1]["deployment"], "sc9")
+        self.assertEqual(calls[1]["deployment_type"], "ShardedCluster")
+
+
     def test_add_sharded_cluster_records_topology(self) -> None:
         vault = FakeVault({})
         calls = []

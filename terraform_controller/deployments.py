@@ -142,6 +142,27 @@ def require_running(
                 )
 
 
+def _deployment_operation(
+    action: str,
+    deployment_key: str,
+    deployment: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a one-shot Terraform operation for deployment-level validation."""
+
+    members = (
+        int(deployment["members_per_shard"])
+        if deployment_type_label(deployment) == "ShardedCluster"
+        else int(deployment["members"])
+    )
+    return {
+        "action": action,
+        "deployment": deployment_key,
+        "deployment_type": deployment_type_label(deployment),
+        "database": "",
+        "members": members,
+    }
+
+
 def _new_common(
     config: dict[str, Any], display: str, deployment_type: str
 ) -> dict[str, Any]:
@@ -223,6 +244,12 @@ def add_replica_set(config: dict[str, Any], vault: VaultClient, name: str) -> No
         "Updated",
         config["rs_ready_timeout"],
     )
+    print(f"Verifying controller administrator authentication for ReplicaSet '{display}' ...")
+    apply_inventory(
+        config,
+        inventory,
+        _deployment_operation("verify_controller_admin", key, item),
+    )
 
     log_event(
         "deployment.create.succeeded",
@@ -281,6 +308,12 @@ def add_sharded_cluster(
         kube.controller_user(key),
         "Updated",
         config["sc_ready_timeout"],
+    )
+    print(f"Verifying controller administrator authentication for ShardedCluster '{display}' ...")
+    apply_inventory(
+        config,
+        inventory,
+        _deployment_operation("verify_controller_admin", key, item),
     )
 
     log_event(
