@@ -147,8 +147,6 @@ RotatePasswords DATABASE
 
 DisableOwner DEPLOYMENT DATABASE --confirm
 DisableOwner DATABASE --confirm
-
-Reconcile
 ```
 
 Use command-level help:
