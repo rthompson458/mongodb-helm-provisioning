@@ -11,6 +11,7 @@ from terraform_controller.async_operations import (
     create_operation,
     effective_result,
     load_operation,
+    launch_operation,
     mark_failed,
     mark_running,
     mark_succeeded,
@@ -100,6 +101,25 @@ class AsyncOperationTests(unittest.TestCase):
         self.assertIn("ListOperation", text)
         self.assertIn(state["operation_id"], text)
         self.assertIn("ListShards SC9", text)
+
+
+    def test_duplicate_in_progress_deployment_submission_is_blocked(self) -> None:
+        with self._patch_state_home():
+            state = create_operation(
+                self.config_path,
+                command="AddShard",
+                deployment="SC9",
+                worker_arguments=["AddShard", "SC9", "1"],
+            )
+            mark_running(self.config_path, state["operation_id"])
+            with self.assertRaises(ControllerError):
+                launch_operation(
+                    self.config_path,
+                    self.root,
+                    command="DeleteShard",
+                    deployment="SC9",
+                    worker_arguments=["DeleteShard", "SC9", "1", "--confirm"],
+                )
 
 
 if __name__ == "__main__":
