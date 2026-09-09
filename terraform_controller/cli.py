@@ -51,6 +51,7 @@ from .controller import (
     list_shards,
     reconcile,
     recover_deployment_lock,
+    recover_orphaned_resources,
     rotate_passwords,
 )
 from .logging_component import configure_logging, log_event, log_exception
@@ -425,6 +426,15 @@ Inventory:
     _deployment(x, "SHARDED_CLUSTER")
     _confirm(x)
 
+    x = _sub(
+        sp,
+        "RecoverOrphanedResources",
+        "Finish Terraform cleanup after controller inventory is already empty.",
+        "Requires --confirm. This exceptional recovery command runs only when Vault inventory is empty and Kubernetes has no terraformController-managed MongoDB deployments. It then submits a detached Terraform operation to converge the controller backend to empty desired state and destroy any orphaned resources still tracked in Terraform state.",
+        "  terraformController.py RecoverOrphanedResources --confirm",
+    )
+    _confirm(x)
+
     _sub(
         sp,
         "Reconcile",
@@ -468,6 +478,11 @@ def _async_worker_arguments(args: argparse.Namespace) -> list[str]:
         if args.confirm:
             values.append("--confirm")
         return values
+    if command == "RecoverOrphanedResources":
+        values = [command]
+        if args.confirm:
+            values.append("--confirm")
+        return values
     raise ControllerError(f"Command '{command}' is not configured for asynchronous execution.")
 
 
@@ -475,7 +490,12 @@ def _async_worker_arguments(args: argparse.Namespace) -> list[str]:
 def _validate_async_submission(args: argparse.Namespace) -> None:
     """Reject obvious invalid async requests before assigning an Operation ID."""
 
-    if args.command in {"DeleteReplicaSet", "DeleteShardedCluster", "DeleteShard"}:
+    if args.command in {
+        "DeleteReplicaSet",
+        "DeleteShardedCluster",
+        "DeleteShard",
+        "RecoverOrphanedResources",
+    }:
         if not getattr(args, "confirm", False):
             raise ControllerError(
                 f"{args.command} is destructive and requires '--confirm'."
@@ -495,6 +515,8 @@ def _validate_async_submission(args: argparse.Namespace) -> None:
 def _async_deployment(args: argparse.Namespace) -> str:
     """Return the deployment name associated with an asynchronous command."""
 
+    if args.command == "RecoverOrphanedResources":
+        return "controller-state"
     return str(getattr(args, "deployment", ""))
 
 
@@ -616,6 +638,9 @@ def main(argv: list[str] | None = None) -> int:
             ),
             "RecoverDeploymentLock": lambda: recover_deployment_lock(
                 config, vault, args.deployment, args.confirm
+            ),
+            "RecoverOrphanedResources": lambda: recover_orphaned_resources(
+                config, vault, args.confirm
             ),
             "Reconcile": lambda: reconcile(config, vault),
         }

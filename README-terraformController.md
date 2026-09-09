@@ -879,6 +879,36 @@ Kubernetes claim and still refuses to remove any PVC that is referenced by a
 pod. While the MongoDB deployment still exists, PV/PVC identity mismatches
 remain a hard refusal.
 
+## RecoverOrphanedResources
+
+Use this command only when a failed Terraform destroy has already removed all
+Vault-backed controller inventory, but Terraform still tracks orphaned
+Kubernetes/storage resources:
+
+```bash
+python3 terraformController.py RecoverOrphanedResources --confirm
+```
+
+The command is asynchronous because storage teardown may need bounded waits.
+Before Terraform is allowed to mutate anything, the controller requires both:
+
+```text
+Vault-backed managed deployment inventory           = empty
+Live MongoDB CRs labeled managed-by=terraformController = none
+```
+
+If either check fails, recovery stops without making a change.
+
+When both checks pass, Python sends an empty desired-state inventory to
+Terraform. Terraform then finishes destroying any remaining controller-managed
+resources in its backend state. Storage cleanup remains protected by the normal
+PVC/PV ownership, live-use, and bounded-wait checks.
+
+This command is intentionally different from `Reconcile`. Reconcile protects
+normal managed desired state; RecoverOrphanedResources exists only for the
+exceptional case where desired state is already empty but a previous Terraform
+destroy ended partway through.
+
 ## Reconcile
 
 ```bash

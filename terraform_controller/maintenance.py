@@ -222,3 +222,82 @@ def recover_deployment_lock(
     print(f"Current shards: {target}")
     print("Status:         Running")
     print("Deployment lock: Released")
+
+
+
+def recover_orphaned_resources(
+    config: dict[str, Any],
+    vault: VaultClient,
+    confirmed: bool,
+) -> None:
+    """Finish Terraform cleanup after desired-state inventory is already empty.
+
+    This is an exceptional recovery path for a failed deployment destroy that
+    removed its Vault inventory before Terraform finished destroying all
+    controller-managed Kubernetes/storage resources.
+
+    Safety rules are intentionally strict:
+    - explicit --confirm is required,
+    - Vault inventory must already be completely empty,
+    - Kubernetes must contain no terraformController-managed MongoDB CRs.
+
+    Only after both independent checks prove there is no live managed deployment
+    does Terraform receive an empty desired-state inventory so it can finish
+    destroying any resources still recorded in the controller backend state.
+    """
+
+    if not confirmed:
+        raise ControllerError(
+            "RecoverOrphanedResources is destructive and requires '--confirm'. "
+            "Example: terraformController.py RecoverOrphanedResources --confirm"
+        )
+
+    inventory = vault.load_inventory()
+    if inventory:
+        names = ", ".join(
+            inventory[key]["display_name"] for key in sorted(inventory)
+        )
+        raise ControllerError(
+            "RecoverOrphanedResources is allowed only when the Vault-backed "
+            f"controller inventory is empty. Managed deployment(s) still exist: {names}."
+        )
+
+    live = kube.list_json(
+        config,
+        "mongodb",
+        label_selector="app.kubernetes.io/managed-by=terraformController",
+    )
+    if live:
+        names = ", ".join(
+            str(item.get("metadata", {}).get("name", "<unknown>"))
+            for item in live
+        )
+        raise ControllerError(
+            "RecoverOrphanedResources refused because live "
+            "terraformController-managed MongoDB resource(s) still exist: "
+            f"{names}."
+        )
+
+    log_event("orphaned_resources.recovery.requested")
+    print(
+        "Vault inventory is empty and no live terraformController-managed "
+        "MongoDB deployments exist."
+    )
+    print("Applying empty desired state through Terraform to finish orphan cleanup ...")
+
+    apply_inventory(config, {})
+
+    remaining = kube.list_json(
+        config,
+        "mongodb",
+        label_selector="app.kubernetes.io/managed-by=terraformController",
+    )
+    if remaining:
+        raise ControllerError(
+            "Terraform cleanup completed, but a managed MongoDB resource is still present."
+        )
+
+    log_event("orphaned_resources.recovery.succeeded")
+    print("\nOrphaned terraformController resources were successfully reconciled.")
+    print("Managed deployments: 0")
+    print("Status:              Clean")

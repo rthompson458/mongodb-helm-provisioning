@@ -33,6 +33,7 @@ ASYNC_COMMANDS = {
     "DeleteShardedCluster",
     "AddShard",
     "DeleteShard",
+    "RecoverOrphanedResources",
 }
 
 TERMINAL_RESULTS = {"Succeeded", "Failed", "Interrupted"}
