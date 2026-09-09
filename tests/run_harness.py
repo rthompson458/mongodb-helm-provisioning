@@ -136,14 +136,22 @@ def main() -> int:
     print(f"Suffix:  {args.suffix}")
     print()
 
-    # Preflight always runs first.  If a prerequisite is broken, the later
-    # failures will still show exactly which external dependency caused trouble.
+    # Preflight always runs first. Stop immediately if a prerequisite is broken
+    # so later scenarios do not create misleading secondary failures.
     scenario_preflight.run(runner)
+    if any(not result.passed for result in runner.results):
+        return runner.summary()
 
     if args.profile in {"replicaset", "all"}:
         scenario_replicaset.run(runner)
+        if any(not result.passed for result in runner.results):
+            return runner.summary()
+
     if args.profile in {"sharded", "all"}:
         scenario_sharded.run(runner)
+        if any(not result.passed for result in runner.results):
+            return runner.summary()
+
     if args.profile in {"locking", "all"}:
         scenario_locking.run(runner)
 
