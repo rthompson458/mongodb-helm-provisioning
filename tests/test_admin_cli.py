@@ -71,5 +71,15 @@ class AdminCliTests(unittest.TestCase):
         )
 
 
+    def test_admin_help_identifies_operator_interface(self) -> None:
+        help_text = admin_cli.build_parser().format_help()
+        self.assertIn("platform administration interface", help_text)
+        self.assertIn("ListOperation", help_text)
+        self.assertIn("RecoverDeploymentLock", help_text)
+        self.assertIn("RecoverOrphanedResources", help_text)
+        self.assertIn("Reconcile", help_text)
+        self.assertIn("NOT the DBaaS end-user interface", help_text)
+
+
 if __name__ == "__main__":
     unittest.main()
