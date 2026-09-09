@@ -144,9 +144,9 @@ Normal DBaaS users should use:
         "ListManagedResources",
         "List controller-managed deployment resources and zero-state status.",
         "Read-only administrator inventory of Vault-backed managed deployments, "
-        "terraformController-managed MongoDB custom resources, persistent volume "
-        "claims, persistent volumes, and deployment-lock ConfigMaps. Reports CLEAN "
-        "only when all five categories are empty.",
+        "terraformController-managed MongoDB and MongoDBUser custom resources, persistent "
+        "volume claims, persistent volumes, and deployment-lock ConfigMaps. Reports "
+        "CLEAN only when all six categories are empty.",
         "  terraformControllerAdmin.py ListManagedResources",
     )
 
