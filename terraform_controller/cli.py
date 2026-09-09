@@ -190,7 +190,7 @@ available: the MongoDB resource is Running, all expected shards are Online,
 config servers are Online, and mongos is Online.
 
 Configured defaults:
-  AddShardedCluster initial shards = ${configured_shards_text}
+  AddShardedCluster initial shards = {configured_shards_text}
     (read from controller configuration)
   AddShard count                  = 1
   DeleteShard count               = 1
