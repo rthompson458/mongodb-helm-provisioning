@@ -328,14 +328,12 @@ cleanup_local_pv() {
     fi
 
     users=$(pvc_users "$claim_ns" "$target_claim")
-    if [[ -n "$users" && "$deployment_exists" == "true" ]]; then
-      echo "Refusing storage cleanup: PVC '$target_claim' is still used by pod(s): $users" >&2
-      echo "No PVC/PV was deleted. The removed shard must be fully absent before storage cleanup." >&2
-      return 42
-    fi
-
     if [[ -n "$users" ]]; then
-      echo "MongoDB deployment '${TC_DEPLOYMENT}' is absent, but PVC '$target_claim' is still used by terminating pod(s): $users" >&2
+      if [[ "$deployment_exists" == "true" ]]; then
+        echo "PVC '$target_claim' is still used by pod(s) from the removed shard: $users" >&2
+      else
+        echo "MongoDB deployment '${TC_DEPLOYMENT}' is absent, but PVC '$target_claim' is still used by terminating pod(s): $users" >&2
+      fi
       echo "Waiting up to $cleanup_timeout for pod(s) to release the PVC before storage cleanup." >&2
       deadline=$(( $(date +%s) + cleanup_timeout_seconds ))
       while [[ -n "$users" && $(date +%s) -lt $deadline ]]; do
