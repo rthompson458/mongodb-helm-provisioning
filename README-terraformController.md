@@ -1,5 +1,12 @@
 # terraformController
 
+**Customer / DBaaS user guide**
+
+This document describes the normal service interface exposed by `terraformController.py`.
+Platform diagnostics, Terraform reconciliation, operation journals, and recovery commands
+are intentionally separated into `terraformControllerAdmin.py`; see
+`README-terraformControllerAdmin.md`.
+
 `terraformController.py` is the temporary local orchestration interface for the MongoDB DBaaS proof of concept.
 
 The durable implementation is Terraform. The long-term execution path is Spacelift plus a private worker running the same Terraform lifecycle.
@@ -85,11 +92,6 @@ ListShardedCluster SHARDED_CLUSTER
 
 ListShards
 ListShards SHARDED_CLUSTER
-
-ListOperations
-ListOperation OPERATION_ID
-
-RecoverDeploymentLock SHARDED_CLUSTER --confirm
 ```
 
 ### ReplicaSet lifecycle
@@ -161,9 +163,14 @@ python3 terraformController.py RotatePasswords --help
 ```
 
 
-## Asynchronous long-running operations
+## Background processing for long-running requests
 
-The following deployment/topology commands are asynchronous from the user's shell:
+Deployment and shard topology changes can take longer than a normal command-line
+interaction because MongoDB, Ops Manager, Kubernetes, storage, and Terraform must
+converge safely.
+
+The following public commands therefore return after the request has been accepted
+while processing continues in the background:
 
 ```text
 AddReplicaSet
@@ -174,7 +181,9 @@ AddShard
 DeleteShard
 ```
 
-The public command validates its command-line shape, creates a persistent local Operation ID, starts a detached worker, prints exact status commands, and returns the shell prompt. The detached worker then executes the same existing synchronous lifecycle implementation, so managed changes remain Terraform-driven.
+The customer interface reports only service-oriented information. Internal
+operation IDs, worker PIDs, journal paths, and recovery details are deliberately
+kept on the administrator interface.
 
 Example:
 
@@ -182,48 +191,34 @@ Example:
 python3 terraformController.py DeleteShard SC9 1 --confirm
 ```
 
-returns:
+returns a customer-facing acknowledgement similar to:
 
 ```text
 DeleteShard request accepted.
 
-Operation ID:   7c1349abc123
-Deployment:     SC9
-Status:         In Progress
+ShardedCluster: SC9
+Status:         Topology change requested
 
-Check positive/negative result with:
-  python3 terraformController.py --config ... ListOperation 7c1349abc123
+The request is being processed in the background.
 
-Check live shard progress with:
-  python3 terraformController.py --config ... ListShards SC9
+Check service status with:
+  python3 terraformController.py ... ListShards SC9
 ```
 
-Read one operation:
-
-```bash
-python3 terraformController.py ListOperation 7c1349abc123
-```
-
-Read recent operations:
-
-```bash
-python3 terraformController.py ListOperations
-```
-
-Possible operation results:
+Use the normal resource status commands to follow progress:
 
 ```text
-In Progress
-Succeeded
-Failed
-Interrupted
+ListReplicaSet
+ListReplicaSets
+ListShardedCluster
+ListShardedClusters
+ListShards
+ListDeployments
 ```
 
-`ListOperation`, `ListOperations`, and `ListShards` are read-only. They do not finish or mutate an operation.
-
-Operation journals are stored outside the repository under `XDG_STATE_HOME` (or `~/.local/state`) in a config-specific terraformController state directory, so `git clean` does not erase operation history.
-
-For this local POC, the detached worker survives the invoking shell but not a stopped WSL/host environment. A stopped/interrupted ShardedCluster operation remains protected by the existing deployment lock and matching-command resume behavior.
+If a request does not converge as expected, a platform administrator can inspect
+the private operation journal without exposing those implementation details to
+DBaaS users.
 
 ## Shard status
 
@@ -323,7 +318,6 @@ AddShard
 DeleteShard
 ```
 
-`Reconcile` refuses to run while any ShardedCluster managed change is active.
 
 Read-only commands remain available, including:
 
@@ -355,7 +349,7 @@ StorageClass:  mongodb-data-local
 Storage:       16Gi/member
 ```
 
-The public command returns an Operation ID after the detached worker starts. `ListOperation OPERATION_ID` reports `Succeeded` only after the MongoDB resource is Running and the hidden controller account is actually usable.
+The command returns after the request is accepted. Use `ListReplicaSet RS1` or `ListReplicaSets` to monitor service readiness. A ReplicaSet is ready for normal database work only after it is Running and controller authentication is usable.
 
 ## AddShardedCluster
 
@@ -375,7 +369,7 @@ MongoDB:            8.0.29
 
 The shard count can be overridden with `--shards N`.
 
-The public command returns an Operation ID promptly. The detached worker waits for the ShardedCluster and all expected components, and `ListOperation OPERATION_ID` reports the eventual positive/negative result.
+The command returns after the request is accepted. Use `ListShardedCluster SC9` and `ListShards SC9` to monitor readiness. The deployment is ready only when the ShardedCluster, shards, config servers, and mongos components are online.
 
 ## AddShard
 
@@ -394,7 +388,7 @@ python3 terraformController.py AddShard SC9 2
 
 For `AddShard SC9 2`, if SC9 starts with 3 shards, the target is 5 shards.
 
-The detached worker performs the existing staged lifecycle:
+The controller performs the staged lifecycle in the background:
 
 1. verify COUNT is at least 1,
 2. verify SC9 exists and is fully ready,
@@ -403,9 +397,9 @@ The detached worker performs the existing staged lifecycle:
 5. Terraform changes the MongoDB `shardCount` to the target,
 6. wait until every target shard is online,
 7. release the deployment lock through Terraform,
-8. record `Succeeded` or `Failed` in the operation journal.
+8. complete the managed topology request.
 
-The submitting shell does not wait for steps 3-8. Use `ListOperation` for the final result and `ListShards` for live topology progress.
+The submitting shell does not wait for steps 3-8. Use `ListShards` for live topology progress and the normal deployment status commands for service readiness.
 
 If the controller process is interrupted after the lock is acquired, rerun the **same** AddShard command. The controller recognizes the matching lock and resumes toward the stored target instead of adding the count again.
 
@@ -433,7 +427,7 @@ Safety rules:
 5. Application databases may remain on the ShardedCluster during shard removal.
 6. Terraform lowers the managed MongoDB ShardedCluster `spec.shardCount`; Python does not directly remove shards.
 7. The MongoDB Kubernetes Operator/Ops Manager reconciles the supported ShardedCluster scale-down.
-8. The detached worker waits for the remaining cluster to become fully ready and for removed shard StatefulSets to disappear before Terraform cleans the old shard storage. The submitting shell has already returned with an Operation ID.
+8. Background processing waits for the remaining cluster to become fully ready and for removed shard StatefulSets to disappear before Terraform cleans the old shard storage.
 
 For example, if SC9 has 3 shards:
 
@@ -586,20 +580,7 @@ python3 terraformController.py DisableOwner SC9 HouseInfo --confirm
 
 On a ShardedCluster, the command acquires the same deployment lock before changing Owner state.
 
-To re-enable Owner, an authorized administrator updates:
-
-```text
-mongodb/<Deployment>/<Database>/_metadata
-owner_disabled = false
-```
-
-then runs:
-
-```bash
-python3 terraformController.py Reconcile
-```
-
-Reconcile is blocked while another ShardedCluster managed change is active.
+Re-enabling a disabled Owner account is an administrator-controlled service action rather than a customer command. The platform administrator follows the controller administration runbook in `README-terraformControllerAdmin.md` and performs any required reconciliation through the administrator interface.
 
 ## Database deletion
 
@@ -828,8 +809,10 @@ without a fixed `projectName`, allowing each managed MongoDB resource to use a d
 ## Source layout
 
 ```text
-terraformController.py
+terraformController.py                  # customer / DBaaS interface
+terraformControllerAdmin.py             # platform administrator interface
 terraform_controller/cli.py
+terraform_controller/admin_cli.py
 terraform_controller/deployments.py
 terraform_controller/databases.py
 terraform_controller/deployment_lock.py
@@ -843,81 +826,16 @@ terraform_controller/common.py
 terraform-dbaas/
 ```
 
-## RecoverDeploymentLock
+## Administrator operations
 
-Use this command only for an interrupted ShardedCluster topology operation that
-already reached its recorded target topology but failed during a later
-bookkeeping or storage step:
+Administrator diagnostics, operation journals, Terraform reconciliation, and
+recovery procedures are deliberately excluded from the customer command surface.
 
-```bash
-python3 terraformController.py RecoverDeploymentLock SC9 --confirm
-```
-
-The recovery is intentionally narrow. Before releasing anything, the controller
-requires:
+See:
 
 ```text
-Active lock category             = topology
-Active lock action               = AddShard or DeleteShard
-Vault desired shard count        = lock target
-Live MongoDB spec.shardCount     = lock target
-MongoDB phase                    = Running
-Every surviving shard            = Online
-Config servers                   = Online
-mongos                           = Online
-Removed shard StatefulSets       = Absent (DeleteShard)
+README-terraformControllerAdmin.md
 ```
-
-The release remains Terraform-driven. The recovery uses a targeted Terraform
-apply for the lifecycle-operation resource so unrelated legacy storage is not
-reconciled while the lock is being released.
-
-For old static-local ShardedClusters created before deterministic PV/PVC
-pre-binding, full deployment teardown can clean a mismatched legacy PV only
-after the MongoDB resource is absent. Cleanup then follows the PV's actual
-Kubernetes claim and still refuses to remove any PVC that is referenced by a
-pod. While the MongoDB deployment still exists, PV/PVC identity mismatches
-remain a hard refusal.
-
-## RecoverOrphanedResources
-
-Use this command only when a failed Terraform destroy has already removed all
-Vault-backed controller inventory, but Terraform still tracks orphaned
-Kubernetes/storage resources:
-
-```bash
-python3 terraformController.py RecoverOrphanedResources --confirm
-```
-
-The command is asynchronous because storage teardown may need bounded waits.
-Before Terraform is allowed to mutate anything, the controller requires both:
-
-```text
-Vault-backed managed deployment inventory           = empty
-Live MongoDB CRs labeled managed-by=terraformController = none
-```
-
-If either check fails, recovery stops without making a change.
-
-When both checks pass, Python sends an empty desired-state inventory to
-Terraform. Terraform then finishes destroying any remaining controller-managed
-resources in its backend state. Storage cleanup remains protected by the normal
-PVC/PV ownership, live-use, and bounded-wait checks.
-
-This command is intentionally different from `Reconcile`. Reconcile protects
-normal managed desired state; RecoverOrphanedResources exists only for the
-exceptional case where desired state is already empty but a previous Terraform
-destroy ended partway through.
-
-## Reconcile
-
-```bash
-python3 terraformController.py Reconcile
-```
-
-Reconcile reconstructs desired state from Vault, refreshes Terraform, reapplies managed state, and waits for convergence.
-
-If any ShardedCluster deployment lock is active, Reconcile stops before applying Terraform and lists the active change.
 
 ## Vault token
 
@@ -955,7 +873,7 @@ python3 tests/run_harness.py \
 The full profile exercises ReplicaSet lifecycle, database/account lifecycle,
 a 3 -> 5 -> 4 -> 1 ShardedCluster lifecycle, count-based shard add/delete,
 final-shard protection, shard deletion while a managed database remains present,
-global/targeted shard status, asynchronous operation polling, and an actual
+global/targeted shard status, background-operation completion, and an actual
 concurrent-process deployment-lock test.
 
 Harness output identifies `Test X of Y`, prints periodic `[WAIT]` lines for
