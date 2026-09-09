@@ -157,6 +157,8 @@ def release_deployment_lock(
     deployment_key: str,
     deployment: dict[str, Any],
     lock: dict[str, Any],
+    *,
+    targets: list[str] | None = None,
 ) -> None:
     """Ask Terraform to release only the lock owned by this operation ID."""
 
@@ -175,6 +177,7 @@ def release_deployment_lock(
             "start_shards": int(lock["start_shards"]),
             "target_shards": int(lock["target_shards"]),
         },
+        targets=targets,
     )
     remaining = read_deployment_lock(config, deployment_key)
     if remaining is not None:

@@ -284,12 +284,18 @@ cleanup_local_pv() {
   claim_ns="${claim_ns:-${TC_NAMESPACE}}"
 
   if [[ -n "$expected_pvc" && -n "$claim" && "$claim" != "$expected_pvc" ]]; then
-    echo "Refusing storage cleanup: PV '$pv' is bound to PVC '$claim', but Terraform expected '$expected_pvc'." >&2
-    echo "No PVC/PV was deleted. This indicates legacy or drifted nondeterministic binding." >&2
-    return 42
-  fi
+    if "${K[@]}" -n "${TC_NAMESPACE}" get mongodb "${TC_DEPLOYMENT}" >/dev/null 2>&1; then
+      echo "Refusing storage cleanup: PV '$pv' is bound to PVC '$claim', but Terraform expected '$expected_pvc'." >&2
+      echo "No PVC/PV was deleted. This indicates legacy or drifted nondeterministic binding." >&2
+      return 42
+    fi
 
-  target_claim="${expected_pvc:-$claim}"
+    echo "Legacy storage binding detected during full teardown: PV '$pv' is bound to PVC '$claim' instead of expected '$expected_pvc'." >&2
+    echo "MongoDB deployment '${TC_DEPLOYMENT}' is absent; cleanup will use the PV's actual claim after live-use checks." >&2
+    target_claim="$claim"
+  else
+    target_claim="${expected_pvc:-$claim}"
+  fi
 
   if [[ -n "$target_claim" ]] && "${K[@]}" -n "$claim_ns" get pvc "$target_claim" >/dev/null 2>&1; then
     pvc_volume=$("${K[@]}" -n "$claim_ns" get pvc "$target_claim" -o jsonpath='{.spec.volumeName}' 2>/dev/null || true)

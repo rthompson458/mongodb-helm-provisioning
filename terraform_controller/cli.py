@@ -50,6 +50,7 @@ from .controller import (
     list_sharded_clusters,
     list_shards,
     reconcile,
+    recover_deployment_lock,
     rotate_passwords,
 )
 from .logging_component import configure_logging, log_event, log_exception
@@ -414,6 +415,16 @@ Inventory:
         "  terraformController.py ListOperations",
     )
 
+    x = _sub(
+        sp,
+        "RecoverDeploymentLock",
+        "Release a completed ShardedCluster topology lock after interrupted cleanup.",
+        "Requires --confirm. This recovery command is allowed only when an interrupted AddShard/DeleteShard has already reached its recorded target topology and every surviving component is healthy. Terraform releases only the existing deployment lock; unrelated storage resources are not reconciled by this recovery apply.",
+        "  terraformController.py RecoverDeploymentLock SC9 --confirm",
+    )
+    _deployment(x, "SHARDED_CLUSTER")
+    _confirm(x)
+
     _sub(
         sp,
         "Reconcile",
@@ -602,6 +613,9 @@ def main(argv: list[str] | None = None) -> int:
                 args.deployment_or_database,
                 args.database,
                 args.confirm,
+            ),
+            "RecoverDeploymentLock": lambda: recover_deployment_lock(
+                config, vault, args.deployment, args.confirm
             ),
             "Reconcile": lambda: reconcile(config, vault),
         }

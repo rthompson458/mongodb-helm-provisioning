@@ -29,7 +29,7 @@ from .deployments import (
     list_sharded_clusters,
     list_shards,
 )
-from .maintenance import reconcile
+from .maintenance import reconcile, recover_deployment_lock
 
 __all__ = [
     "add_database",
@@ -51,5 +51,6 @@ __all__ = [
     "list_sharded_clusters",
     "list_shards",
     "reconcile",
+    "recover_deployment_lock",
     "rotate_passwords",
 ]

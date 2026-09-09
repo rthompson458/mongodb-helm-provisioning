@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from terraform_controller import maintenance
 
-from helpers import FakeVault, deployment_inventory, topology_lock
+from helpers import FakeVault, deployment_inventory, online_sc_status, topology_lock
 
 
 class MaintenanceTests(unittest.TestCase):
@@ -44,6 +44,75 @@ class MaintenanceTests(unittest.TestCase):
 
         self.assertIn("Reconcile is blocked", str(ctx.exception))
         apply_mock.assert_not_called()
+
+
+    def test_recover_completed_delete_shard_releases_only_lock(self) -> None:
+        inventory = deployment_inventory(
+            deployment_type="ShardedCluster",
+            name="SC9",
+            shard_count=3,
+        )
+        vault = FakeVault(inventory)
+        lock = topology_lock(action="DeleteShard", start=4, target=3)
+
+        def fake_get_json(_config, resource, name):
+            if resource == "mongodb" and name == "sc9":
+                return {"spec": {"shardCount": 3}, "status": {"phase": "Running"}}
+            if resource == "statefulset" and name == "sc9-3":
+                return None
+            return None
+
+        with (
+            patch.object(maintenance, "read_deployment_lock", return_value=lock),
+            patch.object(maintenance.kube, "get_json", side_effect=fake_get_json),
+            patch.object(
+                maintenance.kube,
+                "sharded_cluster_status",
+                return_value=online_sc_status(3, "sc9"),
+            ),
+            patch.object(maintenance, "release_deployment_lock") as release_mock,
+        ):
+            maintenance.recover_deployment_lock(
+                self.config, vault, "SC9", confirmed=True
+            )
+
+        release_mock.assert_called_once()
+        self.assertEqual(
+            release_mock.call_args.kwargs["targets"],
+            ["terraform_data.lifecycle_operation"],
+        )
+
+    def test_recover_lock_refuses_before_target_topology_is_healthy(self) -> None:
+        inventory = deployment_inventory(
+            deployment_type="ShardedCluster",
+            name="SC9",
+            shard_count=3,
+        )
+        vault = FakeVault(inventory)
+        lock = topology_lock(action="DeleteShard", start=4, target=3)
+        degraded = online_sc_status(3, "sc9")
+        degraded["shards"][2]["status"] = "Degraded"
+
+        with (
+            patch.object(maintenance, "read_deployment_lock", return_value=lock),
+            patch.object(
+                maintenance.kube,
+                "get_json",
+                return_value={"spec": {"shardCount": 3}},
+            ),
+            patch.object(
+                maintenance.kube,
+                "sharded_cluster_status",
+                return_value=degraded,
+            ),
+            patch.object(maintenance, "release_deployment_lock") as release_mock,
+        ):
+            with self.assertRaises(maintenance.ControllerError):
+                maintenance.recover_deployment_lock(
+                    self.config, vault, "SC9", confirmed=True
+                )
+
+        release_mock.assert_not_called()
 
 
 if __name__ == "__main__":

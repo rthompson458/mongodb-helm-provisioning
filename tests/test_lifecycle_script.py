@@ -377,5 +377,184 @@ exit 1
             self.assertFalse(delete_marker.exists())
 
 
+    def test_legacy_storage_mismatch_is_cleaned_only_after_cluster_is_absent(self) -> None:
+        """Full teardown may use the PV's actual claim after MongoDB is gone."""
+
+        repo_root = Path(__file__).resolve().parent.parent
+        lifecycle = repo_root / "terraform-dbaas" / "scripts" / "lifecycle.sh"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            fake_kubectl = temp / "kubectl"
+            fake_docker = temp / "docker"
+            pvc_deleted = temp / "pvc-deleted"
+            pv_deleted = temp / "pv-deleted"
+
+            fake_kubectl.write_text(
+                """#!/usr/bin/env bash
+set -eu
+
+: "${FAKE_PVC_DELETED:?}"
+: "${FAKE_PV_DELETED:?}"
+args=" $* "
+
+if [[ "$args" == *" get pv test-sc-shard-8 -o jsonpath={.spec.claimRef.name}"* ]]; then
+  printf 'data-test-sc-3-1'
+  exit 0
+fi
+
+if [[ "$args" == *" get pv test-sc-shard-8 -o jsonpath={.spec.claimRef.namespace}"* ]]; then
+  printf 'mongodb'
+  exit 0
+fi
+
+if [[ "$args" == *" get mongodb test-sc"* ]]; then
+  exit 1
+fi
+
+if [[ "$args" == *" get pvc data-test-sc-3-1 -o jsonpath={.spec.volumeName}"* ]]; then
+  printf 'test-sc-shard-8'
+  exit 0
+fi
+
+if [[ "$args" == *" get pvc data-test-sc-3-1"* ]]; then
+  [[ -f "$FAKE_PVC_DELETED" ]] && exit 1
+  exit 0
+fi
+
+if [[ "$args" == *" get pods -o json"* ]]; then
+  printf '{"items":[]}'
+  exit 0
+fi
+
+if [[ "$args" == *" delete pvc data-test-sc-3-1"* ]]; then
+  touch "$FAKE_PVC_DELETED"
+  exit 0
+fi
+
+if [[ "$args" == *" delete pv test-sc-shard-8"* ]]; then
+  touch "$FAKE_PV_DELETED"
+  exit 0
+fi
+
+if [[ "$args" == *" get pv test-sc-shard-8"* ]]; then
+  [[ -f "$FAKE_PV_DELETED" ]] && exit 1
+  exit 0
+fi
+
+echo "Unexpected fake kubectl invocation: $*" >&2
+exit 1
+""",
+                encoding="utf-8",
+            )
+            fake_kubectl.chmod(0o755)
+            fake_docker.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+            fake_docker.chmod(0o755)
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{temp}{os.pathsep}{env['PATH']}",
+                    "FAKE_PVC_DELETED": str(pvc_deleted),
+                    "FAKE_PV_DELETED": str(pv_deleted),
+                    "TC_ACTION": "cleanup_sharded_cluster_volume",
+                    "TC_NAMESPACE": "mongodb",
+                    "TC_KUBECONFIG": "/tmp/fake-kubeconfig",
+                    "TC_DEPLOYMENT": "test-sc",
+                    "TC_PV_NAME": "test-sc-shard-8",
+                    "TC_PVC_NAME": "data-test-sc-2-2",
+                    "TC_STORAGE_BASE_PATH": "/tmp/storage",
+                    "TC_STORAGE_NODE_NAME": "fake-node",
+                }
+            )
+
+            result = subprocess.run(
+                ["bash", str(lifecycle)],
+                cwd=lifecycle.parent,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertIn("Legacy storage binding detected during full teardown", result.stderr)
+            self.assertTrue(pvc_deleted.exists())
+            self.assertTrue(pv_deleted.exists())
+
+    def test_legacy_storage_mismatch_still_refuses_while_cluster_exists(self) -> None:
+        """A live cluster must never reinterpret a mismatched PV as safe."""
+
+        repo_root = Path(__file__).resolve().parent.parent
+        lifecycle = repo_root / "terraform-dbaas" / "scripts" / "lifecycle.sh"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            fake_kubectl = temp / "kubectl"
+            delete_marker = temp / "delete-called"
+
+            fake_kubectl.write_text(
+                """#!/usr/bin/env bash
+set -eu
+
+: "${FAKE_DELETE_MARKER:?}"
+args=" $* "
+
+if [[ "$args" == *" get pv test-sc-shard-8 -o jsonpath={.spec.claimRef.name}"* ]]; then
+  printf 'data-test-sc-3-1'
+  exit 0
+fi
+
+if [[ "$args" == *" get pv test-sc-shard-8 -o jsonpath={.spec.claimRef.namespace}"* ]]; then
+  printf 'mongodb'
+  exit 0
+fi
+
+if [[ "$args" == *" get mongodb test-sc"* ]]; then
+  exit 0
+fi
+
+if [[ "$args" == *" delete pvc "* || "$args" == *" delete pv "* ]]; then
+  touch "$FAKE_DELETE_MARKER"
+  exit 99
+fi
+
+echo "Unexpected fake kubectl invocation: $*" >&2
+exit 1
+""",
+                encoding="utf-8",
+            )
+            fake_kubectl.chmod(0o755)
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PATH": f"{temp}{os.pathsep}{env['PATH']}",
+                    "FAKE_DELETE_MARKER": str(delete_marker),
+                    "TC_ACTION": "cleanup_sharded_cluster_volume",
+                    "TC_NAMESPACE": "mongodb",
+                    "TC_KUBECONFIG": "/tmp/fake-kubeconfig",
+                    "TC_DEPLOYMENT": "test-sc",
+                    "TC_PV_NAME": "test-sc-shard-8",
+                    "TC_PVC_NAME": "data-test-sc-2-2",
+                    "TC_STORAGE_BASE_PATH": "/tmp/storage",
+                    "TC_STORAGE_NODE_NAME": "fake-node",
+                }
+            )
+
+            result = subprocess.run(
+                ["bash", str(lifecycle)],
+                cwd=lifecycle.parent,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 42, msg=result.stderr)
+            self.assertIn("Refusing storage cleanup", result.stderr)
+            self.assertFalse(delete_marker.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

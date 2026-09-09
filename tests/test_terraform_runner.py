@@ -33,7 +33,7 @@ class TerraformRunnerLockTests(unittest.TestCase):
                 finally:
                     locked = False
 
-            def fake_transaction(_config, _inventory, _operation):
+            def fake_transaction(_config, _inventory, _operation, _targets=None):
                 nonlocal transaction_seen
                 self.assertTrue(locked)
                 transaction_seen = True
