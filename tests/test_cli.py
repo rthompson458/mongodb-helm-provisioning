@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from terraform_controller import cli
@@ -144,7 +145,21 @@ class CliTests(unittest.TestCase):
         selected = cli._config_path_from_argv(
             ["--config", "/tmp/customer-controller.conf", "--help"]
         )
-        self.assertEqual(selected, cli.Path("/tmp/customer-controller.conf"))
+        self.assertEqual(selected, Path("/tmp/customer-controller.conf"))
+
+
+    def test_add_and_delete_shard_help_state_default_one(self) -> None:
+        parser = cli.build_parser(cli.DEFAULT_CONFIG)
+        subparsers = next(
+            action
+            for action in parser._actions
+            if getattr(action, "choices", None)
+            and "AddShard" in action.choices
+        )
+        add_help = subparsers.choices["AddShard"].format_help()
+        delete_help = subparsers.choices["DeleteShard"].format_help()
+        self.assertIn("Optional. Default: 1.", add_help)
+        self.assertIn("Optional. Default: 1.", delete_help)
 
 
 if __name__ == "__main__":
