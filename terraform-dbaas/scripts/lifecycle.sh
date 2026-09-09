@@ -247,17 +247,15 @@ EOF
 pvc_users() {
   local namespace="$1"
   local claim="$2"
+  local pod_json
 
-  "${K[@]}" -n "$namespace" get pods -o json 2>/dev/null | python3 - "$claim" <<'PY'
+  pod_json=$("${K[@]}" -n "$namespace" get pods -o json 2>/dev/null || printf '{"items":[]}')
+  python3 -c '
 import json
 import sys
 
 claim = sys.argv[1]
-try:
-    data = json.load(sys.stdin)
-except json.JSONDecodeError:
-    sys.exit(0)
-
+data = json.load(sys.stdin)
 users = []
 for pod in data.get("items", []):
     for volume in pod.get("spec", {}).get("volumes", []) or []:
@@ -265,9 +263,8 @@ for pod in data.get("items", []):
         if pvc.get("claimName") == claim:
             users.append(pod.get("metadata", {}).get("name", "<unknown>"))
             break
-
 print(" ".join(users))
-PY
+' "$claim" <<<"$pod_json"
 }
 
 cleanup_local_pv() {
