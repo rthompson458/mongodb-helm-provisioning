@@ -519,8 +519,6 @@ def add_shard(
     print(f"Previous shards: {start}")
     print(f"Total shards:    {target}")
     print("Status:          Running")
-    if item["databases"]:
-        print(f"Databases:       {len(item['databases'])} preserved")
 
 
 def delete_shard(
@@ -572,7 +570,6 @@ def delete_shard(
             )
 
         require_running(config, key, item)
-
 
         lock = acquire_deployment_lock(
             config,
@@ -641,6 +638,8 @@ def delete_shard(
     print(f"Previous shards: {start}")
     print(f"Total shards:    {target}")
     print("Status:          Running")
+    if item["databases"]:
+        print(f"Databases:       {len(item['databases'])} preserved")
 
 
 def _deployment_row(
