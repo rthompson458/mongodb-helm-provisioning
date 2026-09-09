@@ -407,6 +407,11 @@ resource "kubernetes_manifest" "replica_set" {
   depends_on = [terraform_data.replica_set_storage]
 }
 
+# ShardedCluster topology is always controlled through Terraform desired state.
+# In particular, DeleteShard lowers spec.shardCount here; Python never issues a
+# direct MongoDB removeShard or directly deletes shard pods. The MongoDB
+# Kubernetes Operator/Ops Manager reconciles the supported scale-down, and only
+# after the removed shard StatefulSets are gone does Terraform clean old storage.
 resource "kubernetes_manifest" "sharded_cluster" {
   for_each = local.sharded_clusters
 
