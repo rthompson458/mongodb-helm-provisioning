@@ -23,6 +23,7 @@ python3 terraformControllerAdmin.py --help
 Show command-specific help:
 
 ~~~bash
+python3 terraformControllerAdmin.py ListManagedResources --help
 python3 terraformControllerAdmin.py ListOperations --help
 python3 terraformControllerAdmin.py ListOperation --help
 python3 terraformControllerAdmin.py Reconcile --help
@@ -44,6 +45,7 @@ Do not store the Vault token in `terraformController.config`.
 
 | Command | Purpose | Mutation |
 | --- | --- | --- |
+| `ListManagedResources` | List deployment-level controller resources and report zero-state cleanliness | Read-only |
 | `ListOperations` | List recent asynchronous controller operations | Read-only |
 | `ListOperation OPERATION_ID` | Show detailed status for one operation | Read-only |
 | `Reconcile` | Reapply the complete Vault-backed desired state through Terraform | Yes |
@@ -51,6 +53,53 @@ Do not store the Vault token in `terraformController.config`.
 | `RecoverOrphanedResources --confirm` | Finish Terraform cleanup after desired-state inventory is already empty | Yes |
 
 These commands are deliberately **not accepted** by `terraformController.py`.
+
+---
+
+## ListManagedResources
+
+```bash
+python3 terraformControllerAdmin.py ListManagedResources
+```
+
+This is the administrator's read-only **zero-state and leftover-resource check**.
+It combines the controller's Vault-backed deployment inventory with the
+deployment-level Kubernetes resources that must be empty before a clean acceptance
+run:
+
+```text
+Managed deployments
+MongoDB resources
+PVCs
+PVs
+Deployment locks
+```
+
+A clean environment reports:
+
+```text
+terraformController Managed Resource Inventory
+
+Managed deployments:  0
+MongoDB resources:    0
+PVCs:                 0
+PVs:                  0
+Deployment locks:     0
+
+Status: CLEAN
+```
+
+If anything remains, the command reports `Status: ATTENTION REQUIRED` and lists
+the resource names by category. It does not delete, reconcile, or mutate
+anything.
+
+This replaces the need for an administrator to remember several separate
+`kubectl` commands when checking whether the controller is truly at zero.
+
+There is intentionally **no `ListResources` alias**. The explicit
+`ListManagedResources` name makes it clear that the command reports resources
+owned by terraformController rather than every resource in the Kubernetes
+cluster.
 
 ---
 
@@ -205,6 +254,17 @@ Operation IDs are appropriate here because this is an administrator diagnostic w
 
 ## Recovery decision guide
 
+### Verify a clean zero-resource starting point
+
+```bash
+python3 terraformController.py ListDeployments
+python3 terraformControllerAdmin.py ListManagedResources
+```
+
+For a clean acceptance-test starting point, the public deployment inventory
+should be empty and the administrator resource inventory should report
+`Status: CLEAN`.
+
 ### Normal service is healthy
 
 Use the public controller:
@@ -260,6 +320,7 @@ Do **not** use `RecoverOrphanedResources`. Investigate the existing desired stat
 | Deployment lifecycle | Yes | No |
 | Shard lifecycle | Yes | No |
 | Normal service status | Yes | No |
+| Managed-resource / zero-state inventory | No | Yes |
 | Operation journal | No | Yes |
 | Worker PID/log path | No | Yes |
 | Terraform reconciliation | No | Yes |
