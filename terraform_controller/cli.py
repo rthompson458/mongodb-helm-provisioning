@@ -24,9 +24,7 @@ from .async_operations import (
     mark_failed,
     mark_running,
     mark_succeeded,
-    print_operation,
-    print_operations,
-    submission_instructions,
+    public_submission_instructions,
 )
 from .common import ControllerError
 from .config import load_config
@@ -49,9 +47,6 @@ from .controller import (
     list_sharded_cluster,
     list_sharded_clusters,
     list_shards,
-    reconcile,
-    recover_deployment_lock,
-    recover_orphaned_resources,
     rotate_passwords,
 )
 from .logging_component import configure_logging, log_event, log_exception
@@ -149,9 +144,9 @@ Each managed database gets exactly:
 Database commands can omit the deployment only when exactly one managed
 deployment exists. If multiple deployments exist, the deployment is required.
 
-ShardedCluster database work is blocked until the MongoDB resource is Running,
-all expected shards are Online, config servers are Online, mongos is Online,
-and no other managed change holds the ShardedCluster deployment lock.
+ShardedCluster database work is accepted only when the deployment is fully
+available: the MongoDB resource is Running, all expected shards are Online,
+config servers are Online, and mongos is Online.
 
 Use '<command> --help' for detailed help.
 """,
@@ -194,7 +189,7 @@ Inventory:
         sp,
         "AddReplicaSet",
         "Create an empty managed ReplicaSet.",
-        "Submits a detached local operation that creates a non-sharded MongoDB ReplicaSet through Terraform. The command returns promptly with an Operation ID and an exact ListOperation command for checking the eventual positive/negative result.",
+        "Requests creation of a non-sharded MongoDB ReplicaSet and returns promptly while provisioning continues in the background. Use the ReplicaSet status commands to monitor readiness.",
         "  terraformController.py AddReplicaSet RS1",
     )
     _deployment(x, "REPLICASET")
@@ -203,7 +198,7 @@ Inventory:
         sp,
         "AddShardedCluster",
         "Create an empty managed ShardedCluster.",
-        "Submits a detached local operation that creates a MongoDB ShardedCluster through Terraform. The command returns promptly with an Operation ID; use ListOperation to check the eventual positive/negative result.",
+        "Requests creation of a MongoDB ShardedCluster and returns promptly while provisioning continues in the background. Use the ShardedCluster status commands to monitor readiness.",
         "  terraformController.py AddShardedCluster SC9\n  terraformController.py AddShardedCluster SC9 --shards 3",
     )
     _deployment(x, "SHARDED_CLUSTER")
@@ -218,7 +213,7 @@ Inventory:
         sp,
         "DeleteReplicaSet",
         "Delete an empty managed ReplicaSet.",
-        "Requires --confirm. Submits a detached local deletion operation. Terraform performs the normal Running/database safety checks and live emptiness validation; use ListOperation to check the eventual result.",
+        "Requires --confirm. Requests deletion of an empty ReplicaSet and returns promptly while deletion continues in the background. Managed and live database safety checks are enforced before deletion.",
         "  terraformController.py DeleteReplicaSet RS1 --confirm",
     )
     _deployment(x, "REPLICASET")
@@ -228,7 +223,7 @@ Inventory:
         sp,
         "DeleteShardedCluster",
         "Delete an empty managed ShardedCluster.",
-        "Requires --confirm. Submits a detached local deletion operation. The normal readiness, managed-database, lock, and live emptiness checks still apply; use ListOperation to check the eventual result.",
+        "Requires --confirm. Requests deletion of an empty ShardedCluster and returns promptly while deletion continues in the background. Readiness, database, and active-change safety checks remain enforced.",
         "  terraformController.py DeleteShardedCluster SC9 --confirm",
     )
     _deployment(x, "SHARDED_CLUSTER")
@@ -303,7 +298,7 @@ Inventory:
         sp,
         "AddShard",
         "Add one or more shards to a Running ShardedCluster.",
-        "COUNT defaults to 1. Submits a detached local operation. The worker acquires the Terraform-managed ShardedCluster lock, prepares storage, changes shardCount, waits for the requested total to become online, and releases the lock. The CLI immediately returns an Operation ID plus ListOperation/ListShards check commands.",
+        "COUNT defaults to 1. Requests one or more additional shards and returns promptly while the topology change continues in the background. Use ListShards to monitor shard readiness.",
         "  terraformController.py AddShard SC9\n  terraformController.py AddShard SC9 2",
     )
     _deployment(x, "SHARDED_CLUSTER")
@@ -320,7 +315,7 @@ Inventory:
         sp,
         "DeleteShard",
         "Remove one or more shards from a ShardedCluster.",
-        "COUNT defaults to 1 and --confirm is required. Submits a detached local operation and immediately returns an Operation ID plus ListOperation/ListShards check commands. The one-shard minimum, database preservation, Terraform-driven scale-down, readiness wait, storage cleanup, highest-numbered-first behavior, and resume safety remain unchanged.",
+        "COUNT defaults to 1 and --confirm is required. Requests removal of one or more shards and returns promptly while the topology change continues in the background. The one-shard minimum, database preservation, readiness checks, and storage safety rules remain enforced.",
         "  terraformController.py DeleteShard SC9 --confirm\n  terraformController.py DeleteShard SC9 2 --confirm",
     )
     _deployment(x, "SHARDED_CLUSTER")
@@ -395,54 +390,6 @@ Inventory:
     _database_target(x)
     _confirm(x)
 
-    x = _sub(
-        sp,
-        "ListOperation",
-        "Show one asynchronous operation result.",
-        "Read-only status for one Operation ID. Reports In Progress, Succeeded, Failed, or Interrupted plus timestamps, elapsed time, worker PID, log path, and failure message.",
-        "  terraformController.py ListOperation 7c1349abc123",
-    )
-    x.add_argument(
-        "operation_id",
-        metavar="OPERATION_ID",
-        help="Operation ID returned by an asynchronous lifecycle command.",
-    )
-
-    _sub(
-        sp,
-        "ListOperations",
-        "List recent asynchronous operations.",
-        "Read-only summary of up to 50 recent asynchronous deployment/topology operations, including their positive/negative result and elapsed time.",
-        "  terraformController.py ListOperations",
-    )
-
-    x = _sub(
-        sp,
-        "RecoverDeploymentLock",
-        "Release a completed ShardedCluster topology lock after interrupted cleanup.",
-        "Requires --confirm. This recovery command is allowed only when an interrupted AddShard/DeleteShard has already reached its recorded target topology and every surviving component is healthy. Terraform releases only the existing deployment lock; unrelated storage resources are not reconciled by this recovery apply.",
-        "  terraformController.py RecoverDeploymentLock SC9 --confirm",
-    )
-    _deployment(x, "SHARDED_CLUSTER")
-    _confirm(x)
-
-    x = _sub(
-        sp,
-        "RecoverOrphanedResources",
-        "Finish Terraform cleanup after controller inventory is already empty.",
-        "Requires --confirm. This exceptional recovery command runs only when Vault inventory is empty and Kubernetes has no terraformController-managed MongoDB deployments. It then submits a detached Terraform operation to converge the controller backend to empty desired state and destroy any orphaned resources still tracked in Terraform state.",
-        "  terraformController.py RecoverOrphanedResources --confirm",
-    )
-    _confirm(x)
-
-    _sub(
-        sp,
-        "Reconcile",
-        "Reapply complete Vault-backed desired state through Terraform.",
-        "Refreshes Terraform from GitHub, reapplies all managed ReplicaSets, ShardedClusters, databases, accounts, and lifecycle state, then waits for convergence.",
-        "  terraformController.py Reconcile",
-    )
-
     return parser
 
 
@@ -478,11 +425,6 @@ def _async_worker_arguments(args: argparse.Namespace) -> list[str]:
         if args.confirm:
             values.append("--confirm")
         return values
-    if command == "RecoverOrphanedResources":
-        values = [command]
-        if args.confirm:
-            values.append("--confirm")
-        return values
     raise ControllerError(f"Command '{command}' is not configured for asynchronous execution.")
 
 
@@ -494,7 +436,6 @@ def _validate_async_submission(args: argparse.Namespace) -> None:
         "DeleteReplicaSet",
         "DeleteShardedCluster",
         "DeleteShard",
-        "RecoverOrphanedResources",
     }:
         if not getattr(args, "confirm", False):
             raise ControllerError(
@@ -515,18 +456,50 @@ def _validate_async_submission(args: argparse.Namespace) -> None:
 def _async_deployment(args: argparse.Namespace) -> str:
     """Return the deployment name associated with an asynchronous command."""
 
-    if args.command == "RecoverOrphanedResources":
-        return "controller-state"
     return str(getattr(args, "deployment", ""))
 
+
+
+def _public_async_feedback(args: argparse.Namespace) -> tuple[str, str, list[str]]:
+    """Translate internal async execution into customer-facing service status.
+
+    The operation journal remains available to platform administrators, but the
+    public DBaaS CLI reports only the resource and the normal status command.
+    """
+
+    command = args.command
+    deployment = str(getattr(args, "deployment", ""))
+
+    if command == "AddReplicaSet":
+        return "ReplicaSet", "Creation requested", ["ListReplicaSet", deployment]
+    if command == "DeleteReplicaSet":
+        return "ReplicaSet", "Deletion requested", ["ListReplicaSets"]
+    if command == "AddShardedCluster":
+        return (
+            "ShardedCluster",
+            "Creation requested",
+            ["ListShardedCluster", deployment],
+        )
+    if command == "DeleteShardedCluster":
+        return "ShardedCluster", "Deletion requested", ["ListShardedClusters"]
+    if command in {"AddShard", "DeleteShard"}:
+        return (
+            "ShardedCluster",
+            "Topology change requested",
+            ["ListShards", deployment],
+        )
+
+    raise ControllerError(
+        f"Command '{command}' is not configured for public asynchronous feedback."
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
     """Parse one command, initialize shared services, and execute it.
 
     Long-running deployment/topology commands are asynchronous from the user's
-    perspective. A detached worker executes the same Terraform-driven lifecycle
-    implementation while ListOperation/ListOperations remain read-only.
+    perspective. Internal worker/journal details are intentionally kept out of
+    this customer-facing interface.
     """
 
     args = build_parser().parse_args(argv)
@@ -539,18 +512,6 @@ def main(argv: list[str] | None = None) -> int:
         configure_logging(config)
         logging_ready = True
         log_event("command.started", command=args.command)
-
-        # Operation status must remain available even when Vault or MongoDB is
-        # unhealthy, so these read-only commands intentionally do not construct
-        # a Vault client.
-        if args.command == "ListOperation":
-            print_operation(config_path, args.operation_id)
-            log_event("command.succeeded", command=args.command)
-            return 0
-        if args.command == "ListOperations":
-            print_operations(config_path)
-            log_event("command.succeeded", command=args.command)
-            return 0
 
         # Public long-running commands return as soon as a detached worker has
         # been safely started. The worker re-enters this same CLI with the
@@ -565,11 +526,14 @@ def main(argv: list[str] | None = None) -> int:
                 deployment=_async_deployment(args),
                 worker_arguments=_async_worker_arguments(args),
             )
+            resource_label, status_text, status_arguments = _public_async_feedback(args)
             print(
-                submission_instructions(
+                public_submission_instructions(
                     config_path,
                     state,
-                    shard_status=args.command in {"AddShard", "DeleteShard"},
+                    resource_label=resource_label,
+                    status_text=status_text,
+                    status_arguments=status_arguments,
                 )
             )
             log_event(
@@ -636,13 +600,6 @@ def main(argv: list[str] | None = None) -> int:
                 args.database,
                 args.confirm,
             ),
-            "RecoverDeploymentLock": lambda: recover_deployment_lock(
-                config, vault, args.deployment, args.confirm
-            ),
-            "RecoverOrphanedResources": lambda: recover_orphaned_resources(
-                config, vault, args.confirm
-            ),
-            "Reconcile": lambda: reconcile(config, vault),
         }
         actions[args.command]()
         if operation_id:

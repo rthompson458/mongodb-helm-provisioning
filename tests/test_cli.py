@@ -43,9 +43,6 @@ class CliTests(unittest.TestCase):
         self.assertIsNone(args.database)
 
 
-    def test_list_operation_accepts_operation_id(self) -> None:
-        args = cli.build_parser().parse_args(["ListOperation", "abc123"])
-        self.assertEqual(args.operation_id, "abc123")
 
     def test_async_worker_arguments_preserve_delete_confirmation(self) -> None:
         args = cli.build_parser().parse_args(
@@ -75,34 +72,40 @@ class CliTests(unittest.TestCase):
             cli._validate_async_submission(args)
 
 
-    def test_recover_deployment_lock_requires_confirmation_flag_shape(self) -> None:
-        args = cli.build_parser().parse_args(
-            ["RecoverDeploymentLock", "SC9", "--confirm"]
-        )
-        self.assertEqual(args.deployment, "SC9")
-        self.assertTrue(args.confirm)
 
 
-    def test_recover_orphaned_resources_requires_confirmation_flag_shape(self) -> None:
-        args = cli.build_parser().parse_args(
-            ["RecoverOrphanedResources", "--confirm"]
-        )
-        self.assertTrue(args.confirm)
 
-    def test_async_worker_arguments_preserve_orphan_recovery_confirmation(self) -> None:
-        args = cli.build_parser().parse_args(
-            ["RecoverOrphanedResources", "--confirm"]
-        )
-        self.assertEqual(
-            cli._async_worker_arguments(args),
-            ["RecoverOrphanedResources", "--confirm"],
-        )
 
-    def test_orphan_recovery_async_status_uses_controller_state_label(self) -> None:
-        args = cli.build_parser().parse_args(
-            ["RecoverOrphanedResources", "--confirm"]
-        )
-        self.assertEqual(cli._async_deployment(args), "controller-state")
+
+    def test_public_parser_does_not_expose_administrator_commands(self) -> None:
+        parser = cli.build_parser()
+        admin_commands = {
+            "ListOperation",
+            "ListOperations",
+            "RecoverDeploymentLock",
+            "RecoverOrphanedResources",
+            "Reconcile",
+        }
+        for command in admin_commands:
+            with self.subTest(command=command):
+                with self.assertRaises(SystemExit):
+                    parser.parse_args([command])
+
+    def test_public_async_feedback_uses_service_status_commands(self) -> None:
+        args = cli.build_parser().parse_args(["AddShard", "SC9", "2"])
+        label, status, status_args = cli._public_async_feedback(args)
+        self.assertEqual(label, "ShardedCluster")
+        self.assertEqual(status, "Topology change requested")
+        self.assertEqual(status_args, ["ListShards", "SC9"])
+
+
+    def test_public_help_is_customer_facing(self) -> None:
+        help_text = cli.build_parser().format_help()
+        self.assertIn("Terraform-driven MongoDB DBaaS controller", help_text)
+        self.assertNotIn("ListOperation", help_text)
+        self.assertNotIn("RecoverDeploymentLock", help_text)
+        self.assertNotIn("RecoverOrphanedResources", help_text)
+        self.assertNotIn("Reconcile", help_text)
 
 
 if __name__ == "__main__":

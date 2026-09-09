@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 from typing import Sequence
 
+from terraform_controller.async_operations import list_operation_records
+
 from .models import AsyncOperation, HarnessContext, StepResult
 
 
@@ -191,7 +193,18 @@ class HarnessRunner:
         )
 
     def start_async_controller(self, *arguments: str) -> AsyncOperation:
-        """Submit one public async controller command and return its Operation ID."""
+        """Submit one public async command and correlate its private journal entry.
+
+        The customer CLI intentionally does not print Operation IDs. The live
+        acceptance harness is an internal engineering tool, so it reads the
+        private operation journal directly to correlate the newly submitted
+        request before polling it through terraformControllerAdmin.py.
+        """
+
+        before_ids = {
+            str(item.get("operation_id", ""))
+            for item in list_operation_records(self.context.config_path)
+        }
 
         command = [
             self.context.python,
@@ -208,10 +221,21 @@ class HarnessRunner:
             timeout=120,
             check=False,
         )
-        combined = completed.stdout + "\n" + completed.stderr
-        match = re.search(r"Operation ID:\s*([A-Za-z0-9_-]+)", combined)
+
+        operation_id = ""
+        if completed.returncode == 0 and arguments:
+            command_name = str(arguments[0])
+            candidates = [
+                item
+                for item in list_operation_records(self.context.config_path)
+                if str(item.get("operation_id", "")) not in before_ids
+                and str(item.get("command", "")) == command_name
+            ]
+            if candidates:
+                operation_id = str(candidates[0].get("operation_id", ""))
+
         return AsyncOperation(
-            operation_id=match.group(1) if match else "",
+            operation_id=operation_id,
             command=command,
             stdout=completed.stdout,
             stderr=(
@@ -233,7 +257,7 @@ class HarnessRunner:
         announce: bool = True,
         started_at: float | None = None,
     ) -> StepResult:
-        """Poll ListOperation until a terminal positive/negative result appears."""
+        """Poll the administrator operation journal until a terminal result appears."""
 
         if announce:
             self._announce(name)
@@ -247,14 +271,14 @@ class HarnessRunner:
                     command=operation.command,
                     stdout=operation.stdout,
                     stderr=operation.stderr,
-                    note="Async command did not return an Operation ID.",
+                    note="Async command did not create a correlatable operation journal entry.",
                     elapsed_seconds=time.monotonic() - started,
                 )
             )
 
         status_command = [
             self.context.python,
-            "terraformController.py",
+            "terraformControllerAdmin.py",
             "--config",
             str(self.context.config_path),
             "ListOperation",

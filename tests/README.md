@@ -533,31 +533,42 @@ python3 tests/run_harness.py \
 
 # Live harness behavior for asynchronous commands
 
-The product CLI returns promptly for long-running deployment/topology commands, but the live harness still verifies completion before advancing.
+The customer-facing CLI returns promptly for long-running deployment/topology
+requests and deliberately does **not** expose internal Operation IDs.
+
+The acceptance harness still needs deterministic completion before it can advance
+to dependent tests, so the harness uses the private controller operation journal
+as an engineering/test mechanism.
 
 For an asynchronous test step the harness:
 
-1. submits the public controller command;
-2. extracts the returned Operation ID;
-3. polls `ListOperation OPERATION_ID` every few seconds;
-4. prints a `[WAIT]` line at least once per minute while the result is still `In Progress`;
-5. records `PASS` only when the expected terminal result is observed;
-6. records `FAIL` on an unexpected `Failed`, `Interrupted`, or timeout result;
-7. only then advances to the next dependent test.
+1. snapshots the private operation journal;
+2. submits the normal public `terraformController.py` command;
+3. correlates the new internal journal entry created by that submission;
+4. polls that operation through `terraformControllerAdmin.py ListOperation`;
+5. prints a `[WAIT]` line at least once per minute while the result is still `In Progress`;
+6. records `PASS` only when the expected terminal result is observed;
+7. records `FAIL` on an unexpected `Failed`, `Interrupted`, or timeout result;
+8. only then advances to the next dependent test.
 
-This means the user-facing CLI remains asynchronous while the acceptance harness remains deterministic.
+This is intentional separation:
 
-Example output:
+- the **customer CLI** stays clean and service-oriented;
+- the **administrator CLI** owns internal operation diagnostics;
+- the **acceptance harness** may use administrator/internal diagnostics because it is an engineering validation tool, not a customer workflow.
+
+Example harness output may still display an internal operation ID because the
+harness is diagnostic tooling:
 
 ```text
 [RUN ] Test 21 of 33 - Delete a shard while database exists
-       Operation 7c1349abc123 accepted; polling for completion.
+       Internal operation 7c1349abc123 accepted; polling for completion.
 [WAIT] Test 21 of 33 - Delete a shard while database exists - elapsed 00:01:00 - operation 7c1349abc123 still In Progress
-[WAIT] Test 21 of 33 - Delete a shard while database exists - elapsed 00:02:00 - operation 7c1349abc123 still In Progress
 [PASS] Test 21 of 33 - Delete a shard while database exists (00:02:41)
 ```
 
-The selected profile determines the `X of Y` total. The `all` profile currently contains **33** PASS/FAIL checks.
+The selected profile determines the `X of Y` total. The `all` profile currently
+contains **33** PASS/FAIL checks.
 
 # 15. Fail-fast behavior
 
