@@ -70,6 +70,7 @@ run:
 ```text
 Managed deployments
 MongoDB resources
+MongoDB users
 PVCs
 PVs
 Deployment locks
@@ -82,6 +83,7 @@ terraformController Managed Resource Inventory
 
 Managed deployments:  0
 MongoDB resources:    0
+MongoDB users:        0
 PVCs:                 0
 PVs:                  0
 Deployment locks:     0
@@ -90,7 +92,7 @@ Status: CLEAN
 ```
 
 If anything remains, the command reports `Status: ATTENTION REQUIRED` and lists
-the resource names by category. It does not delete, reconcile, or mutate
+the resource names by category. Managed MongoDBUser custom resources are included so an orphaned database or controller account cannot be hidden by a CLEAN result. It does not delete, reconcile, or mutate
 anything.
 
 This replaces the need for an administrator to remember several separate
