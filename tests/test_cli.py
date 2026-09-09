@@ -135,11 +135,12 @@ class CliTests(unittest.TestCase):
             and "AddShardedCluster" in action.choices
         )
         help_text = subparsers.choices["AddShardedCluster"].format_help()
+        normalized_help = " ".join(help_text.split())
         self.assertIn(
             "Default: 7 (read from controller configuration)",
-            help_text,
+            normalized_help,
         )
-        self.assertIn("uses configured default: 7 shard(s)", help_text)
+        self.assertIn("uses configured default: 7 shard(s)", normalized_help)
 
     def test_config_path_prescan_honors_custom_config(self) -> None:
         selected = cli._config_path_from_argv(
