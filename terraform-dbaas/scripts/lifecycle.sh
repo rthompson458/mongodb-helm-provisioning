@@ -273,28 +273,50 @@ cleanup_local_pv() {
   : "${TC_STORAGE_BASE_PATH:?TC_STORAGE_BASE_PATH is required}"
   : "${TC_STORAGE_NODE_NAME:?TC_STORAGE_NODE_NAME is required}"
 
-  # Do not let a kubectl --wait hang hold Terraform forever. Three minutes is
-  # intentionally much shorter than the harness timeout and is plenty of time
-  # for an unused local PVC/PV to disappear.
+  # Keep every wait bounded. During a full ShardedCluster teardown the MongoDB
+  # CR can disappear before its StatefulSet pods finish terminating, so storage
+  # cleanup may need to wait briefly for those pods to release their PVCs.
   local cleanup_timeout="${TC_STORAGE_CLEANUP_TIMEOUT:-180s}"
+  local cleanup_timeout_seconds="${cleanup_timeout%s}"
+  if ! [[ "$cleanup_timeout_seconds" =~ ^[0-9]+$ ]]; then
+    cleanup_timeout_seconds=180
+  fi
+
   local claim claim_ns target_claim pvc_volume users
+  local deployment_exists="false"
+  local deadline
+
+  if "${K[@]}" -n "${TC_NAMESPACE}" get mongodb "${TC_DEPLOYMENT}" >/dev/null 2>&1; then
+    deployment_exists="true"
+  fi
 
   claim=$("${K[@]}" get pv "$pv" -o jsonpath='{.spec.claimRef.name}' 2>/dev/null || true)
   claim_ns=$("${K[@]}" get pv "$pv" -o jsonpath='{.spec.claimRef.namespace}' 2>/dev/null || true)
   claim_ns="${claim_ns:-${TC_NAMESPACE}}"
 
-  if [[ -n "$expected_pvc" && -n "$claim" && "$claim" != "$expected_pvc" ]]; then
-    if "${K[@]}" -n "${TC_NAMESPACE}" get mongodb "${TC_DEPLOYMENT}" >/dev/null 2>&1; then
+  if [[ "$deployment_exists" == "true" ]]; then
+    if [[ -n "$expected_pvc" && -n "$claim" && "$claim" != "$expected_pvc" ]]; then
       echo "Refusing storage cleanup: PV '$pv' is bound to PVC '$claim', but Terraform expected '$expected_pvc'." >&2
       echo "No PVC/PV was deleted. This indicates legacy or drifted nondeterministic binding." >&2
       return 42
     fi
 
-    echo "Legacy storage binding detected during full teardown: PV '$pv' is bound to PVC '$claim' instead of expected '$expected_pvc'." >&2
-    echo "MongoDB deployment '${TC_DEPLOYMENT}' is absent; cleanup will use the PV's actual claim after live-use checks." >&2
-    target_claim="$claim"
-  else
     target_claim="${expected_pvc:-$claim}"
+  else
+    # Full teardown is different from live shard contraction. The MongoDB CR is
+    # already absent, so legacy randomly-bound PVs must follow Kubernetes'
+    # actual claim rather than Terraform's newer deterministic expectation.
+    if [[ -n "$claim" ]]; then
+      if [[ -n "$expected_pvc" && "$claim" != "$expected_pvc" ]]; then
+        echo "Legacy storage binding detected during full teardown: PV '$pv' is bound to PVC '$claim' instead of expected '$expected_pvc'." >&2
+        echo "MongoDB deployment '${TC_DEPLOYMENT}' is absent; cleanup will use the PV's actual claim after live-use checks." >&2
+      fi
+      target_claim="$claim"
+    else
+      # An unbound PV owns no PVC. Never adopt/delete some other PVC merely
+      # because Terraform state contains an expected name for this PV.
+      target_claim=""
+    fi
   fi
 
   if [[ -n "$target_claim" ]] && "${K[@]}" -n "$claim_ns" get pvc "$target_claim" >/dev/null 2>&1; then
@@ -306,10 +328,25 @@ cleanup_local_pv() {
     fi
 
     users=$(pvc_users "$claim_ns" "$target_claim")
-    if [[ -n "$users" ]]; then
+    if [[ -n "$users" && "$deployment_exists" == "true" ]]; then
       echo "Refusing storage cleanup: PVC '$target_claim' is still used by pod(s): $users" >&2
       echo "No PVC/PV was deleted. The removed shard must be fully absent before storage cleanup." >&2
       return 42
+    fi
+
+    if [[ -n "$users" ]]; then
+      echo "MongoDB deployment '${TC_DEPLOYMENT}' is absent, but PVC '$target_claim' is still used by terminating pod(s): $users" >&2
+      echo "Waiting up to $cleanup_timeout for pod(s) to release the PVC before storage cleanup." >&2
+      deadline=$(( $(date +%s) + cleanup_timeout_seconds ))
+      while [[ -n "$users" && $(date +%s) -lt $deadline ]]; do
+        sleep 2
+        users=$(pvc_users "$claim_ns" "$target_claim")
+      done
+      if [[ -n "$users" ]]; then
+        echo "Timed out waiting $cleanup_timeout for PVC '$target_claim' to be released by pod(s): $users" >&2
+        echo "No PVC/PV was deleted." >&2
+        return 42
+      fi
     fi
 
     "${K[@]}" -n "$claim_ns" delete pvc "$target_claim" --ignore-not-found=true --wait=false >/dev/null
