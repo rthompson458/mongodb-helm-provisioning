@@ -111,7 +111,7 @@ locals {
           # MongoDB database names may contain underscores, but Kubernetes
           # object names may not. Keep the MongoDB/Vault display name unchanged
           # while converting only the Kubernetes resource-name segment.
-          resource_name    = "tc-${substr(database.deployment_key, 0, 8)}-${substr(replace(database.database_key, "_", "-"), 0, 10)}-${account_key}-${substr(md5("${database_key}/${account_key}"), 0, 6)}"
+          resource_name = "tc-${substr(database.deployment_key, 0, 8)}-${substr(replace(database.database_key, "_", "-"), 0, 10)}-${account_key}-${substr(md5("${database_key}/${account_key}"), 0, 6)}"
         }
       ]
     ]) : account.key => account
