@@ -83,5 +83,27 @@ class CliTests(unittest.TestCase):
         self.assertTrue(args.confirm)
 
 
+    def test_recover_orphaned_resources_requires_confirmation_flag_shape(self) -> None:
+        args = cli.build_parser().parse_args(
+            ["RecoverOrphanedResources", "--confirm"]
+        )
+        self.assertTrue(args.confirm)
+
+    def test_async_worker_arguments_preserve_orphan_recovery_confirmation(self) -> None:
+        args = cli.build_parser().parse_args(
+            ["RecoverOrphanedResources", "--confirm"]
+        )
+        self.assertEqual(
+            cli._async_worker_arguments(args),
+            ["RecoverOrphanedResources", "--confirm"],
+        )
+
+    def test_orphan_recovery_async_status_uses_controller_state_label(self) -> None:
+        args = cli.build_parser().parse_args(
+            ["RecoverOrphanedResources", "--confirm"]
+        )
+        self.assertEqual(cli._async_deployment(args), "controller-state")
+
+
 if __name__ == "__main__":
     unittest.main()
