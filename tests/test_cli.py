@@ -99,5 +99,14 @@ class CliTests(unittest.TestCase):
         self.assertEqual(status_args, ["ListShards", "SC9"])
 
 
+    def test_public_help_is_customer_facing(self) -> None:
+        help_text = cli.build_parser().format_help()
+        self.assertIn("Terraform-driven MongoDB DBaaS controller", help_text)
+        self.assertNotIn("ListOperation", help_text)
+        self.assertNotIn("RecoverDeploymentLock", help_text)
+        self.assertNotIn("RecoverOrphanedResources", help_text)
+        self.assertNotIn("Reconcile", help_text)
+
+
 if __name__ == "__main__":
     unittest.main()
