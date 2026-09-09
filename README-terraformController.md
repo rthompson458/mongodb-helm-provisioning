@@ -88,6 +88,8 @@ ListShards SHARDED_CLUSTER
 
 ListOperations
 ListOperation OPERATION_ID
+
+RecoverDeploymentLock SHARDED_CLUSTER --confirm
 ```
 
 ### ReplicaSet lifecycle
@@ -840,6 +842,42 @@ terraform_controller/config.py
 terraform_controller/common.py
 terraform-dbaas/
 ```
+
+## RecoverDeploymentLock
+
+Use this command only for an interrupted ShardedCluster topology operation that
+already reached its recorded target topology but failed during a later
+bookkeeping or storage step:
+
+```bash
+python3 terraformController.py RecoverDeploymentLock SC9 --confirm
+```
+
+The recovery is intentionally narrow. Before releasing anything, the controller
+requires:
+
+```text
+Active lock category             = topology
+Active lock action               = AddShard or DeleteShard
+Vault desired shard count        = lock target
+Live MongoDB spec.shardCount     = lock target
+MongoDB phase                    = Running
+Every surviving shard            = Online
+Config servers                   = Online
+mongos                           = Online
+Removed shard StatefulSets       = Absent (DeleteShard)
+```
+
+The release remains Terraform-driven. The recovery uses a targeted Terraform
+apply for the lifecycle-operation resource so unrelated legacy storage is not
+reconciled while the lock is being released.
+
+For old static-local ShardedClusters created before deterministic PV/PVC
+pre-binding, full deployment teardown can clean a mismatched legacy PV only
+after the MongoDB resource is absent. Cleanup then follows the PV's actual
+Kubernetes claim and still refuses to remove any PVC that is referenced by a
+pod. While the MongoDB deployment still exists, PV/PVC identity mismatches
+remain a hard refusal.
 
 ## Reconcile
 
