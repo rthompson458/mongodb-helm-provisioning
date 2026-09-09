@@ -38,11 +38,11 @@ class MaintenanceTests(unittest.TestCase):
             maintenance.list_managed_resources(self.config, vault)
 
         text = output.getvalue()
-        self.assertIn("Managed deployments:  0", text)
-        self.assertIn("MongoDB resources:     0", text)
-        self.assertIn("PVCs:                  0", text)
-        self.assertIn("PVs:                   0", text)
-        self.assertIn("Deployment locks:      0", text)
+        self.assertRegex(text, r"(?m)^Managed deployments:\\s+0$")
+        self.assertRegex(text, r"(?m)^MongoDB resources:\\s+0$")
+        self.assertRegex(text, r"(?m)^PVCs:\\s+0$")
+        self.assertRegex(text, r"(?m)^PVs:\\s+0$")
+        self.assertRegex(text, r"(?m)^Deployment locks:\\s+0$")
         self.assertIn("Status: CLEAN", text)
 
     def test_list_managed_resources_reports_remaining_resource_names(self) -> None:
@@ -75,11 +75,11 @@ class MaintenanceTests(unittest.TestCase):
             maintenance.list_managed_resources(self.config, vault)
 
         text = output.getvalue()
-        self.assertIn("Managed deployments:  1", text)
-        self.assertIn("MongoDB resources:     1", text)
-        self.assertIn("PVCs:                  1", text)
-        self.assertIn("PVs:                   1", text)
-        self.assertIn("Deployment locks:      1", text)
+        self.assertRegex(text, r"(?m)^Managed deployments:\\s+1$")
+        self.assertRegex(text, r"(?m)^MongoDB resources:\\s+1$")
+        self.assertRegex(text, r"(?m)^PVCs:\\s+1$")
+        self.assertRegex(text, r"(?m)^PVs:\\s+1$")
+        self.assertRegex(text, r"(?m)^Deployment locks:\\s+1$")
         self.assertIn("Status: ATTENTION REQUIRED", text)
         self.assertIn("SC9", text)
         self.assertIn("sc9", text)
