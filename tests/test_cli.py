@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 from terraform_controller import cli
 
@@ -106,6 +107,44 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("RecoverDeploymentLock", help_text)
         self.assertNotIn("RecoverOrphanedResources", help_text)
         self.assertNotIn("Reconcile", help_text)
+
+
+    def test_public_help_shows_live_configured_shard_default(self) -> None:
+        configured = cli._configured_default_shards(cli.DEFAULT_CONFIG)
+        self.assertIsNotNone(configured)
+        help_text = cli.build_parser(cli.DEFAULT_CONFIG).format_help()
+        self.assertIn(
+            f"AddShardedCluster initial shards = {configured}",
+            help_text,
+        )
+        self.assertIn("(read from controller configuration)", help_text)
+        self.assertIn("AddShard count                  = 1", help_text)
+        self.assertIn("DeleteShard count               = 1", help_text)
+
+    def test_add_sharded_cluster_help_labels_configured_default(self) -> None:
+        with mock.patch.object(
+            cli, "_configured_default_shards", return_value=7
+        ):
+            parser = cli.build_parser(cli.DEFAULT_CONFIG)
+
+        subparsers = next(
+            action
+            for action in parser._actions
+            if getattr(action, "choices", None)
+            and "AddShardedCluster" in action.choices
+        )
+        help_text = subparsers.choices["AddShardedCluster"].format_help()
+        self.assertIn(
+            "Default: 7 (read from controller configuration)",
+            help_text,
+        )
+        self.assertIn("uses configured default: 7 shard(s)", help_text)
+
+    def test_config_path_prescan_honors_custom_config(self) -> None:
+        selected = cli._config_path_from_argv(
+            ["--config", "/tmp/customer-controller.conf", "--help"]
+        )
+        self.assertEqual(selected, cli.Path("/tmp/customer-controller.conf"))
 
 
 if __name__ == "__main__":
