@@ -115,5 +115,56 @@ class MaintenanceTests(unittest.TestCase):
         release_mock.assert_not_called()
 
 
+    def test_recover_orphaned_resources_applies_empty_inventory(self) -> None:
+        vault = FakeVault({})
+
+        with (
+            patch.object(maintenance.kube, "list_json", return_value=[]),
+            patch.object(maintenance, "apply_inventory") as apply_mock,
+        ):
+            maintenance.recover_orphaned_resources(
+                self.config, vault, confirmed=True
+            )
+
+        apply_mock.assert_called_once_with(self.config, {})
+
+    def test_recover_orphaned_resources_refuses_nonempty_vault_inventory(self) -> None:
+        vault = FakeVault(
+            deployment_inventory(
+                deployment_type="ShardedCluster",
+                name="SC9",
+            )
+        )
+
+        with (
+            patch.object(maintenance.kube, "list_json") as list_mock,
+            patch.object(maintenance, "apply_inventory") as apply_mock,
+        ):
+            with self.assertRaises(maintenance.ControllerError) as ctx:
+                maintenance.recover_orphaned_resources(
+                    self.config, vault, confirmed=True
+                )
+
+        self.assertIn("Vault-backed controller inventory is empty", str(ctx.exception))
+        list_mock.assert_not_called()
+        apply_mock.assert_not_called()
+
+    def test_recover_orphaned_resources_refuses_live_managed_mongodb(self) -> None:
+        vault = FakeVault({})
+        live = [{"metadata": {"name": "sc9"}}]
+
+        with (
+            patch.object(maintenance.kube, "list_json", return_value=live),
+            patch.object(maintenance, "apply_inventory") as apply_mock,
+        ):
+            with self.assertRaises(maintenance.ControllerError) as ctx:
+                maintenance.recover_orphaned_resources(
+                    self.config, vault, confirmed=True
+                )
+
+        self.assertIn("live terraformController-managed MongoDB", str(ctx.exception))
+        apply_mock.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
