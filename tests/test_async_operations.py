@@ -18,6 +18,7 @@ from terraform_controller.async_operations import (
     operation_directory,
     submission_instructions,
 )
+from terraform_controller.common import ControllerError
 
 
 class AsyncOperationTests(unittest.TestCase):
@@ -54,7 +55,10 @@ class AsyncOperationTests(unittest.TestCase):
                 worker_arguments=["DeleteShard", "SC1", "1", "--confirm"],
             )
             operation_id = state["operation_id"]
-            self.assertEqual(load_operation(self.config_path, operation_id)["result"], "Queued")
+            self.assertEqual(
+                load_operation(self.config_path, operation_id)["result"],
+                "Queued",
+            )
 
             mark_running(self.config_path, operation_id)
             self.assertEqual(
@@ -101,7 +105,6 @@ class AsyncOperationTests(unittest.TestCase):
         self.assertIn("ListOperation", text)
         self.assertIn(state["operation_id"], text)
         self.assertIn("ListShards SC9", text)
-
 
     def test_duplicate_in_progress_deployment_submission_is_blocked(self) -> None:
         with self._patch_state_home():
