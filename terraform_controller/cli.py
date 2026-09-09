@@ -164,7 +164,7 @@ def build_parser(config_path: Path | None = None) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="terraformController.py",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="""Terraform-driven MongoDB DBaaS controller.
+        description=f"""Terraform-driven MongoDB DBaaS controller.
 
 A fresh installation starts with zero user-facing MongoDB deployments.
 Create and name a ReplicaSet or ShardedCluster before creating databases.
