@@ -46,10 +46,16 @@ If more than one deployment exists, the controller requires an explicit target.
 | Interface | Audience | Purpose |
 | --- | --- | --- |
 | `terraformController.py` | DBaaS user / customer demo | Normal deployments, shards, databases, credentials, and service status |
-| `terraformControllerAdmin.py` | Platform administrator | Operation diagnostics, Terraform reconciliation, and guarded recovery |
+| `terraformControllerAdmin.py` | Platform administrator | Managed-resource inventory, operation diagnostics, Terraform reconciliation, and guarded recovery |
 
 Normal DBaaS users should not need to know about Terraform operation journals,
 worker processes, recovery locks, or orphaned controller state.
+
+Administrators can verify a clean controller zero-state with:
+
+```bash
+python3 terraformControllerAdmin.py ListManagedResources
+```
 
 ## Background deployment and topology processing
 
