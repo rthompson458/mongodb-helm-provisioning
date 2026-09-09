@@ -25,7 +25,10 @@ class MaintenanceTests(unittest.TestCase):
         vault = FakeVault({})
 
         def fake_list(_config, resource, **kwargs):
-            self.assertIn(resource, {"mongodb", "mongodbuser", "pvc", "pv", "configmap"})
+            self.assertIn(
+                resource,
+                {"mongodb", "mongodbuser", "pvc", "pv", "configmap"},
+            )
             if resource == "pv":
                 self.assertFalse(kwargs.get("namespaced", True))
             return []
