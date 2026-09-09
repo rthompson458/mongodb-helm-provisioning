@@ -64,5 +64,16 @@ class CliTests(unittest.TestCase):
         self.assertEqual(args.command, "AddShard")
 
 
+    def test_async_submission_rejects_missing_confirmation(self) -> None:
+        args = cli.build_parser().parse_args(["DeleteShard", "SC9", "1"])
+        with self.assertRaises(cli.ControllerError):
+            cli._validate_async_submission(args)
+
+    def test_async_submission_rejects_zero_shards(self) -> None:
+        args = cli.build_parser().parse_args(["AddShard", "SC9", "0"])
+        with self.assertRaises(cli.ControllerError):
+            cli._validate_async_submission(args)
+
+
 if __name__ == "__main__":
     unittest.main()
