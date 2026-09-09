@@ -168,6 +168,22 @@ def launch_operation(
 ) -> dict[str, Any]:
     """Launch a detached worker that executes the normal synchronous lifecycle."""
 
+    # Prevent an easy double-submit from starting two local workers against the
+    # same deployment. Cross-process ShardedCluster safety is still enforced by
+    # the Terraform-created deployment lock; this is an additional UX guard.
+    for existing in list_operation_records(config_path):
+        if (
+            deployment
+            and str(existing.get("deployment", "")).lower() == deployment.lower()
+            and effective_result(existing) == "In Progress"
+        ):
+            raise ControllerError(
+                f"Deployment '{deployment}' already has an asynchronous operation "
+                f"in progress: {existing.get('command')} "
+                f"({existing.get('operation_id')}). Check it with 'ListOperation "
+                f"{existing.get('operation_id')}' before submitting another."
+            )
+
     state = create_operation(
         config_path,
         command=command,
