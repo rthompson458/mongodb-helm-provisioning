@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""Executable entry point for terraformController.
+"""Customer-facing entry point for the MongoDB DBaaS controller.
 
-Keep this file intentionally tiny.  All parsing and controller behavior lives
-inside terraform_controller/cli.py so the implementation can be unit tested
-without spawning a new Python process.
+Normal DBaaS users and customer demonstrations should use this executable.
+
+Administrator diagnostics, Terraform reconciliation, operation journals, and
+recovery commands are intentionally separated into terraformControllerAdmin.py.
+
+Keep this file tiny. Parsing and public controller behavior live in
+terraform_controller/cli.py so the interface can be unit tested without
+spawning a new Python process.
 """
 
 from terraform_controller.cli import main
