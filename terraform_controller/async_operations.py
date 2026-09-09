@@ -206,11 +206,16 @@ def launch_operation(
         _write_state(config_path, state)
         raise ControllerError(state["message"]) from exc
 
-    state["pid"] = process.pid
-    state["result"] = "In Progress"
-    state["message"] = "Detached local worker started."
-    _write_state(config_path, state)
-    return state
+    # The worker can start extremely quickly. Reload before recording the PID so
+    # the parent never overwrites a terminal Succeeded/Failed result that the
+    # child managed to persist first.
+    latest = load_operation(config_path, operation_id)
+    latest["pid"] = process.pid
+    if latest.get("result") == "Queued":
+        latest["result"] = "In Progress"
+        latest["message"] = "Detached local worker started."
+    _write_state(config_path, latest)
+    return latest
 
 
 def mark_running(config_path: Path, operation_id: str) -> None:
