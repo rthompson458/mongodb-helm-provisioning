@@ -92,9 +92,12 @@ json_string() {
 account_resource_name() {
   local account="$1"
   local db_key="${TC_DATABASE,,}"
+  # MongoDB database names may contain underscores. Kubernetes resource
+  # names may not, so use a DNS-safe copy only for the Kubernetes name.
+  local db_resource_key="${db_key//_/-}"
   local digest
   digest=$(python3 -c 'import hashlib,sys; print(hashlib.md5(sys.argv[1].encode()).hexdigest()[:6])' "${TC_DEPLOYMENT}/${db_key}/${account}")
-  printf 'tc-%s-%s-%s-%s' "${TC_DEPLOYMENT:0:8}" "${db_key:0:10}" "${account}" "${digest}"
+  printf 'tc-%s-%s-%s-%s' "${TC_DEPLOYMENT:0:8}" "${db_resource_key:0:10}" "${account}" "${digest}"
 }
 
 verify_account() {
