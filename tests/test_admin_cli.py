@@ -13,6 +13,7 @@ class AdminCliTests(unittest.TestCase):
     def test_admin_parser_exposes_only_admin_commands(self) -> None:
         parser = admin_cli.build_parser()
         expected = {
+            "ListManagedResources",
             "ListOperation",
             "ListOperations",
             "RecoverDeploymentLock",
@@ -48,6 +49,11 @@ class AdminCliTests(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     parser.parse_args([command])
 
+    def test_list_resources_alias_is_not_supported(self) -> None:
+        parser = admin_cli.build_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["ListResources"])
+
     def test_recover_deployment_lock_requires_confirmation_shape(self) -> None:
         args = admin_cli.build_parser().parse_args(
             ["RecoverDeploymentLock", "SC9", "--confirm"]
@@ -74,6 +80,7 @@ class AdminCliTests(unittest.TestCase):
     def test_admin_help_identifies_operator_interface(self) -> None:
         help_text = admin_cli.build_parser().format_help()
         self.assertIn("platform administration interface", help_text)
+        self.assertIn("ListManagedResources", help_text)
         self.assertIn("ListOperation", help_text)
         self.assertIn("RecoverDeploymentLock", help_text)
         self.assertIn("RecoverOrphanedResources", help_text)
