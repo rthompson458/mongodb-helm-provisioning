@@ -6,7 +6,7 @@ from .runner import HarnessRunner
 
 
 def run(runner: HarnessRunner) -> None:
-    """Exercise count-based shard operations and database safety rules."""
+    """Exercise count-based shard operations, including removal with a live database."""
 
     ctx = runner.context
     sc = ctx.sharded_cluster
@@ -55,13 +55,13 @@ def run(runner: HarnessRunner) -> None:
         timeout=900,
     )
     runner.controller(
-        "Block shard deletion while database exists",
+        "Delete a shard while database exists",
         "DeleteShard",
         sc,
         "1",
         "--confirm",
-        expect_success=False,
-        expected_text="contains managed databases",
+        expected_text="Successfully deleted 1 shard(s)",
+        timeout=2400,
     )
     runner.controller(
         "Rotate ShardedCluster database credentials",
@@ -90,10 +90,10 @@ def run(runner: HarnessRunner) -> None:
         timeout=900,
     )
     runner.controller(
-        "Delete three shards in one command and leave one",
+        "Delete two more shards in one command and leave one",
         "DeleteShard",
         sc,
-        "3",
+        "2",
         "--confirm",
         expected_text="Total shards:    1",
         timeout=2400,
