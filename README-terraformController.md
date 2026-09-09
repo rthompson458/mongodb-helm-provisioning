@@ -85,6 +85,9 @@ ListShardedCluster SHARDED_CLUSTER
 
 ListShards
 ListShards SHARDED_CLUSTER
+
+ListOperations
+ListOperation OPERATION_ID
 ```
 
 ### ReplicaSet lifecycle
@@ -154,6 +157,71 @@ python3 terraformController.py DeleteShard --help
 python3 terraformController.py AddDatabase --help
 python3 terraformController.py RotatePasswords --help
 ```
+
+
+## Asynchronous long-running operations
+
+The following deployment/topology commands are asynchronous from the user's shell:
+
+```text
+AddReplicaSet
+DeleteReplicaSet
+AddShardedCluster
+DeleteShardedCluster
+AddShard
+DeleteShard
+```
+
+The public command validates its command-line shape, creates a persistent local Operation ID, starts a detached worker, prints exact status commands, and returns the shell prompt. The detached worker then executes the same existing synchronous lifecycle implementation, so managed changes remain Terraform-driven.
+
+Example:
+
+```bash
+python3 terraformController.py DeleteShard SC9 1 --confirm
+```
+
+returns:
+
+```text
+DeleteShard request accepted.
+
+Operation ID:   7c1349abc123
+Deployment:     SC9
+Status:         In Progress
+
+Check positive/negative result with:
+  python3 terraformController.py --config ... ListOperation 7c1349abc123
+
+Check live shard progress with:
+  python3 terraformController.py --config ... ListShards SC9
+```
+
+Read one operation:
+
+```bash
+python3 terraformController.py ListOperation 7c1349abc123
+```
+
+Read recent operations:
+
+```bash
+python3 terraformController.py ListOperations
+```
+
+Possible operation results:
+
+```text
+In Progress
+Succeeded
+Failed
+Interrupted
+```
+
+`ListOperation`, `ListOperations`, and `ListShards` are read-only. They do not finish or mutate an operation.
+
+Operation journals are stored outside the repository under `XDG_STATE_HOME` (or `~/.local/state`) in a config-specific terraformController state directory, so `git clean` does not erase operation history.
+
+For this local POC, the detached worker survives the invoking shell but not a stopped WSL/host environment. A stopped/interrupted ShardedCluster operation remains protected by the existing deployment lock and matching-command resume behavior.
 
 ## Shard status
 
@@ -285,7 +353,7 @@ StorageClass:  mongodb-data-local
 Storage:       16Gi/member
 ```
 
-The command does not report success until the MongoDB resource is Running and the hidden controller account is ready.
+The public command returns an Operation ID after the detached worker starts. `ListOperation OPERATION_ID` reports `Succeeded` only after the MongoDB resource is Running and the hidden controller account is actually usable.
 
 ## AddShardedCluster
 
@@ -305,7 +373,7 @@ MongoDB:            8.0.29
 
 The shard count can be overridden with `--shards N`.
 
-The command waits for the ShardedCluster and all expected components before reporting success.
+The public command returns an Operation ID promptly. The detached worker waits for the ShardedCluster and all expected components, and `ListOperation OPERATION_ID` reports the eventual positive/negative result.
 
 ## AddShard
 
@@ -324,7 +392,7 @@ python3 terraformController.py AddShard SC9 2
 
 For `AddShard SC9 2`, if SC9 starts with 3 shards, the target is 5 shards.
 
-The operation is staged:
+The detached worker performs the existing staged lifecycle:
 
 1. verify COUNT is at least 1,
 2. verify SC9 exists and is fully ready,
@@ -333,7 +401,9 @@ The operation is staged:
 5. Terraform changes the MongoDB `shardCount` to the target,
 6. wait until every target shard is online,
 7. release the deployment lock through Terraform,
-8. report the previous and final shard counts.
+8. record `Succeeded` or `Failed` in the operation journal.
+
+The submitting shell does not wait for steps 3-8. Use `ListOperation` for the final result and `ListShards` for live topology progress.
 
 If the controller process is interrupted after the lock is acquired, rerun the **same** AddShard command. The controller recognizes the matching lock and resumes toward the stored target instead of adding the count again.
 
@@ -361,7 +431,7 @@ Safety rules:
 5. Application databases may remain on the ShardedCluster during shard removal.
 6. Terraform lowers the managed MongoDB ShardedCluster `spec.shardCount`; Python does not directly remove shards.
 7. The MongoDB Kubernetes Operator/Ops Manager reconciles the supported ShardedCluster scale-down.
-8. The controller waits for the remaining cluster to become fully ready and for removed shard StatefulSets to disappear before Terraform cleans the old shard storage.
+8. The detached worker waits for the remaining cluster to become fully ready and for removed shard StatefulSets to disappear before Terraform cleans the old shard storage. The submitting shell has already returned with an Operation ID.
 
 For example, if SC9 has 3 shards:
 
@@ -815,9 +885,14 @@ python3 tests/run_harness.py \
 ```
 
 The full profile exercises ReplicaSet lifecycle, database/account lifecycle,
-ShardedCluster lifecycle, count-based shard add/delete, final-shard protection,
-shard deletion while a managed database remains present, global/targeted shard
-status, and an actual concurrent-process deployment-lock test.
+a 3 -> 5 -> 4 -> 1 ShardedCluster lifecycle, count-based shard add/delete,
+final-shard protection, shard deletion while a managed database remains present,
+global/targeted shard status, asynchronous operation polling, and an actual
+concurrent-process deployment-lock test.
+
+Harness output identifies `Test X of Y`, prints periodic `[WAIT]` lines for
+long asynchronous operations, records per-test elapsed time, and finishes with
+per-profile plus total elapsed time.
 
 See `tests/README.md` for scenario details.
 

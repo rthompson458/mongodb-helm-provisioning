@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from .runner import HarnessRunner
 
+TEST_COUNT = 13
+
 
 def run(runner: HarnessRunner) -> None:
     """Exercise count-based shard operations, stopping on prerequisite failure."""
@@ -12,13 +14,12 @@ def run(runner: HarnessRunner) -> None:
     sc = ctx.sharded_cluster
     db = ctx.database
 
-    created = runner.controller(
-        "Create two-shard test cluster",
+    created = runner.controller_async(
+        "Create three-shard test cluster",
         "AddShardedCluster",
         sc,
         "--shards",
-        "2",
-        expected_text=f"ShardedCluster '{sc}' was successfully created",
+        "3",
         timeout=2400,
     )
     if not created.passed:
@@ -41,24 +42,23 @@ def run(runner: HarnessRunner) -> None:
     if not global_status.passed:
         return
 
-    added = runner.controller(
+    added = runner.controller_async(
         "Add two shards in one command",
         "AddShard",
         sc,
         "2",
-        expected_text="Successfully added 2 shard(s)",
         timeout=2400,
     )
     if not added.passed:
         return
 
-    four_shard_status = runner.controller(
-        "Four-shard cluster reports online",
+    five_shard_status = runner.controller(
+        "Five-shard cluster reports online",
         "ListShards",
         sc,
-        expected_text=f"{sc.lower()}-3",
+        expected_text=f"{sc.lower()}-4",
     )
-    if not four_shard_status.passed:
+    if not five_shard_status.passed:
         return
 
     created_db = runner.controller(
@@ -72,13 +72,12 @@ def run(runner: HarnessRunner) -> None:
     if not created_db.passed:
         return
 
-    deleted_one = runner.controller(
+    deleted_one = runner.controller_async(
         "Delete a shard while database exists",
         "DeleteShard",
         sc,
         "1",
         "--confirm",
-        expected_text="Successfully deleted 1 shard(s)",
         timeout=2400,
     )
     if not deleted_one.passed:
@@ -119,19 +118,18 @@ def run(runner: HarnessRunner) -> None:
     if not deleted_db.passed:
         return
 
-    reduced = runner.controller(
-        "Delete two more shards in one command and leave one",
+    reduced = runner.controller_async(
+        "Delete three more shards in one command and leave one",
         "DeleteShard",
         sc,
-        "2",
+        "3",
         "--confirm",
-        expected_text="Total shards:    1",
         timeout=2400,
     )
     if not reduced.passed:
         return
 
-    blocked_final = runner.controller(
+    blocked_final = runner.controller_async(
         "Block deletion of final shard",
         "DeleteShard",
         sc,
@@ -139,15 +137,15 @@ def run(runner: HarnessRunner) -> None:
         "--confirm",
         expect_success=False,
         expected_text="must retain at least 1 shard",
+        timeout=300,
     )
     if not blocked_final.passed:
         return
 
-    runner.controller(
+    runner.controller_async(
         "Delete temporary ShardedCluster",
         "DeleteShardedCluster",
         sc,
         "--confirm",
-        expected_text=f"ShardedCluster '{sc}' was successfully deleted",
         timeout=2400,
     )

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from .runner import HarnessRunner
 
+TEST_COUNT = 5
+
 
 def run(runner: HarnessRunner) -> None:
     """Verify the CLI and basic status paths work without changing anything."""

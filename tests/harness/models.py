@@ -16,6 +16,17 @@ class StepResult:
     stdout: str = ""
     stderr: str = ""
     note: str = ""
+    elapsed_seconds: float = 0.0
+
+
+@dataclass
+class AsyncOperation:
+    """Accepted terraformController asynchronous operation."""
+
+    operation_id: str
+    command: list[str]
+    stdout: str = ""
+    stderr: str = ""
 
 
 @dataclass
@@ -29,6 +40,7 @@ class HarnessContext:
     allow_mutations: bool
     allow_destructive: bool
     verbose: bool
+    total_tests: int
 
     @property
     def replica_set(self) -> str:
