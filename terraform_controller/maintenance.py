@@ -47,8 +47,9 @@ def managed_resource_inventory(
 
     This function is intentionally read-only. It combines the Vault-backed
     desired deployment inventory with the Kubernetes resources used during the
-    controller zero-state check: managed MongoDB custom resources, managed PVCs,
-    managed PVs, and terraformController deployment-lock ConfigMaps.
+    controller zero-state check: managed MongoDB custom resources, managed
+    MongoDBUser custom resources, managed PVCs, managed PVs, and
+    terraformController deployment-lock ConfigMaps.
     """
 
     inventory = vault.load_inventory()
@@ -60,6 +61,11 @@ def managed_resource_inventory(
     mongodb_resources = kube.list_json(
         config,
         "mongodb",
+        label_selector=MANAGED_BY_SELECTOR,
+    )
+    mongodb_users = kube.list_json(
+        config,
+        "mongodbuser",
         label_selector=MANAGED_BY_SELECTOR,
     )
     pvcs = kube.list_json(
@@ -85,6 +91,7 @@ def managed_resource_inventory(
     return {
         "managed_deployments": deployments,
         "mongodb_resources": _kubernetes_names(mongodb_resources),
+        "mongodb_users": _kubernetes_names(mongodb_users),
         "pvcs": _kubernetes_names(pvcs),
         "pvs": _kubernetes_names(pvs),
         "deployment_locks": _kubernetes_names(locks),
@@ -101,6 +108,7 @@ def list_managed_resources(
     labels = [
         ("Managed deployments", "managed_deployments"),
         ("MongoDB resources", "mongodb_resources"),
+        ("MongoDB users", "mongodb_users"),
         ("PVCs", "pvcs"),
         ("PVs", "pvs"),
         ("Deployment locks", "deployment_locks"),
