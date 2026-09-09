@@ -36,9 +36,21 @@ python3 terraformController.py AddDatabase HouseInfo
 If more than one deployment exists, the controller requires an explicit target.
 
 
-## Asynchronous deployment and topology operations
 
-Long-running deployment/topology commands return control to the user after a detached local worker is started:
+### Two intentionally separate command interfaces
+
+| Interface | Audience | Purpose |
+| --- | --- | --- |
+| `terraformController.py` | DBaaS user / customer demo | Normal deployments, shards, databases, credentials, and service status |
+| `terraformControllerAdmin.py` | Platform administrator | Operation diagnostics, Terraform reconciliation, and guarded recovery |
+
+Normal DBaaS users should not need to know about Terraform operation journals,
+worker processes, recovery locks, or orphaned controller state.
+
+## Background deployment and topology processing
+
+Long-running deployment/topology requests return control to the DBaaS user after
+the request is accepted:
 
 ```text
 AddReplicaSet
@@ -55,46 +67,25 @@ Example:
 python3 terraformController.py DeleteShard SC9 1 --confirm
 ```
 
-returns an Operation ID and exact check-back commands instead of holding the terminal for the entire MongoDB/Ops Manager reconciliation:
+The public response is deliberately service-oriented:
 
 ```text
 DeleteShard request accepted.
 
-Operation ID:   7c1349abc123
-Deployment:     SC9
-Status:         In Progress
+ShardedCluster: SC9
+Status:         Topology change requested
 
-Check positive/negative result with:
-  python3 terraformController.py ... ListOperation 7c1349abc123
+The request is being processed in the background.
 
-Check live shard progress with:
+Check service status with:
   python3 terraformController.py ... ListShards SC9
 ```
 
-Check one completed or active operation:
+Internal operation IDs, worker PIDs, journal paths, and recovery commands are
+available only through `terraformControllerAdmin.py`.
 
-```bash
-python3 terraformController.py ListOperation 7c1349abc123
-```
-
-List recent operations:
-
-```bash
-python3 terraformController.py ListOperations
-```
-
-Operation results are explicit:
-
-```text
-In Progress
-Succeeded
-Failed
-Interrupted
-```
-
-The operation journal is stored outside the Git checkout under the user's local state directory, so normal Git clean/reset operations do not erase it. The detached worker still executes the normal Terraform-driven lifecycle; asynchronous execution does **not** move managed MongoDB/Kubernetes/Vault/storage mutations into Python.
-
-For this local POC, the detached worker survives the invoking shell but not a stopped WSL/host environment. If the host is stopped during a protected ShardedCluster change, the existing deployment-lock/resume safeguards remain the recovery path.
+Background execution does **not** change the architecture boundary: managed
+MongoDB, Kubernetes, Vault, and storage mutations remain Terraform-driven.
 
 ## Managed database accounts
 
@@ -191,7 +182,6 @@ RotatePasswords
 DisableOwner
 AddShard
 DeleteShard
-Reconcile
 ```
 
 The lock itself is created and released by the Terraform lifecycle script. Python only requests the Terraform operation and reads lock/status information.
@@ -235,8 +225,29 @@ where `%m` is month and `%M` is minute.
 
 ## Documentation
 
-See [README-terraformController.md](README-terraformController.md) for the complete command reference, lifecycle rules, logging configuration, storage model, Vault behavior, deployment locking, and Terraform architecture.
+Customer / DBaaS user guide:
 
+```text
+README-terraformController.md
+```
+
+Platform administrator / recovery guide:
+
+```text
+README-terraformControllerAdmin.md
+```
+
+Interface-boundary architecture note:
+
+```text
+docs/CLI-INTERFACES.md
+```
+
+Test and acceptance-harness guide:
+
+```text
+tests/README.md
+```
 
 ## Testing
 
