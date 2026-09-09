@@ -166,6 +166,7 @@ def launch_operation(
     command: str,
     deployment: str,
     worker_arguments: Sequence[str],
+    entrypoint_name: str = "terraformController.py",
 ) -> dict[str, Any]:
     """Launch a detached worker that executes the normal synchronous lifecycle."""
 
@@ -179,10 +180,10 @@ def launch_operation(
             and effective_result(existing) == "In Progress"
         ):
             raise ControllerError(
-                f"Deployment '{deployment}' already has an asynchronous operation "
-                f"in progress: {existing.get('command')} "
-                f"({existing.get('operation_id')}). Check it with 'ListOperation "
-                f"{existing.get('operation_id')}' before submitting another."
+                f"Deployment '{deployment}' already has a controller operation "
+                f"in progress: {existing.get('command')}. "
+                "Wait for the current change to finish before submitting another "
+                "mutation. Use the normal resource status commands to monitor progress."
             )
 
     state = create_operation(
@@ -193,7 +194,7 @@ def launch_operation(
     )
     operation_id = state["operation_id"]
     log_path = _log_path(config_path, operation_id)
-    entrypoint = repo_root / "terraformController.py"
+    entrypoint = repo_root / entrypoint_name
 
     worker_command = [
         sys.executable,
@@ -338,50 +339,75 @@ def print_operations(config_path: Path) -> None:
         )
 
 
-def submission_instructions(
+def public_submission_instructions(
     config_path: Path,
     state: dict[str, Any],
     *,
-    shard_status: bool = False,
+    resource_label: str,
+    status_text: str,
+    status_arguments: Sequence[str] | None = None,
 ) -> str:
-    """Return exact copy/paste commands for checking an accepted operation."""
+    """Return customer-facing confirmation without exposing operation internals.
+
+    The public DBaaS interface intentionally hides worker PIDs, operation IDs,
+    journal paths, and recovery details. Those belong to terraformControllerAdmin.
+    """
+
+    lines = [
+        f"{state['command']} request accepted.",
+        "",
+        f"{resource_label}: {state.get('deployment') or '-'}",
+        f"Status:         {status_text}",
+        "",
+        "The request is being processed in the background.",
+    ]
+
+    if status_arguments:
+        check_command = shlex.join(
+            [
+                sys.executable,
+                "terraformController.py",
+                "--config",
+                str(config_path.expanduser().resolve()),
+                *status_arguments,
+            ]
+        )
+        lines.extend(
+            [
+                "",
+                "Check service status with:",
+                f"  {check_command}",
+            ]
+        )
+
+    return "\n".join(lines)
+
+
+def admin_submission_instructions(
+    config_path: Path,
+    state: dict[str, Any],
+) -> str:
+    """Return administrator-facing async details and exact journal command."""
 
     check_command = shlex.join(
         [
             sys.executable,
-            "terraformController.py",
+            "terraformControllerAdmin.py",
             "--config",
             str(config_path.expanduser().resolve()),
             "ListOperation",
             state["operation_id"],
         ]
     )
-    lines = [
-        f"{state['command']} request accepted.",
-        "",
-        f"Operation ID:   {state['operation_id']}",
-        f"Deployment:     {state.get('deployment') or '-'}",
-        "Status:         In Progress",
-        "",
-        "Check positive/negative result with:",
-        f"  {check_command}",
-    ]
-    if shard_status and state.get("deployment"):
-        shard_command = shlex.join(
-            [
-                sys.executable,
-                "terraformController.py",
-                "--config",
-                str(config_path.expanduser().resolve()),
-                "ListShards",
-                state["deployment"],
-            ]
-        )
-        lines.extend(
-            [
-                "",
-                "Check live shard progress with:",
-                f"  {shard_command}",
-            ]
-        )
-    return "\n".join(lines)
+    return "\n".join(
+        [
+            f"{state['command']} request accepted.",
+            "",
+            f"Operation ID:   {state['operation_id']}",
+            f"Scope:          {state.get('deployment') or '-'}",
+            "Status:         In Progress",
+            "",
+            "Check administrator operation status with:",
+            f"  {check_command}",
+        ]
+    )
