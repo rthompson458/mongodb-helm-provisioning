@@ -5,25 +5,27 @@ from __future__ import annotations
 import subprocess
 import time
 
+from terraform_controller.async_operations import effective_result, load_operation
 from terraform_controller.config import load_config
 from terraform_controller.deployment_lock import lock_name
 from terraform_controller import kube
 
+from .models import AsyncOperation
 from .runner import HarnessRunner
+
+TEST_COUNT = 6
 
 
 def _wait_for_lock(
     runner: HarnessRunner,
     deployment_key: str,
-    process: subprocess.Popen[str],
+    operation: AsyncOperation,
     seconds: int = 300,
 ) -> bool:
-    """Poll until the Terraform-created lock appears or AddShard exits.
+    """Poll until the Terraform-created lock appears or AddShard terminates."""
 
-    Terraform may need to refresh the repository and initialize providers before
-    it reaches the lock operation, so this timeout is intentionally longer than
-    a simple Kubernetes polling timeout.
-    """
+    if not operation.operation_id:
+        return False
 
     config = load_config(runner.context.config_path)
     command = kube.base(config) + [
@@ -38,7 +40,11 @@ def _wait_for_lock(
 
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        if process.poll() is not None:
+        try:
+            state = load_operation(runner.context.config_path, operation.operation_id)
+            if effective_result(state) in {"Succeeded", "Failed", "Interrupted"}:
+                return False
+        except Exception:
             return False
 
         result = subprocess.run(
@@ -55,28 +61,29 @@ def _wait_for_lock(
 
 
 def run(runner: HarnessRunner) -> None:
-    """Prove a concurrent database mutation is blocked during AddShard."""
+    """Prove a concurrent database mutation is blocked during async AddShard."""
 
     ctx = runner.context
     sc = ctx.lock_cluster
     db = f"LOCKDB_{ctx.suffix}"
 
-    created = runner.controller(
+    created = runner.controller_async(
         "Create lock-test ShardedCluster",
         "AddShardedCluster",
         sc,
         "--shards",
         "1",
-        expected_text=f"ShardedCluster '{sc}' was successfully created",
         timeout=2400,
     )
     if not created.passed:
         return
 
-    # AddShard runs in the background so the harness can issue a second command
-    # while the first operation owns the Terraform-created deployment lock.
-    process = runner.start_controller("AddShard", sc, "1")
-    lock_seen = _wait_for_lock(runner, sc.lower(), process)
+    # Public AddShard now returns immediately with an Operation ID. Its detached
+    # worker owns the Terraform-created deployment lock while the harness starts
+    # a second command to prove conflicting mutations are blocked.
+    operation = runner.start_async_controller("AddShard", sc, "1")
+    lock_started = time.monotonic()
+    lock_seen = _wait_for_lock(runner, sc.lower(), operation)
     runner.check(
         "Observe Terraform-created deployment lock",
         lock_seen,
@@ -85,6 +92,7 @@ def run(runner: HarnessRunner) -> None:
             if not lock_seen
             else "Deployment lock became visible in Kubernetes."
         ),
+        elapsed_seconds=time.monotonic() - lock_started,
     )
 
     if lock_seen:
@@ -97,11 +105,10 @@ def run(runner: HarnessRunner) -> None:
             expected_text="busy with another managed change",
         )
 
-    runner.record_background(
+    runner.wait_async(
         "Background AddShard completes",
-        process,
+        operation,
         timeout=2400,
-        expected_text="Successfully added 1 shard(s)",
     )
 
     runner.controller(
@@ -111,11 +118,10 @@ def run(runner: HarnessRunner) -> None:
         expected_text="Active change:   None",
     )
 
-    runner.controller(
+    runner.controller_async(
         "Delete lock-test ShardedCluster",
         "DeleteShardedCluster",
         sc,
         "--confirm",
-        expected_text=f"ShardedCluster '{sc}' was successfully deleted",
         timeout=2400,
     )
