@@ -144,7 +144,10 @@ locals {
         deployment        = key
         component         = "shard"
         ordinal           = ordinal
+        shard_index       = floor(ordinal / cluster.members_per_shard)
+        member_index      = ordinal % cluster.members_per_shard
         pv_name           = "${key}-shard-${ordinal}"
+        pvc_name          = "data-${key}-${floor(ordinal / cluster.members_per_shard)}-${ordinal % cluster.members_per_shard}"
         storage_base_path = cluster.storage_base_path
         storage_node_name = cluster.storage_node_name
         storage_class     = cluster.storage_class
@@ -160,7 +163,9 @@ locals {
         deployment        = key
         component         = "config"
         ordinal           = ordinal
+        member_index      = ordinal
         pv_name           = "${key}-config-${ordinal}"
+        pvc_name          = "data-${key}-config-${ordinal}"
         storage_base_path = cluster.storage_base_path
         storage_node_name = cluster.storage_node_name
         storage_class     = cluster.storage_class
@@ -269,6 +274,7 @@ resource "terraform_data" "sharded_cluster_shard_storage" {
       TC_DEPLOYMENT        = self.input.deployment
       TC_COMPONENT         = self.input.component
       TC_PV_NAME           = self.input.pv_name
+      TC_PVC_NAME          = self.input.pvc_name
       TC_NAMESPACE         = self.input.namespace
       TC_KUBECONFIG        = self.input.kubeconfig
       TC_KUBE_CONTEXT      = self.input.kube_context
@@ -288,6 +294,7 @@ resource "terraform_data" "sharded_cluster_shard_storage" {
       TC_DEPLOYMENT        = self.input.deployment
       TC_COMPONENT         = self.input.component
       TC_PV_NAME           = self.input.pv_name
+      TC_PVC_NAME          = try(self.input.pvc_name, "")
       TC_NAMESPACE         = self.input.namespace
       TC_KUBECONFIG        = self.input.kubeconfig
       TC_KUBE_CONTEXT      = self.input.kube_context
@@ -316,6 +323,7 @@ resource "terraform_data" "sharded_cluster_config_storage" {
       TC_DEPLOYMENT        = self.input.deployment
       TC_COMPONENT         = self.input.component
       TC_PV_NAME           = self.input.pv_name
+      TC_PVC_NAME          = self.input.pvc_name
       TC_NAMESPACE         = self.input.namespace
       TC_KUBECONFIG        = self.input.kubeconfig
       TC_KUBE_CONTEXT      = self.input.kube_context
@@ -335,6 +343,7 @@ resource "terraform_data" "sharded_cluster_config_storage" {
       TC_DEPLOYMENT        = self.input.deployment
       TC_COMPONENT         = self.input.component
       TC_PV_NAME           = self.input.pv_name
+      TC_PVC_NAME          = try(self.input.pvc_name, "")
       TC_NAMESPACE         = self.input.namespace
       TC_KUBECONFIG        = self.input.kubeconfig
       TC_KUBE_CONTEXT      = self.input.kube_context
