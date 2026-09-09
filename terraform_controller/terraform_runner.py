@@ -12,11 +12,13 @@ Important rule for maintainers:
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import shutil
 import tempfile
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +45,49 @@ def _check_version() -> None:
         raise ControllerError(
             f"Terraform {version} is installed; terraformController requires 1.11 or newer."
         )
+
+
+
+@contextmanager
+def _terraform_execution_lock(config: dict[str, Any]):
+    """Serialize all local Terraform cache/workdir activity across processes.
+
+    Every controller command shares one disposable Git checkout and one
+    terraform-dbaas/.terraform provider directory. Detached async workers make
+    overlapping commands much more likely, so git refresh, terraform init, and
+    terraform apply must be one cross-process critical section.
+
+    flock is process-safe on Linux/WSL and is automatically released if a
+    worker exits or is killed. The lock file lives beside the cache so git
+    reset/clean cannot remove it.
+    """
+
+    cache: Path = config["terraform_cache"]
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = cache.parent / f".{cache.name}.terraformController.lock"
+
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        print("Waiting for exclusive Terraform execution access ...")
+        log_event("terraform.execution_lock.waiting", lock_file=str(lock_path))
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            handle.seek(0)
+            handle.truncate()
+            handle.write(f"pid={os.getpid()}\n")
+            handle.flush()
+            log_event(
+                "terraform.execution_lock.acquired",
+                lock_file=str(lock_path),
+                pid=os.getpid(),
+            )
+            yield
+        finally:
+            log_event(
+                "terraform.execution_lock.released",
+                lock_file=str(lock_path),
+                pid=os.getpid(),
+            )
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _sync(config: dict[str, Any]) -> Path:
@@ -109,48 +154,72 @@ def apply_inventory(
 
     High-level sequence:
       1. Check local tools and Terraform version.
-      2. Refresh the Terraform module from GitHub.
-      3. Pass environment/config values as TF_VAR_* variables.
-      4. Write desired state to a temporary .tfvars.json file.
-      5. Run terraform init and terraform apply.
-      6. Delete the temporary input file even if apply fails.
+      2. Acquire the cross-process Terraform execution lock.
+      3. Refresh the Terraform module from GitHub.
+      4. Pass environment/config values as TF_VAR_* variables.
+      5. Write desired state to a temporary .tfvars.json file.
+      6. Run terraform init and terraform apply.
+      7. Delete the temporary input file and release the execution lock.
 
     Password values are never written into this temporary JSON by Python.
     """
+
     _require("terraform", "git", "kubectl", "bash", "python3")
     op = _operation_payload(operation)
     if config["storage_mode"] == "static-local":
         _require("docker")
 
     _check_version()
+
+    # The shared Git checkout, .terraform provider directory, and Terraform
+    # backend workflow are treated as one transaction. This prevents one async
+    # worker from resetting the checkout or reinstalling a provider while
+    # another worker is actively executing it ("text file busy").
+    with _terraform_execution_lock(config):
+        _apply_inventory_locked(config, inventory, op)
+
+
+def _apply_inventory_locked(
+    config: dict[str, Any],
+    inventory: dict[str, dict[str, Any]],
+    op: dict[str, Any],
+) -> None:
+    """Run one Terraform refresh/init/apply while execution access is held."""
+
     tfdir = _sync(config)
     token_name = config["vault_token_env"]
     token = os.getenv(token_name, "")
     if not token:
-        raise ControllerError(f"Vault token environment variable '{token_name}' is not set.")
+        raise ControllerError(
+            f"Vault token environment variable '{token_name}' is not set."
+        )
 
     env = os.environ.copy()
-    env.update({
-        "VAULT_ADDR": config["vault_address"],
-        "VAULT_TOKEN": token,
-        "TF_VAR_vault_address": config["vault_address"],
-        "TF_VAR_vault_mount": config["vault_mount"],
-        "TF_VAR_vault_base_path": config["vault_base_path"],
-        "TF_VAR_rotation_days": str(config["rotation_days"]),
-        "TF_VAR_mongodb_namespace": config["mongodb_namespace"],
-        "TF_VAR_ops_manager_config_map": config["ops_manager_config_map"],
-        "TF_VAR_ops_manager_credentials_secret": config["ops_manager_credentials_secret"],
-        "TF_VAR_mongodb_auth_database": config["mongodb_auth_database"],
-        "TF_VAR_kubeconfig_path": config["kubeconfig"],
-        "TF_VAR_kube_context": config["kube_context"],
-        "TF_VAR_mongo_image": config["mongo_image"],
-        "TF_VAR_placeholder_collection": config["placeholder_collection"],
-        "TF_VAR_default_members": str(config["default_members"]),
-        "TF_VAR_default_storage_class": config["storage_class"],
-        "TF_VAR_default_storage_size": config["storage_size"],
-        "TF_VAR_storage_base_path": config["storage_base_path"],
-        "TF_VAR_storage_node_name": config["storage_node_name"],
-    })
+    env.update(
+        {
+            "VAULT_ADDR": config["vault_address"],
+            "VAULT_TOKEN": token,
+            "TF_VAR_vault_address": config["vault_address"],
+            "TF_VAR_vault_mount": config["vault_mount"],
+            "TF_VAR_vault_base_path": config["vault_base_path"],
+            "TF_VAR_rotation_days": str(config["rotation_days"]),
+            "TF_VAR_mongodb_namespace": config["mongodb_namespace"],
+            "TF_VAR_ops_manager_config_map": config["ops_manager_config_map"],
+            "TF_VAR_ops_manager_credentials_secret": config[
+                "ops_manager_credentials_secret"
+            ],
+            "TF_VAR_mongodb_auth_database": config["mongodb_auth_database"],
+            "TF_VAR_kubeconfig_path": config["kubeconfig"],
+            "TF_VAR_kube_context": config["kube_context"],
+            "TF_VAR_mongo_image": config["mongo_image"],
+            "TF_VAR_placeholder_collection": config["placeholder_collection"],
+            "TF_VAR_default_members": str(config["default_members"]),
+            "TF_VAR_default_storage_class": config["storage_class"],
+            "TF_VAR_default_storage_size": config["storage_size"],
+            "TF_VAR_storage_base_path": config["storage_base_path"],
+            "TF_VAR_storage_node_name": config["storage_node_name"],
+        }
+    )
 
     init = [
         "terraform",
@@ -170,7 +239,7 @@ def apply_inventory(
     log_event("terraform.init.succeeded", directory=str(tfdir))
 
     # The inventory file is temporary because desired state is reconstructed
-    # from Vault for each command.  Keeping it around would invite stale state.
+    # from Vault for each command. Keeping it around would invite stale state.
     temp: Path | None = None
     try:
         payload = {
