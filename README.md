@@ -35,6 +35,67 @@ python3 terraformController.py AddDatabase HouseInfo
 
 If more than one deployment exists, the controller requires an explicit target.
 
+
+## Asynchronous deployment and topology operations
+
+Long-running deployment/topology commands return control to the user after a detached local worker is started:
+
+```text
+AddReplicaSet
+DeleteReplicaSet
+AddShardedCluster
+DeleteShardedCluster
+AddShard
+DeleteShard
+```
+
+Example:
+
+```bash
+python3 terraformController.py DeleteShard SC9 1 --confirm
+```
+
+returns an Operation ID and exact check-back commands instead of holding the terminal for the entire MongoDB/Ops Manager reconciliation:
+
+```text
+DeleteShard request accepted.
+
+Operation ID:   7c1349abc123
+Deployment:     SC9
+Status:         In Progress
+
+Check positive/negative result with:
+  python3 terraformController.py ... ListOperation 7c1349abc123
+
+Check live shard progress with:
+  python3 terraformController.py ... ListShards SC9
+```
+
+Check one completed or active operation:
+
+```bash
+python3 terraformController.py ListOperation 7c1349abc123
+```
+
+List recent operations:
+
+```bash
+python3 terraformController.py ListOperations
+```
+
+Operation results are explicit:
+
+```text
+In Progress
+Succeeded
+Failed
+Interrupted
+```
+
+The operation journal is stored outside the Git checkout under the user's local state directory, so normal Git clean/reset operations do not erase it. The detached worker still executes the normal Terraform-driven lifecycle; asynchronous execution does **not** move managed MongoDB/Kubernetes/Vault/storage mutations into Python.
+
+For this local POC, the detached worker survives the invoking shell but not a stopped WSL/host environment. If the host is stopped during a protected ShardedCluster change, the existing deployment-lock/resume safeguards remain the recovery path.
+
 ## Managed database accounts
 
 Every managed application database gets exactly three accounts:
@@ -312,9 +373,9 @@ preflight
   -> deployment-lock/concurrency lifecycle
 ```
 
-Coverage includes ReplicaSet and ShardedCluster creation/deletion, real controller-admin authentication readiness, database creation/deletion, Owner/ReadWrite/Read accounts, password rotation, Owner disable, blocking deployment deletion while databases exist, targeted/global shard status, multi-shard add/delete, deleting a shard while a database remains, one-shard minimum enforcement, and concurrent mutation locking.
+Coverage includes ReplicaSet and ShardedCluster creation/deletion, real controller-admin authentication readiness, database creation/deletion, Owner/ReadWrite/Read accounts, password rotation, Owner disable, blocking deployment deletion while databases exist, targeted/global shard status, a 3 -> 5 -> 4 -> 1 shard lifecycle, deleting a shard while a database remains, one-shard minimum enforcement, asynchronous-operation polling, and concurrent mutation locking.
 
-The harness is **fail-fast**. If a prerequisite step fails, dependent steps and later profiles are not started. This keeps the first meaningful defect visible instead of producing a cascade of secondary failures.
+The harness is **fail-fast**. If a prerequisite step fails, dependent steps and later profiles are not started. Each check is numbered as `Test X of Y`, long asynchronous checks print periodic `[WAIT]` progress, every result includes per-test elapsed time, and the final summary includes per-profile and total elapsed time.
 
 Successful live profiles clean up their temporary resources. After a failed run, temporary resources may remain so the failed state can be inspected. Use normal `terraformController.py`/Terraform lifecycle commands to clean controller-managed resources rather than manually deleting them from Kubernetes.
 
