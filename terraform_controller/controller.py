@@ -3,7 +3,7 @@
 The implementation is intentionally split by responsibility:
 - deployments.py: ReplicaSet, ShardedCluster, and shard lifecycle/status
 - databases.py: database, account, Vault credential, and rotation lifecycle
-- maintenance.py: reconciliation
+- maintenance.py: administrator inventory, reconciliation, and recovery
 """
 
 from .databases import (
