@@ -25,7 +25,7 @@ class MaintenanceTests(unittest.TestCase):
         vault = FakeVault({})
 
         def fake_list(_config, resource, **kwargs):
-            self.assertIn(resource, {"mongodb", "pvc", "pv", "configmap"})
+            self.assertIn(resource, {"mongodb", "mongodbuser", "pvc", "pv", "configmap"})
             if resource == "pv":
                 self.assertFalse(kwargs.get("namespaced", True))
             return []
@@ -40,6 +40,7 @@ class MaintenanceTests(unittest.TestCase):
         text = output.getvalue()
         self.assertRegex(text, r"(?m)^Managed deployments:\s+0$")
         self.assertRegex(text, r"(?m)^MongoDB resources:\s+0$")
+        self.assertRegex(text, r"(?m)^MongoDB users:\s+0$")
         self.assertRegex(text, r"(?m)^PVCs:\s+0$")
         self.assertRegex(text, r"(?m)^PVs:\s+0$")
         self.assertRegex(text, r"(?m)^Deployment locks:\s+0$")
@@ -56,6 +57,8 @@ class MaintenanceTests(unittest.TestCase):
         def fake_list(_config, resource, **kwargs):
             if resource == "mongodb":
                 return [{"metadata": {"name": "sc9"}}]
+            if resource == "mongodbuser":
+                return [{"metadata": {"name": "tc-sc9-admin"}}]
             if resource == "pvc":
                 return [{"metadata": {"name": "data-sc9-0-0"}}]
             if resource == "pv":
@@ -77,12 +80,14 @@ class MaintenanceTests(unittest.TestCase):
         text = output.getvalue()
         self.assertRegex(text, r"(?m)^Managed deployments:\s+1$")
         self.assertRegex(text, r"(?m)^MongoDB resources:\s+1$")
+        self.assertRegex(text, r"(?m)^MongoDB users:\s+1$")
         self.assertRegex(text, r"(?m)^PVCs:\s+1$")
         self.assertRegex(text, r"(?m)^PVs:\s+1$")
         self.assertRegex(text, r"(?m)^Deployment locks:\s+1$")
         self.assertIn("Status: ATTENTION REQUIRED", text)
         self.assertIn("SC9", text)
         self.assertIn("sc9", text)
+        self.assertIn("tc-sc9-admin", text)
         self.assertIn("data-sc9-0-0", text)
         self.assertIn("sc9-shard-0", text)
         self.assertIn("tc-deployment-lock-sc9", text)
