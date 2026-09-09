@@ -149,6 +149,7 @@ def apply_inventory(
     config: dict[str, Any],
     inventory: dict[str, dict[str, Any]],
     operation: dict[str, Any] | None = None,
+    targets: list[str] | None = None,
 ) -> None:
     """Apply desired deployment state and an optional one-shot operation.
 
@@ -176,13 +177,14 @@ def apply_inventory(
     # worker from resetting the checkout or reinstalling a provider while
     # another worker is actively executing it ("text file busy").
     with _terraform_execution_lock(config):
-        _apply_inventory_locked(config, inventory, op)
+        _apply_inventory_locked(config, inventory, op, targets)
 
 
 def _apply_inventory_locked(
     config: dict[str, Any],
     inventory: dict[str, dict[str, Any]],
     op: dict[str, Any],
+    targets: list[str] | None = None,
 ) -> None:
     """Run one Terraform refresh/init/apply while execution access is held."""
 
@@ -272,17 +274,16 @@ def _apply_inventory_locked(
             deployment_count=len(inventory),
         )
         try:
-            run_process(
-                [
-                    "terraform",
-                    "apply",
-                    "-input=false",
-                    "-auto-approve",
-                    f"-var-file={temp.name}",
-                ],
-                cwd=tfdir,
-                env=env,
-            )
+            command = [
+                "terraform",
+                "apply",
+                "-input=false",
+                "-auto-approve",
+                f"-var-file={temp.name}",
+            ]
+            for target in targets or []:
+                command.append(f"-target={target}")
+            run_process(command, cwd=tfdir, env=env)
         except ControllerError:
             log_event(
                 "terraform.apply.failed",
