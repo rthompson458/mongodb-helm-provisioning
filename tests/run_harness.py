@@ -108,6 +108,27 @@ def _require_live_opt_in(args: argparse.Namespace) -> None:
         )
 
 
+
+def _total_tests(profile: str) -> int:
+    """Return the exact number of PASS/FAIL checks for the selected profile."""
+
+    total = scenario_preflight.TEST_COUNT
+    if profile == "replicaset":
+        return total + scenario_replicaset.TEST_COUNT
+    if profile == "sharded":
+        return total + scenario_sharded.TEST_COUNT
+    if profile == "locking":
+        return total + scenario_locking.TEST_COUNT
+    if profile == "all":
+        return (
+            total
+            + scenario_replicaset.TEST_COUNT
+            + scenario_sharded.TEST_COUNT
+            + scenario_locking.TEST_COUNT
+        )
+    return total
+
+
 def main() -> int:
     """Run the requested scenarios and return zero only when all checks pass."""
 
@@ -126,6 +147,7 @@ def main() -> int:
         allow_mutations=args.allow_mutations,
         allow_destructive=args.allow_destructive,
         verbose=args.verbose,
+        total_tests=_total_tests(args.profile),
     )
     runner = HarnessRunner(context)
 
@@ -134,26 +156,35 @@ def main() -> int:
     print(f"Profile: {args.profile}")
     print(f"Config:  {config_path}")
     print(f"Suffix:  {args.suffix}")
+    print(f"Tests:   {context.total_tests}")
     print()
 
     # Preflight always runs first. Stop immediately if a prerequisite is broken
     # so later scenarios do not create misleading secondary failures.
+    runner.start_profile("Preflight")
     scenario_preflight.run(runner)
+    runner.finish_profile("Preflight")
     if any(not result.passed for result in runner.results):
         return runner.summary()
 
     if args.profile in {"replicaset", "all"}:
+        runner.start_profile("ReplicaSet")
         scenario_replicaset.run(runner)
+        runner.finish_profile("ReplicaSet")
         if any(not result.passed for result in runner.results):
             return runner.summary()
 
     if args.profile in {"sharded", "all"}:
+        runner.start_profile("ShardedCluster")
         scenario_sharded.run(runner)
+        runner.finish_profile("ShardedCluster")
         if any(not result.passed for result in runner.results):
             return runner.summary()
 
     if args.profile in {"locking", "all"}:
+        runner.start_profile("Locking")
         scenario_locking.run(runner)
+        runner.finish_profile("Locking")
 
     return runner.summary()
 
