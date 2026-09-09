@@ -88,7 +88,7 @@ class DeploymentLifecycleTests(unittest.TestCase):
         self.assertEqual(calls[0]["shard_count"], 3)
         self.assertEqual(calls[1]["shard_count"], 5)
 
-    def test_delete_shard_blocked_when_managed_database_exists(self) -> None:
+    def test_delete_shard_allowed_when_managed_database_exists(self) -> None:
         vault = FakeVault(
             deployment_inventory(
                 deployment_type="ShardedCluster",
@@ -96,17 +96,37 @@ class DeploymentLifecycleTests(unittest.TestCase):
                 with_db=True,
             )
         )
+        calls = []
+
+        def apply_side_effect(config, inventory, operation=None):
+            calls.append((copy.deepcopy(inventory["sc9"]), copy.deepcopy(operation)))
 
         with (
             patch.object(deployments, "read_deployment_lock", return_value=None),
             patch.object(deployments, "require_running"),
-            patch.object(deployments, "apply_inventory") as apply_mock,
+            patch.object(
+                deployments,
+                "acquire_deployment_lock",
+                return_value=topology_lock(action="DeleteShard", start=3, target=2),
+            ),
+            patch.object(deployments, "release_deployment_lock"),
+            patch.object(
+                deployments,
+                "apply_inventory",
+                side_effect=apply_side_effect,
+            ),
+            patch.object(deployments.kube, "wait_sharded_cluster_ready"),
+            patch.object(deployments.kube, "wait_absent"),
         ):
-            with self.assertRaises(deployments.ControllerError) as ctx:
-                deployments.delete_shard(self.config, vault, "SC9", 1, True)
+            deployments.delete_shard(self.config, vault, "SC9", 1, True)
 
-        self.assertIn("contains managed databases", str(ctx.exception))
-        apply_mock.assert_not_called()
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0][0]["shard_count"], 2)
+        self.assertEqual(calls[0][0]["storage_shard_count"], 3)
+        self.assertEqual(calls[1][0]["shard_count"], 2)
+        self.assertEqual(calls[1][0]["storage_shard_count"], 2)
+        self.assertIsNone(calls[0][1])
+        self.assertIn("houseinfo", vault.inventory["sc9"]["databases"])
 
     def test_delete_shards_cannot_reduce_cluster_below_one(self) -> None:
         vault = FakeVault(
