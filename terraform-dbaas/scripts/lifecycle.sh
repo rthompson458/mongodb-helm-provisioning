@@ -195,14 +195,20 @@ verify_owner_absent() {
 prepare_local_pv() {
   local pv="$1"
   local component="$2"
+  local expected_pvc="$3"
   : "${TC_STORAGE_BASE_PATH:?TC_STORAGE_BASE_PATH is required}"
   : "${TC_STORAGE_NODE_NAME:?TC_STORAGE_NODE_NAME is required}"
   : "${TC_STORAGE_CLASS:?TC_STORAGE_CLASS is required}"
   : "${TC_STORAGE_SIZE:?TC_STORAGE_SIZE is required}"
+  : "${expected_pvc:?Expected PVC name is required}"
 
   local path="${TC_STORAGE_BASE_PATH%/}/${pv}"
   docker exec "${TC_STORAGE_NODE_NAME}" mkdir -p "$path"
 
+  # Static-local shard/config PVs used to share only a broad label selector.
+  # Kubernetes was therefore free to bind any matching PV to any shard member.
+  # Pre-binding each PV to the exact PVC name makes the Terraform storage
+  # ordinal deterministic and makes later shard cleanup safe.
   cat <<EOF | "${K[@]}" apply -f - >/dev/null
 apiVersion: v1
 kind: PersistentVolume
@@ -213,7 +219,11 @@ metadata:
     dbaas.deployment: ${TC_DEPLOYMENT}
     dbaas.sharded-cluster: ${TC_DEPLOYMENT}
     dbaas.component: ${component}
+    dbaas.pvc-name: ${expected_pvc}
 spec:
+  claimRef:
+    namespace: ${TC_NAMESPACE}
+    name: ${expected_pvc}
   accessModes:
     - ReadWriteOnce
   capacity:
@@ -234,20 +244,87 @@ spec:
 EOF
 }
 
+pvc_users() {
+  local namespace="$1"
+  local claim="$2"
+  local pod_json
+
+  pod_json=$("${K[@]}" -n "$namespace" get pods -o json 2>/dev/null || printf '{"items":[]}')
+  python3 -c '
+import json
+import sys
+
+claim = sys.argv[1]
+data = json.load(sys.stdin)
+users = []
+for pod in data.get("items", []):
+    for volume in pod.get("spec", {}).get("volumes", []) or []:
+        pvc = volume.get("persistentVolumeClaim") or {}
+        if pvc.get("claimName") == claim:
+            users.append(pod.get("metadata", {}).get("name", "<unknown>"))
+            break
+print(" ".join(users))
+' "$claim" <<<"$pod_json"
+}
+
 cleanup_local_pv() {
   local pv="$1"
+  local expected_pvc="${2:-}"
   : "${TC_STORAGE_BASE_PATH:?TC_STORAGE_BASE_PATH is required}"
   : "${TC_STORAGE_NODE_NAME:?TC_STORAGE_NODE_NAME is required}"
 
-  local claim claim_ns
+  # Do not let a kubectl --wait hang hold Terraform forever. Three minutes is
+  # intentionally much shorter than the harness timeout and is plenty of time
+  # for an unused local PVC/PV to disappear.
+  local cleanup_timeout="${TC_STORAGE_CLEANUP_TIMEOUT:-180s}"
+  local claim claim_ns target_claim pvc_volume users
+
   claim=$("${K[@]}" get pv "$pv" -o jsonpath='{.spec.claimRef.name}' 2>/dev/null || true)
   claim_ns=$("${K[@]}" get pv "$pv" -o jsonpath='{.spec.claimRef.namespace}' 2>/dev/null || true)
   claim_ns="${claim_ns:-${TC_NAMESPACE}}"
 
-  if [[ -n "$claim" ]]; then
-    "${K[@]}" -n "$claim_ns" delete pvc "$claim" --ignore-not-found=true --wait=true >/dev/null
+  if [[ -n "$expected_pvc" && -n "$claim" && "$claim" != "$expected_pvc" ]]; then
+    echo "Refusing storage cleanup: PV '$pv' is bound to PVC '$claim', but Terraform expected '$expected_pvc'." >&2
+    echo "No PVC/PV was deleted. This indicates legacy or drifted nondeterministic binding." >&2
+    return 42
   fi
-  "${K[@]}" delete pv "$pv" --ignore-not-found=true --wait=true >/dev/null
+
+  target_claim="${expected_pvc:-$claim}"
+
+  if [[ -n "$target_claim" ]] && "${K[@]}" -n "$claim_ns" get pvc "$target_claim" >/dev/null 2>&1; then
+    pvc_volume=$("${K[@]}" -n "$claim_ns" get pvc "$target_claim" -o jsonpath='{.spec.volumeName}' 2>/dev/null || true)
+    if [[ -n "$pvc_volume" && "$pvc_volume" != "$pv" ]]; then
+      echo "Refusing storage cleanup: PVC '$target_claim' is bound to PV '$pvc_volume', not '$pv'." >&2
+      echo "No PVC/PV was deleted." >&2
+      return 42
+    fi
+
+    users=$(pvc_users "$claim_ns" "$target_claim")
+    if [[ -n "$users" ]]; then
+      echo "Refusing storage cleanup: PVC '$target_claim' is still used by pod(s): $users" >&2
+      echo "No PVC/PV was deleted. The removed shard must be fully absent before storage cleanup." >&2
+      return 42
+    fi
+
+    "${K[@]}" -n "$claim_ns" delete pvc "$target_claim" --ignore-not-found=true --wait=false >/dev/null
+    if "${K[@]}" -n "$claim_ns" get pvc "$target_claim" >/dev/null 2>&1; then
+      if ! "${K[@]}" -n "$claim_ns" wait --for=delete "pvc/$target_claim" --timeout="$cleanup_timeout" >/dev/null 2>&1; then
+        echo "Timed out waiting $cleanup_timeout for PVC '$target_claim' to be deleted." >&2
+        "${K[@]}" -n "$claim_ns" get pvc "$target_claim" -o wide >&2 || true
+        return 42
+      fi
+    fi
+  fi
+
+  "${K[@]}" delete pv "$pv" --ignore-not-found=true --wait=false >/dev/null
+  if "${K[@]}" get pv "$pv" >/dev/null 2>&1; then
+    if ! "${K[@]}" wait --for=delete "pv/$pv" --timeout="$cleanup_timeout" >/dev/null 2>&1; then
+      echo "Timed out waiting $cleanup_timeout for PV '$pv' to be deleted." >&2
+      "${K[@]}" get pv "$pv" -o wide >&2 || true
+      return 42
+    fi
+  fi
+
   docker exec "${TC_STORAGE_NODE_NAME}" rm -rf "${TC_STORAGE_BASE_PATH%/}/${pv}"
 }
 
@@ -317,12 +394,13 @@ EOF
       echo "TC_COMPONENT must be shard or config." >&2
       exit 2
     fi
-    prepare_local_pv "${TC_PV_NAME}" "${TC_COMPONENT}"
+    : "${TC_PVC_NAME:?TC_PVC_NAME is required}"
+    prepare_local_pv "${TC_PV_NAME}" "${TC_COMPONENT}" "${TC_PVC_NAME}"
     ;;
 
   cleanup_sharded_cluster_volume)
     : "${TC_PV_NAME:?TC_PV_NAME is required}"
-    cleanup_local_pv "${TC_PV_NAME}"
+    cleanup_local_pv "${TC_PV_NAME}" "${TC_PVC_NAME:-}"
     ;;
 
   acquire_deployment_lock)
