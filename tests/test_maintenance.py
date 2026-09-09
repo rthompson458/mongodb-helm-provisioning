@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import unittest
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
 from terraform_controller import maintenance
@@ -18,6 +20,73 @@ class MaintenanceTests(unittest.TestCase):
             "rs_ready_timeout": 30,
             "sc_ready_timeout": 30,
         }
+
+    def test_list_managed_resources_reports_clean_zero_state(self) -> None:
+        vault = FakeVault({})
+
+        def fake_list(_config, resource, **kwargs):
+            self.assertIn(resource, {"mongodb", "pvc", "pv", "configmap"})
+            if resource == "pv":
+                self.assertFalse(kwargs.get("namespaced", True))
+            return []
+
+        output = io.StringIO()
+        with (
+            patch.object(maintenance.kube, "list_json", side_effect=fake_list),
+            redirect_stdout(output),
+        ):
+            maintenance.list_managed_resources(self.config, vault)
+
+        text = output.getvalue()
+        self.assertIn("Managed deployments:  0", text)
+        self.assertIn("MongoDB resources:     0", text)
+        self.assertIn("PVCs:                  0", text)
+        self.assertIn("PVs:                   0", text)
+        self.assertIn("Deployment locks:      0", text)
+        self.assertIn("Status: CLEAN", text)
+
+    def test_list_managed_resources_reports_remaining_resource_names(self) -> None:
+        vault = FakeVault(
+            deployment_inventory(
+                deployment_type="ShardedCluster",
+                name="SC9",
+            )
+        )
+
+        def fake_list(_config, resource, **kwargs):
+            if resource == "mongodb":
+                return [{"metadata": {"name": "sc9"}}]
+            if resource == "pvc":
+                return [{"metadata": {"name": "data-sc9-0-0"}}]
+            if resource == "pv":
+                return [{"metadata": {"name": "sc9-shard-0"}}]
+            if resource == "configmap":
+                return [
+                    {"metadata": {"name": "unrelated-config"}},
+                    {"metadata": {"name": "tc-deployment-lock-sc9"}},
+                ]
+            raise AssertionError(resource)
+
+        output = io.StringIO()
+        with (
+            patch.object(maintenance.kube, "list_json", side_effect=fake_list),
+            redirect_stdout(output),
+        ):
+            maintenance.list_managed_resources(self.config, vault)
+
+        text = output.getvalue()
+        self.assertIn("Managed deployments:  1", text)
+        self.assertIn("MongoDB resources:     1", text)
+        self.assertIn("PVCs:                  1", text)
+        self.assertIn("PVs:                   1", text)
+        self.assertIn("Deployment locks:      1", text)
+        self.assertIn("Status: ATTENTION REQUIRED", text)
+        self.assertIn("SC9", text)
+        self.assertIn("sc9", text)
+        self.assertIn("data-sc9-0-0", text)
+        self.assertIn("sc9-shard-0", text)
+        self.assertIn("tc-deployment-lock-sc9", text)
+        self.assertNotIn("unrelated-config", text)
 
     def test_reconcile_with_no_inventory_is_noop(self) -> None:
         vault = FakeVault({})
