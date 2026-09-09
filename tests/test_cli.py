@@ -75,5 +75,13 @@ class CliTests(unittest.TestCase):
             cli._validate_async_submission(args)
 
 
+    def test_recover_deployment_lock_requires_confirmation_flag_shape(self) -> None:
+        args = cli.build_parser().parse_args(
+            ["RecoverDeploymentLock", "SC9", "--confirm"]
+        )
+        self.assertEqual(args.deployment, "SC9")
+        self.assertTrue(args.confirm)
+
+
 if __name__ == "__main__":
     unittest.main()
