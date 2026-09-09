@@ -288,10 +288,20 @@ def print_operation(config_path: Path, operation_id: str) -> None:
     result = effective_result(state)
     message = state.get("message", "")
     if result == "Interrupted":
+        if state.get("command") in {"AddShard", "DeleteShard"}:
+            recovery = (
+                "The Terraform deployment lock/resume safeguards remain in effect. "
+                "Rerun the same shard command with the same count to resume safely."
+            )
+        else:
+            recovery = (
+                "Inspect ListDeployments (and ListShards for ShardedClusters) before "
+                "taking another mutation. Use the normal Terraform-driven Reconcile/"
+                "cleanup path based on the recorded inventory state."
+            )
         message = (
             "The detached worker is no longer running before a terminal result was "
-            "recorded. The existing Terraform/deployment-lock resume safeguards remain "
-            "in effect; rerun the same lifecycle command to resume safely."
+            f"recorded. {recovery}"
         )
 
     print(f"Operation ID: {state['operation_id']}")
