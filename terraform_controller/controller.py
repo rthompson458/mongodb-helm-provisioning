@@ -29,7 +29,12 @@ from .deployments import (
     list_sharded_clusters,
     list_shards,
 )
-from .maintenance import reconcile, recover_deployment_lock, recover_orphaned_resources
+from .maintenance import (
+    list_managed_resources,
+    reconcile,
+    recover_deployment_lock,
+    recover_orphaned_resources,
+)
 
 __all__ = [
     "add_database",
@@ -50,6 +55,7 @@ __all__ = [
     "list_sharded_cluster",
     "list_sharded_clusters",
     "list_shards",
+    "list_managed_resources",
     "reconcile",
     "recover_deployment_lock",
     "recover_orphaned_resources",
