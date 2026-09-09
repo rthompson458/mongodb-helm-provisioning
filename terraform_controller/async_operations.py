@@ -13,6 +13,7 @@ Important architecture boundary:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shlex
@@ -44,9 +45,18 @@ def _now() -> str:
 
 
 def operation_directory(config_path: Path) -> Path:
-    """Return the config-relative directory that stores operation journals."""
+    """Return a per-config state directory outside the Git working tree.
 
-    return config_path.expanduser().resolve().parent / ".terraformController" / "operations"
+    Keeping operation journals under XDG_STATE_HOME (or ~/.local/state) means a
+    normal git clean/reset cannot erase the status of an in-flight operation.
+    """
+
+    resolved = str(config_path.expanduser().resolve())
+    namespace = hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:12]
+    state_home = Path(
+        os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state"))
+    ).expanduser()
+    return state_home / "terraformController" / namespace / "operations"
 
 
 def _state_path(config_path: Path, operation_id: str) -> Path:
