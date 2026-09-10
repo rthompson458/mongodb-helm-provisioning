@@ -1,0 +1,9 @@
+mongodb:
+  name: ""
+  image: "mongo:8.0"
+  provisionerConnectionSecret: ""
+  adminConnectionSecret: ""
+
+mongodbDatabases: []
+mongodbDatabaseOperations: []
+mongodbManagementNonce: ""
