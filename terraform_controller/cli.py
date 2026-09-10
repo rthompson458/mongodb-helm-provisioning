@@ -53,11 +53,12 @@ from .controller import (
 from .logging_component import configure_logging, log_event, log_exception
 from .vault import VaultClient
 
-# Keep these two paths separate on purpose. REPO_ROOT locates the controller
-# code for detached workers. DEFAULT_CONFIG describes what the person running
-# the CLI normally types: a config file in the current working directory.
+# Keep these values separate on purpose. REPO_ROOT locates the controller code
+# for detached workers. DEFAULT_CONFIG_DISPLAY is the friendly path a person
+# sees and types, while DEFAULT_CONFIG is the Path object used by Python.
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CONFIG = Path("./terraformController.config")
+DEFAULT_CONFIG_DISPLAY = "./terraformController.config"
+DEFAULT_CONFIG = Path(DEFAULT_CONFIG_DISPLAY)
 
 
 def _config_path_from_argv(argv: list[str]) -> Path:
@@ -208,7 +209,7 @@ Inventory:
     )
     parser.add_argument(
         "--config",
-        default=str(DEFAULT_CONFIG),
+        default=DEFAULT_CONFIG_DISPLAY,
         metavar="FILE",
         help="Optional configuration file. Default: ./terraformController.config",
     )
