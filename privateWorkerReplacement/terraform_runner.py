@@ -289,6 +289,7 @@ def _apply_inventory_locked(
             "TF_VAR_kube_context": config["kube_context"],
             "TF_VAR_mongo_image": config["mongo_image"],
             "TF_VAR_placeholder_collection": config["placeholder_collection"],
+            "TF_VAR_mongodb_management_timeout_seconds": str(config["job_timeout"]),
             "TF_VAR_default_members": str(config["default_members"]),
             "TF_VAR_default_storage_class": config["storage_class"],
             "TF_VAR_default_storage_size": config["storage_size"],
@@ -326,6 +327,10 @@ def _apply_inventory_locked(
         payload = {
             "deployments": inventory,
             "operation": op,
+            # DeleteDatabase already requires --confirm at the public CLI.
+            # Carry that approval into Terraform so Noah's destructive-operation
+            # gate remains meaningful without creating a second user prompt.
+            "allow_destructive_mongodb_operations": op["action"] == "delete_database",
         }
         with tempfile.NamedTemporaryFile(
             "w",
