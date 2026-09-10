@@ -20,6 +20,14 @@ python3 terraformControllerAdmin.py --help
 
 Running either executable with no command is intentional. It prints the full help text and exits successfully instead of returning an argparse `COMMAND` error.
 
+Both controller CLIs assume the configuration file is in the current working directory:
+
+```text
+./terraformController.config
+```
+
+Use `--config FILE` only when a different configuration file is intentionally selected.
+
 The complete customer/operator manual is:
 
 ```text
@@ -192,7 +200,7 @@ AddDatabase
 DeleteDatabase
 ```
 
-The acknowledgement tells the user what was requested and which normal service-status command to run. It does **not** expose an internal operation ID.
+The acknowledgement tells the user what was requested and which normal service-status command to run. It does **not** expose an internal operation ID. Normal follow-up instructions use the friendly `./terraformController.config` path; detached workers resolve that path internally before running.
 
 Examples:
 
@@ -320,12 +328,12 @@ python3 terraformControllerAdmin.py ListManagedResources
 A clean environment reports:
 
 ```text
-Managed deployments:  0
-MongoDB resources:    0
-MongoDB users:        0
-PVCs:                 0
-PVs:                  0
-Deployment locks:     0
+Managed deployments:             0
+MongoDB resources:               0
+MongoDB users:                   0
+PVCs (Persistent Volume Claims): 0
+PVs (Persistent Volumes):        0
+Deployment locks:                0
 
 Status: CLEAN
 ```
@@ -340,6 +348,12 @@ That status is informational. It does not, by itself, indicate a health problem.
 
 ## Testing
 
+Show complete live-harness help without running tests:
+
+```bash
+python3 tests/run_harness.py
+```
+
 Fast unit/regression suite:
 
 ```bash
@@ -351,6 +365,8 @@ Safe read-only live preflight:
 ```bash
 python3 tests/run_harness.py --profile preflight
 ```
+
+Lifecycle profiles that create, modify, or delete temporary test resources require the explicit `--allow-changes` safety acknowledgement.
 
 Complete live acceptance run:
 
