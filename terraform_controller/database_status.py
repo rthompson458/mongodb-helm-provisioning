@@ -43,13 +43,8 @@ def _resolve_database_args(
 def _operation_database_target(
     record: dict[str, Any],
     inventory: dict[str, dict[str, Any]],
-) -> tuple[str, str] | None:
-    """Return (deployment_key, database_key) for one active DB operation.
-
-    The async journal stores the exact worker arguments. Explicit targeting is
-    DEPLOYMENT DATABASE; the shorthand contains only DATABASE and is valid only
-    when one managed deployment exists.
-    """
+) -> tuple[str, str, str] | None:
+    """Return deployment key, database key, and display name for active DB work."""
 
     if record.get("command") not in {"AddDatabase", "DeleteDatabase"}:
         return None
@@ -75,27 +70,30 @@ def _operation_database_target(
         return None
 
     try:
-        database_key, _ = normalize_database(database_name)
+        database_key, display = normalize_database(database_name)
     except ControllerError:
         return None
-    return deployment_key, database_key
+    return deployment_key, database_key, display
 
 
 def _active_database_changes(
     config: dict[str, Any],
     inventory: dict[str, dict[str, Any]],
-) -> dict[tuple[str, str], str]:
-    """Map active database targets to Creating or Deleting."""
+) -> dict[tuple[str, str], tuple[str, str]]:
+    """Map active database targets to (status, original display name)."""
 
-    changes: dict[tuple[str, str], str] = {}
+    changes: dict[tuple[str, str], tuple[str, str]] = {}
     config_path = Path(str(config["config_path"]))
     for record in list_operation_records(config_path):
         target = _operation_database_target(record, inventory)
-        if target is None or target in changes:
+        if target is None:
             continue
-        changes[target] = (
-            "Creating" if record.get("command") == "AddDatabase" else "Deleting"
-        )
+        deployment_key, database_key, display = target
+        key = (deployment_key, database_key)
+        if key in changes:
+            continue
+        status = "Creating" if record.get("command") == "AddDatabase" else "Deleting"
+        changes[key] = (status, display)
     return changes
 
 
@@ -106,7 +104,6 @@ def _deployment_is_ready(
 
     if kube.phase(config, deployment_key) != "Running":
         return False
-
     if deployment_type_label(deployment) != "ShardedCluster":
         return True
 
@@ -125,13 +122,13 @@ def _database_status(
     deployment_key: str,
     deployment: dict[str, Any],
     database_key: str,
-    active_changes: dict[tuple[str, str], str],
+    active_changes: dict[tuple[str, str], tuple[str, str]],
 ) -> str:
     """Return the customer-facing lifecycle status for one database."""
 
     active = active_changes.get((deployment_key, database_key))
     if active:
-        return active
+        return active[0]
     return "Ready" if _deployment_is_ready(config, deployment_key, deployment) else "Unavailable"
 
 
@@ -169,23 +166,16 @@ def list_databases(
             )
             seen.add((deployment_key, database_key))
 
-    # AddDatabase may still be in its materialization stage and therefore not
-    # appear in Vault inventory yet. Show it as Creating so the status command
-    # given to the customer is useful immediately after submission.
+    # During the first AddDatabase stage the database may not yet be committed
+    # to Vault inventory. Include that journal entry so users immediately see
+    # the database as Creating instead of seeing a misleading empty list.
     selected_keys = {key for key, _ in deployments}
-    for (deployment_key, database_key), status in sorted(active_changes.items()):
+    for (deployment_key, database_key), (status, display) in sorted(active_changes.items()):
         if status != "Creating" or (deployment_key, database_key) in seen:
             continue
         if deployment_key not in selected_keys or deployment_key not in inventory:
             continue
-        record_db_name = database_key
-        rows.append(
-            (
-                inventory[deployment_key]["display_name"],
-                record_db_name,
-                "Creating",
-            )
-        )
+        rows.append((inventory[deployment_key]["display_name"], display, "Creating"))
 
     if not rows:
         if deployment_name:
@@ -217,10 +207,11 @@ def list_database(
 
     db = deployment["databases"].get(db_key)
     if db is None:
-        if active_changes.get((deployment_key, db_key)) == "Creating":
+        active = active_changes.get((deployment_key, db_key))
+        if active and active[0] == "Creating":
             print(f"Deployment:      {deployment['display_name']}")
             print(f"Deployment Type: {deployment_type_label(deployment)}")
-            print(f"Database:        {display}")
+            print(f"Database:        {active[1]}")
             print("Status:          Creating")
             return
         raise ControllerError(
