@@ -36,11 +36,12 @@ from .controller import (
 from .logging_component import configure_logging, log_event, log_exception
 from .vault import VaultClient
 
-# REPO_ROOT locates the administrator entry point for detached recovery workers.
-# DEFAULT_CONFIG is intentionally relative because operators normally run the
-# tool from the checkout that contains ./terraformController.config.
+# Keep these values separate on purpose. REPO_ROOT locates the administrator
+# entry point for detached recovery workers. DEFAULT_CONFIG_DISPLAY is the
+# friendly path an operator sees and types; DEFAULT_CONFIG is the Path object.
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CONFIG = Path("./terraformController.config")
+DEFAULT_CONFIG_DISPLAY = "./terraformController.config"
+DEFAULT_CONFIG = Path(DEFAULT_CONFIG_DISPLAY)
 
 
 def _confirm(parser: argparse.ArgumentParser) -> None:
@@ -128,7 +129,7 @@ Normal DBaaS users should use:
     )
     parser.add_argument(
         "--config",
-        default=str(DEFAULT_CONFIG),
+        default=DEFAULT_CONFIG_DISPLAY,
         metavar="FILE",
         help="Optional configuration file. Default: ./terraformController.config",
     )
