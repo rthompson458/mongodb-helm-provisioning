@@ -1,66 +1,150 @@
 # MongoDB DBaaS Provisioning
 
-Terraform-driven MongoDB DBaaS proof of concept for ReplicaSet and ShardedCluster deployments managed through the MongoDB Kubernetes Operator, Ops Manager, Vault, Kubernetes, and Terraform-owned lifecycle scripts.
+Terraform-driven MongoDB Database as a Service proof of concept for ReplicaSet and ShardedCluster deployments managed through the MongoDB Kubernetes Operator, Ops Manager, Vault, Kubernetes, and Terraform-owned lifecycle scripts.
 
 ## Start here
 
-The user-facing local controller is:
+Normal DBaaS users use:
 
 ```bash
 python3 terraformController.py --help
 ```
 
-A fresh installation contains **zero user-facing ReplicaSets and zero user-facing ShardedClusters**. The user creates and names the required MongoDB deployment.
+Platform administrators use:
 
-Examples:
+```bash
+python3 terraformControllerAdmin.py --help
+```
+
+The complete customer/operator manual is:
+
+```text
+README-terraformController.md
+```
+
+The administrator/recovery manual is:
+
+```text
+README-terraformControllerAdmin.md
+```
+
+A fresh installation contains **zero user-facing ReplicaSets and zero user-facing ShardedClusters**. The user explicitly creates and names the MongoDB deployment they need.
+
+## Quick example
+
+Create a ReplicaSet:
 
 ```bash
 python3 terraformController.py AddReplicaSet RS1
-python3 terraformController.py AddShardedCluster SC9
-python3 terraformController.py ListDeployments
 ```
 
-`AddShardedCluster` uses the initial shard count stored in controller
-configuration when `--shards` is omitted. The current configured default is
-**3 shards**. Use `--shards N` to override it for one request.
+The request returns promptly while provisioning continues in the background. Check readiness with:
 
-After a deployment is fully ready:
+```bash
+python3 terraformController.py ListReplicaSet RS1
+```
+
+After the ReplicaSet is Running, request a database:
 
 ```bash
 python3 terraformController.py AddDatabase RS1 HouseInfo
-python3 terraformController.py AddDatabase SC9 Orders
 ```
 
-If exactly one managed deployment exists, the deployment name can be omitted:
+Database creation is also asynchronous. Check database/account availability with:
 
 ```bash
-python3 terraformController.py AddDatabase HouseInfo
+python3 terraformController.py ListDatabase RS1 HouseInfo
 ```
 
-If more than one deployment exists, the controller requires an explicit target.
+Every managed database receives exactly three accounts:
 
+```text
+HouseInfo_owner      -> dbOwner
+HouseInfo_readWrite  -> readWrite
+HouseInfo_read       -> read
+```
 
+`ListDatabase` shows each account, its status and password-rotation timing, the Vault secret path, and a complete Vault browser URL for retrieving credentials.
 
-### Two intentionally separate command interfaces
+## Two intentionally separate command interfaces
 
 | Interface | Audience | Purpose |
 | --- | --- | --- |
-| `terraformController.py` | DBaaS user / customer demo | Normal deployments, shards, databases, credentials, and service status |
+| `terraformController.py` | DBaaS user / customer demo | Deployments, shards, databases, credentials, and service status |
 | `terraformControllerAdmin.py` | Platform administrator | Managed-resource inventory, operation diagnostics, Terraform reconciliation, and guarded recovery |
 
-Normal DBaaS users should not need to know about Terraform operation journals,
-worker processes, recovery locks, or orphaned controller state.
+The public CLI deliberately hides operation IDs, worker PIDs, Terraform plans, Git activity, Kubernetes implementation details used only for troubleshooting, and recovery mechanics.
 
-Administrators can verify a clean controller zero-state with:
+The administrator CLI exposes the diagnostics needed to operate and recover the service, but detailed Git/Terraform stdout and stderr are still written to the operations log instead of flooding the terminal.
 
-```bash
-python3 terraformControllerAdmin.py ListManagedResources
+The executable split is an interface boundary, not an authorization boundary. Production must still restrict administrator host, Kubernetes, Vault, and Terraform access.
+
+## Managed hierarchy
+
+```text
+Deployment
+  ReplicaSet
+    Database
+      <Database>_owner
+      <Database>_readWrite
+      <Database>_read
+
+  ShardedCluster
+    Shards
+    Config Server ReplicaSet
+    mongos routers
+    Database
+      <Database>_owner
+      <Database>_readWrite
+      <Database>_read
 ```
 
-## Background deployment and topology processing
+A ShardedCluster is a deployment. Its individual shards are implemented by MongoDB as ReplicaSets, but customers manage the ShardedCluster as one DBaaS deployment.
 
-Long-running deployment/topology requests return control to the DBaaS user after
-the request is accepted:
+## Public command summary
+
+Deployment and shard lifecycle:
+
+```text
+AddReplicaSet REPLICASET
+DeleteReplicaSet REPLICASET --confirm
+ListReplicaSets
+ListReplicaSet REPLICASET
+
+AddShardedCluster SHARDED_CLUSTER [--shards N]
+DeleteShardedCluster SHARDED_CLUSTER --confirm
+ListShardedClusters
+ListShardedCluster SHARDED_CLUSTER
+
+ListDeployments
+ListDeployment DEPLOYMENT
+
+AddShard SHARDED_CLUSTER [COUNT]
+DeleteShard SHARDED_CLUSTER [COUNT] --confirm
+ListShards [SHARDED_CLUSTER]
+```
+
+Database and credential lifecycle:
+
+```text
+AddDatabase DEPLOYMENT DATABASE
+AddDatabase DATABASE
+DeleteDatabase DEPLOYMENT DATABASE --confirm
+DeleteDatabase DATABASE --confirm
+ListDatabases [DEPLOYMENT]
+ListDatabase DEPLOYMENT DATABASE
+ListDatabase DATABASE
+RotatePasswords DEPLOYMENT DATABASE
+RotatePasswords DATABASE
+DisableOwner DEPLOYMENT DATABASE --confirm
+DisableOwner DATABASE --confirm
+```
+
+The one-argument database forms are valid only when exactly one managed deployment exists.
+
+## Asynchronous customer requests
+
+These public commands return after the request is accepted and continue in a detached worker:
 
 ```text
 AddReplicaSet
@@ -69,340 +153,190 @@ AddShardedCluster
 DeleteShardedCluster
 AddShard
 DeleteShard
+AddDatabase
+DeleteDatabase
 ```
 
-Example:
+The acknowledgement tells the user what was requested and which normal service-status command to run. It does **not** expose an internal operation ID.
+
+Examples:
 
 ```bash
-python3 terraformController.py DeleteShard SC9 1 --confirm
+python3 terraformController.py AddDatabase RS1 HouseInfo
+python3 terraformController.py ListDatabase RS1 HouseInfo
+
+python3 terraformController.py DeleteDatabase RS1 HouseInfo --confirm
+python3 terraformController.py ListDatabases RS1
 ```
 
-The public response is deliberately service-oriented:
+`RotatePasswords` and `DisableOwner` currently remain synchronous because the user normally needs the resulting credential/account state immediately. Their Terraform/Git implementation output is captured in the operations log rather than displayed on the terminal.
+
+## ShardedCluster defaults and safety
+
+`AddShardedCluster` uses the configured initial shard count when `--shards` is omitted. The current repository configuration uses **3 shards**.
+
+```bash
+python3 terraformController.py AddShardedCluster SC9
+python3 terraformController.py AddShardedCluster SC9 --shards 5
+```
+
+`AddShard` and `DeleteShard` default to **1 shard** when COUNT is omitted.
+
+```bash
+python3 terraformController.py AddShard SC9
+python3 terraformController.py AddShard SC9 2
+python3 terraformController.py DeleteShard SC9 --confirm
+python3 terraformController.py DeleteShard SC9 2 --confirm
+```
+
+A managed ShardedCluster can never be reduced below one shard. Shard deletion is allowed while application databases remain on the cluster. Terraform changes the desired shard count, MongoDB Operator/Ops Manager performs the supported reconciliation, and old shard storage is removed only after the remaining topology is healthy and removed shard workloads have released it.
+
+Each ShardedCluster uses a Terraform-created deployment lock to serialize conflicting mutations. Read-only status commands remain available while a change is in progress.
+
+## Database readiness
+
+Before database creation, deletion, password rotation, or Owner disable:
+
+- a ReplicaSet must be `Running`;
+- a ShardedCluster must be `Running`;
+- every expected shard must be `Online`;
+- config servers must be `Online`;
+- mongos must be `Online`;
+- no conflicting managed ShardedCluster change may be active.
+
+Unsafe requests fail before the requested managed change proceeds.
+
+## Database credentials and Vault
+
+Every database receives exactly:
 
 ```text
-DeleteShard request accepted.
-
-ShardedCluster: SC9
-Status:         Topology change requested
-
-The request is being processed in the background.
-
-Check service status with:
-  python3 terraformController.py ... ListShards SC9
+<Database>_owner      -> dbOwner on <Database>
+<Database>_readWrite  -> readWrite on <Database>
+<Database>_read       -> read on <Database>
 ```
 
-Internal operation IDs, worker PIDs, journal paths, and recovery commands are
-available only through `terraformControllerAdmin.py`.
-
-Background execution does **not** change the architecture boundary: managed
-MongoDB, Kubernetes, Vault, and storage mutations remain Terraform-driven.
-
-## Managed database accounts
-
-Every managed application database gets exactly three accounts:
-
-```text
-<Database>_owner      -> dbOwner
-<Database>_readWrite  -> readWrite
-<Database>_read       -> read
-```
-
-Current credentials are stored in Vault under:
+Vault inventory is scoped by deployment, database, and user:
 
 ```text
 mongodb/<Deployment>/<Database>/<Username>
 ```
 
-Example:
+For example:
 
 ```text
-mongodb/SC9/HouseInfo/HouseInfo_owner
-mongodb/SC9/HouseInfo/HouseInfo_readWrite
-mongodb/SC9/HouseInfo/HouseInfo_read
+mongodb/RS1/HouseInfo/HouseInfo_owner
+mongodb/RS1/HouseInfo/HouseInfo_readWrite
+mongodb/RS1/HouseInfo/HouseInfo_read
 ```
 
-## ShardedCluster support
-
-The controller provisions and manages ShardedCluster infrastructure, including shard count, members per shard, mongos routers, config servers, status, persistent storage, and safe lifecycle checks.
-
-Collection shard-key design and collection-level sharding policy remain intentionally deferred until customer requirements are defined.
-
-### Shard status
-
-All shards across all managed ShardedClusters:
-
-```bash
-python3 terraformController.py ListShards
-```
-
-One ShardedCluster:
-
-```bash
-python3 terraformController.py ListShards SC9
-```
-
-The targeted view also reports config-server, mongos, and active managed-change status.
-
-### Add shards
-
-If no count is supplied, `AddShard` defaults to **1 shard**.
-
-Add one shard:
-
-```bash
-python3 terraformController.py AddShard SC9
-```
-
-Add two shards:
-
-```bash
-python3 terraformController.py AddShard SC9 2
-```
-
-### Delete shards
-
-If no count is supplied, `DeleteShard` defaults to **1 shard**.
-`--confirm` remains required.
-
-Delete one shard:
-
-```bash
-python3 terraformController.py DeleteShard SC9 --confirm
-```
-
-Delete two shards:
-
-```bash
-python3 terraformController.py DeleteShard SC9 2 --confirm
-```
-
-A ShardedCluster can never be reduced below **one shard**.
-
-Shard deletion is supported while application databases remain on the ShardedCluster. The operation remains Terraform-driven: Terraform lowers the managed ShardedCluster `shardCount`, the MongoDB Kubernetes Operator/Ops Manager reconciles the supported scale-down, and Terraform cleans the removed shard storage only after the remaining cluster is fully ready and the removed shard StatefulSets are gone.
-
-Python does not directly issue MongoDB shard-removal commands or directly delete MongoDB/Kubernetes topology resources.
-
-### Managed-change locking
-
-Each ShardedCluster uses one atomic deployment lock for mutating operations.
-
-While a shard add/delete or database/credential mutation is active on SC9, conflicting changes on SC9 are blocked. Read-only commands remain available.
-
-Examples of blocked concurrent mutations include:
+For a Vault address of `http://127.0.0.1:8200` and the `secret` KV mount, the owner credential is also displayed as a complete browser URL:
 
 ```text
-AddDatabase
-DeleteDatabase
-RotatePasswords
-DisableOwner
-AddShard
-DeleteShard
+http://127.0.0.1:8200/ui/vault/secrets/secret/show/mongodb/RS1/HouseInfo/HouseInfo_owner
 ```
 
-The lock itself is created and released by the Terraform lifecycle script. Python only requests the Terraform operation and reads lock/status information.
+The URL is generated from the configured Vault address and mount; users do not need to manually construct it.
 
-## Readiness
+Passwords rotate every configured rotation interval, currently 30 days. The Owner account is disabled in MongoDB at the first rotation at or after day 30, while its rotated credential remains managed in Vault.
 
-Database work on a ShardedCluster is blocked until:
+## Runtime logs
 
-- the MongoDB resource phase is `Running`,
-- every expected shard is `Online`,
-- config servers are `Online`,
-- mongos is `Online`,
-- no conflicting managed operation holds the ShardedCluster deployment lock.
+Logging uses a fixed convention rather than configuration-file options.
 
-## Controller logging
-
-Logging is configured in `terraformController.config`:
-
-```ini
-[Logging]
-enabled = true
-level = INFO
-directory = logs
-mode = append
-filename_format =
-```
-
-With a blank `filename_format`, the controller writes `Controller.log`.
-A relative `directory` is resolved from the location of the config file, so
-the default `logs` value means `<repository>/logs`.
-
-`mode` may be `append` or `overwrite`.
-
-A formatted name can use standard `strftime` tokens, for example:
-
-```ini
-filename_format = Controller-%Y%m%d-%H%M.log
-```
-
-where `%m` is month and `%M` is minute.
-
-## Documentation
-
-Customer / DBaaS user guide:
+Daily structured controller events:
 
 ```text
-README-terraformController.md
+logs/controller/controller-YYYYMMDD.log
 ```
 
-Platform administrator / recovery guide:
+Daily implementation/operation diagnostics:
 
 ```text
-README-terraformControllerAdmin.md
+logs/operations/operations-YYYYMMDD.log
 ```
 
-Interface-boundary architecture note:
+Asynchronous operation status records:
 
 ```text
-docs/CLI-INTERFACES.md
+logs/operations/state/<operation-id>.json
 ```
 
-Test and acceptance-harness guide:
+Temporary worker transcripts may briefly appear under:
 
 ```text
-tests/README.md
+logs/operations/work/
+```
+
+The controller and operations logs are append-only for the UTC date. There is no `[Logging]` section, overwrite mode, configurable log directory, or configurable filename format in `terraformController.config`.
+
+The JSON state files are not user logs; they are small machine-readable records used by `ListOperation`, interrupted-worker detection, the acceptance harness, and guarded recovery. The `logs/` tree is ignored by Git. Ordinary `git clean -fd` does not remove ignored files, but deleting/recloning the repository or explicitly cleaning ignored files such as with `git clean -fdx` removes local runtime history/state.
+
+Controller code must not intentionally write Vault tokens or managed plaintext passwords to these logs.
+
+## Administrator zero-state check
+
+After testing, cleanup, or a recovery operation, an administrator can verify that no controller-managed deployment resources remain:
+
+```bash
+python3 terraformControllerAdmin.py ListManagedResources
+```
+
+A clean environment reports:
+
+```text
+Managed deployments:  0
+MongoDB resources:    0
+MongoDB users:        0
+PVCs:                 0
+PVs:                  0
+Deployment locks:     0
+
+Status: CLEAN
 ```
 
 ## Testing
 
-The project has two testing layers:
-
-1. fast unit/regression tests that do not require a live MongoDB environment;
-2. a live end-to-end harness that drives the real `terraformController.py` CLI against the configured development environment.
-
-### Fast unit/regression suite
+Fast unit/regression suite:
 
 ```bash
 python3 -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-### Live harness help
-
-Show every supported harness option:
-
-```bash
-python3 tests/run_harness.py --help
-```
-
-### Live harness profiles
-
-Safe read-only preflight, which is also the default:
-
-```bash
-python3 tests/run_harness.py
-```
-
-or:
+Safe read-only live preflight:
 
 ```bash
 python3 tests/run_harness.py --profile preflight
 ```
 
-ReplicaSet lifecycle only:
-
-```bash
-python3 tests/run_harness.py \
-  --profile replicaset \
-  --allow-mutations \
-  --allow-destructive
-```
-
-ShardedCluster and shard lifecycle only:
-
-```bash
-python3 tests/run_harness.py \
-  --profile sharded \
-  --allow-mutations \
-  --allow-destructive
-```
-
-Concurrent ShardedCluster deployment-lock test only:
-
-```bash
-python3 tests/run_harness.py \
-  --profile locking \
-  --allow-mutations \
-  --allow-destructive
-```
-
 Complete live acceptance run:
 
 ```bash
-python3 tests/run_harness.py \
-  --profile all \
-  --allow-mutations \
-  --allow-destructive
+python3 tests/run_harness.py --profile all --allow-mutations --allow-destructive
 ```
 
-The mutating profiles intentionally require both safety flags:
+The complete live harness covers ReplicaSet lifecycle, ShardedCluster lifecycle, database/account lifecycle, password rotation, Owner disable, shard expansion/contraction, the one-shard minimum, storage cleanup, asynchronous request polling, and deployment-lock concurrency. It is fail-fast and cleans successful temporary scenarios.
+
+See `tests/README.md` for profile-by-profile details.
+
+## Architecture rule
+
+**Terraform performs managed changes.**
+
+Python parses/validates requests, reads desired state and live status, coordinates lifecycle steps, waits for convergence, reports customer/admin results, and records logs. Managed MongoDB, Kubernetes, Vault, storage, account, and lock mutations remain Terraform-driven directly or through:
 
 ```text
---allow-mutations
---allow-destructive
+terraform-dbaas/scripts/lifecycle.sh
 ```
 
-### Useful harness options
+## Documentation map
 
-Print stdout/stderr for passing steps as well as failures:
+| File | Purpose |
+| --- | --- |
+| `README-terraformController.md` | Complete DBaaS customer/user manual |
+| `README-terraformControllerAdmin.md` | Platform administrator and recovery manual |
+| `docs/CLI-INTERFACES.md` | Public/admin interface architecture boundary |
+| `tests/README.md` | Unit and live acceptance testing guide |
+| `terraformController.config` | Environment-specific runtime configuration |
 
-```bash
-python3 tests/run_harness.py \
-  --profile all \
-  --allow-mutations \
-  --allow-destructive \
-  --verbose
-```
-
-Use a different controller configuration file:
-
-```bash
-python3 tests/run_harness.py \
-  --profile preflight \
-  --config /path/to/terraformController.config
-```
-
-Use a specific Python interpreter when the harness launches `terraformController.py`:
-
-```bash
-python3 tests/run_harness.py \
-  --profile preflight \
-  --python /usr/bin/python3
-```
-
-Use a predictable suffix for temporary test resources:
-
-```bash
-python3 tests/run_harness.py \
-  --profile replicaset \
-  --suffix RSDEBUG01 \
-  --allow-mutations \
-  --allow-destructive
-```
-
-The default suffix is generated from the current time as `MMDDHHMMSS` and is used in temporary names such as:
-
-```text
-THRS-<suffix>
-THSC-<suffix>
-THDB_<suffix>
-```
-
-### What the full harness covers
-
-The complete `all` profile runs:
-
-```text
-preflight
-  -> ReplicaSet lifecycle
-  -> ShardedCluster lifecycle
-  -> deployment-lock/concurrency lifecycle
-```
-
-Coverage includes ReplicaSet and ShardedCluster creation/deletion, real controller-admin authentication readiness, database creation/deletion, Owner/ReadWrite/Read accounts, password rotation, Owner disable, blocking deployment deletion while databases exist, targeted/global shard status, a 3 -> 5 -> 4 -> 1 shard lifecycle, deleting a shard while a database remains, one-shard minimum enforcement, asynchronous-operation polling, and concurrent mutation locking.
-
-The harness is **fail-fast**. If a prerequisite step fails, dependent steps and later profiles are not started. Each check is numbered as `Test X of Y`, long asynchronous checks print periodic `[WAIT]` progress, every result includes per-test elapsed time, and the final summary includes per-profile and total elapsed time.
-
-Successful live profiles clean up their temporary resources. After a failed run, temporary resources may remain so the failed state can be inspected. Use normal `terraformController.py`/Terraform lifecycle commands to clean controller-managed resources rather than manually deleting them from Kubernetes.
-
-See [tests/README.md](tests/README.md) for the full harness operator guide, including profile-by-profile behavior, all option combinations, cleanup guidance, result interpretation, and recommended testing workflows.
+Use the customer manual as the authoritative guide for normal DBaaS operation and the administrator manual for diagnostics/recovery.
