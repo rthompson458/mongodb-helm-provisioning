@@ -1,14 +1,17 @@
 """End-user command-line interface for terraformController.
 
 This module owns command parsing, help text, configuration loading, logging
-startup, and dispatch to lifecycle functions.  It should remain thin: business
-rules belong in deployments.py/databases.py and real mutations belong to
-Terraform.
+startup, and dispatch to lifecycle functions. It should remain thin: business
+rules belong in deployments.py/databases.py and real managed mutations belong
+to Terraform.
 
-When adding a new command:
-  1. Add clear argparse help and at least one example.
-  2. Dispatch to a focused lifecycle function.
-  3. Keep success/error formatting understandable without Kubernetes knowledge.
+Customer-interface rules:
+  1. Help and examples should use commands a DBaaS user can copy and run.
+  2. Long-running work returns a concise acknowledgement and runs in a detached
+     worker where practical.
+  3. Terraform, Git, Kubernetes implementation details do not belong on the
+     normal customer terminal.
+  4. Administrator-only diagnostics stay in terraformControllerAdmin.py.
 """
 
 from __future__ import annotations
@@ -58,10 +61,9 @@ DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "terraformController.c
 def _config_path_from_argv(argv: list[str]) -> Path:
     """Return the configuration path selected on the command line.
 
-    The public help screen displays live configuration-backed defaults. We must
-    therefore know which config file the caller selected *before* argparse
-    renders --help. This small pre-scan handles both "--config FILE" and
-    "--config=FILE" without performing any controller mutation.
+    The public help screen displays the configured AddShardedCluster default.
+    We therefore need the selected config before argparse renders --help. This
+    small pre-scan supports both ``--config FILE`` and ``--config=FILE``.
     """
 
     for index, value in enumerate(argv):
@@ -73,23 +75,19 @@ def _config_path_from_argv(argv: list[str]) -> Path:
 
 
 def _configured_default_shards(config_path: Path) -> int | None:
-    """Read the configured AddShardedCluster default for customer help text.
-
-    If the configuration cannot be loaded, normal command execution will later
-    report the real configuration error. Help remains available and clearly
-    states that the default is configuration-backed.
-    """
+    """Read the configured AddShardedCluster default for customer help text."""
 
     try:
         return int(load_config(config_path)["default_shards"])
     except (ControllerError, OSError, KeyError, TypeError, ValueError):
+        # Help should still render when configuration is broken. Normal command
+        # execution will report the actual configuration problem later.
         return None
-
-
 
 
 def _confirm(parser: argparse.ArgumentParser) -> None:
     """Add the standard --confirm guard used by destructive commands."""
+
     parser.add_argument(
         "--confirm",
         action="store_true",
@@ -99,6 +97,7 @@ def _confirm(parser: argparse.ArgumentParser) -> None:
 
 def _deployment(parser: argparse.ArgumentParser, label: str = "DEPLOYMENT") -> None:
     """Add a required deployment-name positional argument."""
+
     parser.add_argument(
         "deployment",
         metavar=label,
@@ -109,10 +108,11 @@ def _deployment(parser: argparse.ArgumentParser, label: str = "DEPLOYMENT") -> N
 def _database_target(parser: argparse.ArgumentParser) -> None:
     """Add the one-or-two argument database target syntax.
 
-    With one argument, it is treated as DATABASE and is legal only when exactly
-    one managed deployment exists.  With two arguments, they are
-    DEPLOYMENT DATABASE.
+    With one argument it is treated as DATABASE and is legal only when exactly
+    one managed deployment exists. With two arguments they are DEPLOYMENT and
+    DATABASE.
     """
+
     parser.add_argument(
         "deployment_or_database",
         metavar="DEPLOYMENT_OR_DATABASE",
@@ -148,11 +148,8 @@ def _sub(
 
 
 def build_parser(config_path: Path | None = None) -> argparse.ArgumentParser:
-    """Build the complete public CLI contract.
+    """Build the complete public CLI contract."""
 
-    Keeping command definitions together makes it easy to audit exactly what an
-    end user can do and which destructive commands require --confirm.
-    """
     help_config_path = (config_path or DEFAULT_CONFIG).expanduser()
     configured_default_shards = _configured_default_shards(help_config_path)
     configured_shards_text = (
@@ -185,6 +182,10 @@ Each managed database gets exactly:
 Database commands can omit the deployment only when exactly one managed
 deployment exists. If multiple deployments exist, the deployment is required.
 
+Long-running deployment, shard-topology, and database create/delete requests
+run in the background. The submitting shell returns promptly with a normal
+service-status command to use while the request finishes.
+
 ShardedCluster database work is accepted only when the deployment is fully
 available: the MongoDB resource is Running, all expected shards are Online,
 config servers are Online, and mongos is Online.
@@ -200,22 +201,22 @@ Use '<command> --help' for detailed help.
         epilog="""Typical flows:
 
 ReplicaSet:
-  terraformController.py AddReplicaSet RS1
-  terraformController.py AddDatabase RS1 HouseInfo
+  python3 terraformController.py AddReplicaSet RS1
+  python3 terraformController.py AddDatabase RS1 HouseInfo
 
 ShardedCluster:
-  terraformController.py AddShardedCluster SC9
-  terraformController.py ListShards SC9
-  terraformController.py AddShard SC9 2
-  terraformController.py AddDatabase SC9 HouseInfo
+  python3 terraformController.py AddShardedCluster SC9
+  python3 terraformController.py ListShards SC9
+  python3 terraformController.py AddShard SC9 2
+  python3 terraformController.py AddDatabase SC9 HouseInfo
 
 Only one deployment exists:
-  terraformController.py AddDatabase HouseInfo
-  terraformController.py RotatePasswords HouseInfo
+  python3 terraformController.py AddDatabase HouseInfo
+  python3 terraformController.py RotatePasswords HouseInfo
 
 Inventory:
-  terraformController.py ListDeployments
-  terraformController.py ListDatabases
+  python3 terraformController.py ListDeployments
+  python3 terraformController.py ListDatabases
 """,
     )
     parser.add_argument(
@@ -237,7 +238,7 @@ Inventory:
         "AddReplicaSet",
         "Create an empty managed ReplicaSet.",
         "Requests creation of a non-sharded MongoDB ReplicaSet and returns promptly while provisioning continues in the background. Use the ReplicaSet status commands to monitor readiness.",
-        "  terraformController.py AddReplicaSet RS1",
+        "  python3 terraformController.py AddReplicaSet RS1",
     )
     _deployment(x, "REPLICASET")
 
@@ -246,7 +247,7 @@ Inventory:
         "AddShardedCluster",
         "Create an empty managed ShardedCluster.",
         "Requests creation of a MongoDB ShardedCluster and returns promptly while provisioning continues in the background. Use the ShardedCluster status commands to monitor readiness.",
-        f"  terraformController.py AddShardedCluster SC9    # uses configured default: {configured_shards_text} shard(s)\n  terraformController.py AddShardedCluster SC9 --shards 5    # override",
+        f"  python3 terraformController.py AddShardedCluster SC9    # uses configured default: {configured_shards_text} shard(s)\n  python3 terraformController.py AddShardedCluster SC9 --shards 5    # override",
     )
     _deployment(x, "SHARDED_CLUSTER")
     x.add_argument(
@@ -264,7 +265,7 @@ Inventory:
         "DeleteReplicaSet",
         "Delete an empty managed ReplicaSet.",
         "Requires --confirm. Requests deletion of an empty ReplicaSet and returns promptly while deletion continues in the background. Managed and live database safety checks are enforced before deletion.",
-        "  terraformController.py DeleteReplicaSet RS1 --confirm",
+        "  python3 terraformController.py DeleteReplicaSet RS1 --confirm",
     )
     _deployment(x, "REPLICASET")
     _confirm(x)
@@ -274,7 +275,7 @@ Inventory:
         "DeleteShardedCluster",
         "Delete an empty managed ShardedCluster.",
         "Requires --confirm. Requests deletion of an empty ShardedCluster and returns promptly while deletion continues in the background. Readiness, database, and active-change safety checks remain enforced.",
-        "  terraformController.py DeleteShardedCluster SC9 --confirm",
+        "  python3 terraformController.py DeleteShardedCluster SC9 --confirm",
     )
     _deployment(x, "SHARDED_CLUSTER")
     _confirm(x)
@@ -284,15 +285,15 @@ Inventory:
         "ListDeployments",
         "List all managed ReplicaSets and ShardedClusters.",
         "Shows deployment name, type, live phase, topology, MongoDB version, and managed database count.",
-        "  terraformController.py ListDeployments",
+        "  python3 terraformController.py ListDeployments",
     )
 
     x = _sub(
         sp,
         "ListDeployment",
         "Show one managed deployment.",
-        "Shows detailed status for either a ReplicaSet or ShardedCluster. ShardedCluster output includes individual shard status.",
-        "  terraformController.py ListDeployment SC9",
+        "Shows detailed service status for either a ReplicaSet or ShardedCluster. ShardedCluster output includes individual shard status.",
+        "  python3 terraformController.py ListDeployment SC9",
     )
     _deployment(x)
 
@@ -301,15 +302,15 @@ Inventory:
         "ListReplicaSets",
         "List managed ReplicaSets.",
         "Lists only terraformController-managed standalone ReplicaSet deployments.",
-        "  terraformController.py ListReplicaSets",
+        "  python3 terraformController.py ListReplicaSets",
     )
 
     x = _sub(
         sp,
         "ListReplicaSet",
         "Show one managed ReplicaSet.",
-        "Shows one ReplicaSet, live phase, members, version, and database count.",
-        "  terraformController.py ListReplicaSet RS1",
+        "Shows one ReplicaSet, live phase, members, MongoDB version, and database count.",
+        "  python3 terraformController.py ListReplicaSet RS1",
     )
     _deployment(x, "REPLICASET")
 
@@ -318,7 +319,7 @@ Inventory:
         "ListShardedClusters",
         "List managed ShardedClusters.",
         "Lists only terraformController-managed ShardedCluster deployments.",
-        "  terraformController.py ListShardedClusters",
+        "  python3 terraformController.py ListShardedClusters",
     )
 
     x = _sub(
@@ -326,7 +327,7 @@ Inventory:
         "ListShardedCluster",
         "Show one managed ShardedCluster.",
         "Shows cluster phase, shard count, members per shard, mongos, config servers, database count, and individual shard status.",
-        "  terraformController.py ListShardedCluster SC9",
+        "  python3 terraformController.py ListShardedCluster SC9",
     )
     _deployment(x, "SHARDED_CLUSTER")
 
@@ -335,7 +336,7 @@ Inventory:
         "ListShards",
         "List shard creation/readiness status.",
         "With no cluster name, shows shards across all managed ShardedClusters. With a cluster name, shows detailed shard, config-server, mongos, and active-change status for that ShardedCluster.",
-        "  terraformController.py ListShards\n  terraformController.py ListShards SC9",
+        "  python3 terraformController.py ListShards\n  python3 terraformController.py ListShards SC9",
     )
     x.add_argument(
         "deployment",
@@ -349,7 +350,7 @@ Inventory:
         "AddShard",
         "Add one or more shards to a Running ShardedCluster.",
         "COUNT defaults to 1. Requests one or more additional shards and returns promptly while the topology change continues in the background. Use ListShards to monitor shard readiness.",
-        "  terraformController.py AddShard SC9\n  terraformController.py AddShard SC9 2",
+        "  python3 terraformController.py AddShard SC9\n  python3 terraformController.py AddShard SC9 2",
     )
     _deployment(x, "SHARDED_CLUSTER")
     x.add_argument(
@@ -366,7 +367,7 @@ Inventory:
         "DeleteShard",
         "Remove one or more shards from a ShardedCluster.",
         "COUNT defaults to 1 and --confirm is required. Requests removal of one or more shards and returns promptly while the topology change continues in the background. The one-shard minimum, database preservation, readiness checks, and storage safety rules remain enforced.",
-        "  terraformController.py DeleteShard SC9 --confirm\n  terraformController.py DeleteShard SC9 2 --confirm",
+        "  python3 terraformController.py DeleteShard SC9 --confirm\n  python3 terraformController.py DeleteShard SC9 2 --confirm",
     )
     _deployment(x, "SHARDED_CLUSTER")
     x.add_argument(
@@ -383,8 +384,8 @@ Inventory:
         sp,
         "AddDatabase",
         "Create a database on a ready ReplicaSet or ShardedCluster.",
-        "Validates the target deployment before any change. ReplicaSets must be Running. ShardedClusters must be Running with every shard, config server, and mongos component online. Terraform then creates the database and its three managed accounts and Vault credentials.",
-        "  terraformController.py AddDatabase RS1 HouseInfo\n  terraformController.py AddDatabase SC9 HouseInfo\n  terraformController.py AddDatabase HouseInfo    # only one deployment exists",
+        "Validates the target in the background, then Terraform creates the database, its three managed accounts, and Vault credentials. The submitting shell returns promptly. Use ListDatabase to monitor whether the database is available.",
+        "  python3 terraformController.py AddDatabase RS1 HouseInfo\n  python3 terraformController.py AddDatabase SC9 HouseInfo\n  python3 terraformController.py AddDatabase HouseInfo    # only one deployment exists",
     )
     _database_target(x)
 
@@ -392,8 +393,8 @@ Inventory:
         sp,
         "DeleteDatabase",
         "Delete a database and its three managed accounts.",
-        "Requires --confirm. The target deployment must be fully ready. Confirmation authorizes deletion of the database and its contents, MongoDB users, Kubernetes password resources, Vault credentials, and lifecycle metadata.",
-        "  terraformController.py DeleteDatabase SC9 HouseInfo --confirm\n  terraformController.py DeleteDatabase HouseInfo --confirm    # only one deployment exists",
+        "Requires --confirm. The request runs in the background. The target deployment must be fully ready, and confirmation authorizes deletion of the database and its contents, MongoDB users, Kubernetes password resources, Vault credentials, and lifecycle metadata. Use ListDatabases to confirm removal.",
+        "  python3 terraformController.py DeleteDatabase SC9 HouseInfo --confirm\n  python3 terraformController.py DeleteDatabase HouseInfo --confirm    # only one deployment exists",
     )
     _database_target(x)
     _confirm(x)
@@ -403,7 +404,7 @@ Inventory:
         "ListDatabases",
         "List databases on one deployment or all deployments.",
         "With DEPLOYMENT, lists databases on that deployment. With no DEPLOYMENT, lists all managed databases across ReplicaSets and ShardedClusters.",
-        "  terraformController.py ListDatabases\n  terraformController.py ListDatabases SC9",
+        "  python3 terraformController.py ListDatabases\n  python3 terraformController.py ListDatabases SC9",
     )
     x.add_argument(
         "deployment",
@@ -416,8 +417,8 @@ Inventory:
         sp,
         "ListDatabase",
         "Show one database and its managed accounts.",
-        "Shows deployment, deployment type, database accounts, enabled/disabled state, last rotation, rotation countdown, and Vault URL.",
-        "  terraformController.py ListDatabase SC9 HouseInfo\n  terraformController.py ListDatabase HouseInfo    # only one deployment exists",
+        "Shows deployment, deployment type, database accounts, enabled/disabled state, last rotation, rotation countdown, and browser-ready Vault URLs.",
+        "  python3 terraformController.py ListDatabase SC9 HouseInfo\n  python3 terraformController.py ListDatabase HouseInfo    # only one deployment exists",
     )
     _database_target(x)
 
@@ -426,7 +427,7 @@ Inventory:
         "RotatePasswords",
         "Rotate all three managed database passwords.",
         "Performs deployment health checks first. Terraform rotates Owner, ReadWrite, and Read credentials, writes current credentials to Vault, verifies MongoDB authentication, and applies the configured Owner-disable lifecycle rule.",
-        "  terraformController.py RotatePasswords SC9 HouseInfo\n  terraformController.py RotatePasswords HouseInfo    # only one deployment exists",
+        "  python3 terraformController.py RotatePasswords SC9 HouseInfo\n  python3 terraformController.py RotatePasswords HouseInfo    # only one deployment exists",
     )
     _database_target(x)
 
@@ -435,7 +436,7 @@ Inventory:
         "DisableOwner",
         "Disable the database Owner account.",
         "Requires --confirm and a fully ready deployment. Terraform removes the Owner MongoDBUser while retaining and continuing to rotate its Vault credential.",
-        "  terraformController.py DisableOwner SC9 HouseInfo --confirm",
+        "  python3 terraformController.py DisableOwner SC9 HouseInfo --confirm",
     )
     _database_target(x)
     _confirm(x)
@@ -443,11 +444,19 @@ Inventory:
     return parser
 
 
+def _database_values(args: argparse.Namespace) -> tuple[str, str]:
+    """Return (explicit deployment or blank, database) from parsed DB arguments."""
+
+    if args.database is None:
+        return "", str(args.deployment_or_database)
+    return str(args.deployment_or_database), str(args.database)
+
+
 def _async_worker_arguments(args: argparse.Namespace) -> list[str]:
-    """Rebuild one async lifecycle command for the detached worker.
+    """Rebuild one async command for the detached worker.
 
     Reconstructing from parsed values avoids depending on the caller's current
-    directory or on the original placement of global argparse options.
+    directory or the original placement of global argparse options.
     """
 
     command = args.command
@@ -475,8 +484,18 @@ def _async_worker_arguments(args: argparse.Namespace) -> list[str]:
         if args.confirm:
             values.append("--confirm")
         return values
-    raise ControllerError(f"Command '{command}' is not configured for asynchronous execution.")
-
+    if command in {"AddDatabase", "DeleteDatabase"}:
+        deployment, database = _database_values(args)
+        values = [command]
+        if deployment:
+            values.append(deployment)
+        values.append(database)
+        if command == "DeleteDatabase" and args.confirm:
+            values.append("--confirm")
+        return values
+    raise ControllerError(
+        f"Command '{command}' is not configured for asynchronous execution."
+    )
 
 
 def _validate_async_submission(args: argparse.Namespace) -> None:
@@ -486,11 +505,11 @@ def _validate_async_submission(args: argparse.Namespace) -> None:
         "DeleteReplicaSet",
         "DeleteShardedCluster",
         "DeleteShard",
-    }:
-        if not getattr(args, "confirm", False):
-            raise ControllerError(
-                f"{args.command} is destructive and requires '--confirm'."
-            )
+        "DeleteDatabase",
+    } and not getattr(args, "confirm", False):
+        raise ControllerError(
+            f"{args.command} is destructive and requires '--confirm'."
+        )
 
     if args.command in {"AddShard", "DeleteShard"} and int(args.count) < 1:
         raise ControllerError("Shard COUNT must be at least 1.")
@@ -504,40 +523,70 @@ def _validate_async_submission(args: argparse.Namespace) -> None:
 
 
 def _async_deployment(args: argparse.Namespace) -> str:
-    """Return the deployment name associated with an asynchronous command."""
+    """Return the explicit deployment associated with an async command.
 
+    The one-argument database shorthand intentionally returns blank here because
+    the worker resolves the only managed deployment using the normal lifecycle
+    rules. Explicit database targeting still participates in the local
+    duplicate-submission guard.
+    """
+
+    if args.command in {"AddDatabase", "DeleteDatabase"}:
+        deployment, _ = _database_values(args)
+        return deployment
     return str(getattr(args, "deployment", ""))
 
 
-
-def _public_async_feedback(args: argparse.Namespace) -> tuple[str, str, list[str]]:
-    """Translate internal async execution into customer-facing service status.
-
-    The operation journal remains available to platform administrators, but the
-    public DBaaS CLI reports only the resource and the normal status command.
-    """
+def _public_async_feedback(
+    args: argparse.Namespace,
+) -> tuple[list[tuple[str, str]], str, list[str]]:
+    """Translate internal async execution into customer-facing service status."""
 
     command = args.command
     deployment = str(getattr(args, "deployment", ""))
 
     if command == "AddReplicaSet":
-        return "ReplicaSet", "Creation requested", ["ListReplicaSet", deployment]
+        return [("ReplicaSet", deployment)], "Creation requested", [
+            "ListReplicaSet",
+            deployment,
+        ]
     if command == "DeleteReplicaSet":
-        return "ReplicaSet", "Deletion requested", ["ListReplicaSets"]
+        return [("ReplicaSet", deployment)], "Deletion requested", [
+            "ListReplicaSets"
+        ]
     if command == "AddShardedCluster":
-        return (
-            "ShardedCluster",
-            "Creation requested",
-            ["ListShardedCluster", deployment],
-        )
+        return [("ShardedCluster", deployment)], "Creation requested", [
+            "ListShardedCluster",
+            deployment,
+        ]
     if command == "DeleteShardedCluster":
-        return "ShardedCluster", "Deletion requested", ["ListShardedClusters"]
+        return [("ShardedCluster", deployment)], "Deletion requested", [
+            "ListShardedClusters"
+        ]
     if command in {"AddShard", "DeleteShard"}:
-        return (
-            "ShardedCluster",
-            "Topology change requested",
-            ["ListShards", deployment],
+        return [("ShardedCluster", deployment)], "Topology change requested", [
+            "ListShards",
+            deployment,
+        ]
+    if command in {"AddDatabase", "DeleteDatabase"}:
+        db_deployment, database = _database_values(args)
+        details = []
+        if db_deployment:
+            details.append(("Deployment", db_deployment))
+        details.append(("Database", database))
+        if command == "AddDatabase":
+            status_args = (
+                ["ListDatabase", db_deployment, database]
+                if db_deployment
+                else ["ListDatabase", database]
+            )
+            return details, "Creation requested", status_args
+        status_args = (
+            ["ListDatabases", db_deployment]
+            if db_deployment
+            else ["ListDatabases"]
         )
+        return details, "Deletion requested", status_args
 
     raise ControllerError(
         f"Command '{command}' is not configured for public asynchronous feedback."
@@ -545,12 +594,7 @@ def _public_async_feedback(args: argparse.Namespace) -> tuple[str, str, list[str
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Parse one command, initialize shared services, and execute it.
-
-    Long-running deployment/topology commands are asynchronous from the user's
-    perspective. Internal worker/journal details are intentionally kept out of
-    this customer-facing interface.
-    """
+    """Parse one customer command, initialize shared services, and execute it."""
 
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     help_config_path = _config_path_from_argv(raw_argv)
@@ -565,10 +609,10 @@ def main(argv: list[str] | None = None) -> int:
         logging_ready = True
         log_event("command.started", command=args.command)
 
-        # Public long-running commands return as soon as a detached worker has
-        # been safely started. The worker re-enters this same CLI with the
-        # hidden operation ID and therefore executes the normal synchronous
-        # Terraform lifecycle rather than spawning another worker.
+        # Customer-facing async commands return once a detached worker has been
+        # safely started. The worker re-enters this same CLI with the hidden ID,
+        # so it executes the normal Terraform lifecycle rather than spawning a
+        # second worker.
         if args.command in ASYNC_COMMANDS and not operation_id:
             _validate_async_submission(args)
             state = launch_operation(
@@ -578,12 +622,12 @@ def main(argv: list[str] | None = None) -> int:
                 deployment=_async_deployment(args),
                 worker_arguments=_async_worker_arguments(args),
             )
-            resource_label, status_text, status_arguments = _public_async_feedback(args)
+            details, status_text, status_arguments = _public_async_feedback(args)
             print(
                 public_submission_instructions(
                     config_path,
                     state,
-                    resource_label=resource_label,
+                    details=details,
                     status_text=status_text,
                     status_arguments=status_arguments,
                 )
@@ -600,8 +644,8 @@ def main(argv: list[str] | None = None) -> int:
             mark_running(config_path, operation_id)
 
         vault = VaultClient(config)
-        # The dispatch table keeps main() simple. Each command maps to one
-        # focused lifecycle function; the CLI itself does not mutate resources.
+        # The dispatch table keeps main() readable. Each command maps to one
+        # lifecycle function; the CLI itself does not mutate managed resources.
         actions = {
             "AddReplicaSet": lambda: add_replica_set(config, vault, args.deployment),
             "AddShardedCluster": lambda: add_sharded_cluster(
@@ -658,11 +702,14 @@ def main(argv: list[str] | None = None) -> int:
             mark_succeeded(config_path, operation_id)
         log_event("command.succeeded", command=args.command)
         return 0
+
     except (ControllerError, json.JSONDecodeError) as exc:
         if operation_id:
             try:
                 mark_failed(config_path, operation_id, str(exc))
             except Exception:
+                # Never hide the original lifecycle failure because recording
+                # the diagnostic state encountered a second problem.
                 pass
         if logging_ready:
             log_event(
@@ -673,6 +720,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
+
     except Exception as exc:
         if operation_id:
             try:
