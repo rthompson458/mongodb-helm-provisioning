@@ -139,7 +139,7 @@ locals {
         var.operation.action == "create_database" &&
         var.operation.deployment == deployment_key &&
         !contains(keys(deployment.databases), lower(var.operation.database))
-      ) ? [
+        ) ? [
         {
           name        = var.operation.database
           collections = [var.placeholder_collection]
@@ -156,7 +156,7 @@ locals {
     deployment_key => (
       var.operation.action == "delete_database" &&
       var.operation.deployment == deployment_key
-    ) ? [
+      ) ? [
       {
         id         = var.operation.operation_id != "" ? var.operation.operation_id : var.operation.nonce
         action     = "deleteDatabase"
@@ -170,7 +170,7 @@ locals {
   mongodb_management_deployments = {
     for deployment_key, deployment in var.deployments :
     deployment_key => deployment
-    if (
+    if(
       length(local.mongodb_databases[deployment_key]) > 0 ||
       length(local.mongodb_database_operations[deployment_key]) > 0
     )
@@ -892,8 +892,8 @@ resource "helm_release" "mongodb_management" {
   values = [
     yamlencode({
       mongodb = {
-        name                         = each.key
-        image                        = var.mongo_image
+        name                        = each.key
+        image                       = var.mongo_image
         provisionerConnectionSecret = "tc-${each.key}-admin-connection"
         adminConnectionSecret       = "tc-${each.key}-admin-connection"
       }
