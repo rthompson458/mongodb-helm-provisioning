@@ -5,14 +5,19 @@ Every managed database gets exactly three fixed accounts:
     <DB>_readWrite  -> readWrite
     <DB>_read       -> read
 
-This module validates target/readiness, builds desired state, calls Terraform,
-waits for MongoDBUser reconciliation, and verifies authentication.  It does not
-directly create users, write Vault secrets, or change MongoDB.
+This module validates deployment readiness, builds desired state, asks Terraform
+to apply that state, waits for MongoDBUser reconciliation, and verifies real
+authentication. It does not directly create users, write Vault secrets, or
+change MongoDB.
+
+Customer-facing credential output includes complete browser-ready Vault URLs so
+users do not have to assemble a URL from a mount name and secret path.
 """
 
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 from . import kube
 from .common import (
@@ -24,26 +29,23 @@ from .common import (
     print_table,
     utc_now,
 )
+from .deployment_lock import protected_database_change, require_no_active_change
 from .deployments import (
     deployment_type_label,
     require_deployment,
     require_running,
     resolve_deployment,
 )
-from .deployment_lock import protected_database_change, require_no_active_change
 from .logging_component import log_event
 from .terraform_runner import apply_inventory
 from .vault import VaultClient
 
 
-def _vault_ui(config: dict[str, Any]) -> str:
-    """Return the human-facing Vault UI root used in success messages."""
-    return f"{config['vault_address'].rstrip('/')}/ui/"
-
-
 def _vault_paths(
     config: dict[str, Any], deployment: dict[str, Any], db: dict[str, Any]
 ) -> list[str]:
+    """Return the three logical Vault paths for one managed database."""
+
     base = config["vault_base_path"].strip("/")
     root = f"{base}/{deployment['display_name']}/{db['display_name']}"
     name = db["display_name"]
@@ -54,12 +56,41 @@ def _vault_paths(
     ]
 
 
+def _vault_browser_url(config: dict[str, Any], secret_path: str) -> str:
+    """Build a Vault UI URL that opens the requested KV secret in a browser.
+
+    Vault's UI route identifies the KV mount separately from the path stored
+    inside that mount. Each path segment is URL-encoded so valid database names
+    remain safe in a browser address.
+    """
+
+    base = config["vault_address"].rstrip("/")
+    mount = quote(config["vault_mount"].strip("/"), safe="")
+    encoded_path = "/".join(
+        quote(part, safe="") for part in secret_path.strip("/").split("/")
+    )
+    return f"{base}/ui/vault/secrets/{mount}/show/{encoded_path}"
+
+
+def _print_vault_credentials(
+    config: dict[str, Any], deployment: dict[str, Any], db: dict[str, Any]
+) -> None:
+    """Print Vault paths plus complete browser URLs for all three credentials."""
+
+    print("Vault credentials:")
+    for path in _vault_paths(config, deployment, db):
+        print(f"  Path: {path}")
+        print(f"  URL:  {_vault_browser_url(config, path)}")
+
+
 def _resolve_database_args(
     config: dict[str, Any],
     inventory: dict[str, dict[str, Any]],
     deployment_or_database: str,
     database: str | None,
 ) -> tuple[str, dict[str, Any], str]:
+    """Resolve explicit DEPLOYMENT DATABASE or the one-deployment shorthand."""
+
     if database is None:
         key, deployment = resolve_deployment(config, inventory, None)
         return key, deployment, deployment_or_database
@@ -119,11 +150,11 @@ def _verify_database_accounts(
     db_key: str,
     db: dict[str, Any],
 ) -> None:
-    """Wait for expected MongoDBUser state, then ask Terraform to test login.
+    """Wait for expected MongoDBUser state, then verify real authentication.
 
-    Kubernetes phase Updated proves reconciliation, but not necessarily that the
-    credentials actually authenticate.  The final Terraform lifecycle action
-    performs a real mongosh ping using each current connection secret.
+    Kubernetes phase Updated proves reconciliation but not that the credential
+    actually authenticates. The final Terraform lifecycle action runs a mongosh
+    ping using each current connection secret.
     """
 
     if db["owner_disabled"]:
@@ -168,10 +199,12 @@ def add_database(
     deployment_or_database: str,
     database: str | None = None,
 ) -> None:
-    """Create one logical MongoDB database plus its three managed accounts.
+    """Create one logical database plus its three managed accounts.
 
-    The database is materialized first because MongoDB does not keep a truly
-    empty database.  Only after that succeeds do we commit desired account state.
+    MongoDB does not retain a truly empty database, so the database is
+    materialized before desired account state is committed. Public AddDatabase
+    now invokes this function from a detached worker; this function itself stays
+    synchronous so the worker can report success only after verification.
     """
 
     inventory = vault.load_inventory()
@@ -186,7 +219,8 @@ def add_database(
         raise ControllerError(
             f"Database '{display}' already exists on "
             f"{deployment_type_label(deployment)} '{deployment['display_name']}'. "
-            "Use Reconcile if a previous AddDatabase was interrupted."
+            "Use the administrator Reconcile command if an earlier AddDatabase "
+            "was interrupted."
         )
 
     log_event(
@@ -205,14 +239,17 @@ def add_database(
         "AddDatabase",
         display,
     ):
-        # Stage 1. Materialize the database before desired user/credential state is added.
+        # Stage 1: materialize the database before adding account/credential
+        # desired state. This prevents credentials for a database that never
+        # successfully came into existence.
         apply_inventory(
             config,
             inventory,
             _operation("create_database", deployment_key, deployment, display),
         )
 
-        # Stage 2. Add desired lifecycle state only after materialization succeeds.
+        # Stage 2: record managed database lifecycle state and let Terraform
+        # create the three fixed accounts plus Vault credentials.
         now = iso_utc(utc_now())
         deployment["databases"][db_key] = {
             "display_name": display,
@@ -247,19 +284,19 @@ def add_database(
     )
 
     print(
-        f"\nMongoDB database '{display}' was successfully created on "
+        f"MongoDB database '{display}' was successfully created on "
         f"{dtype} '{updated_deployment['display_name']}'."
     )
     print("Managed accounts created:")
     print(f"  {display}_owner      (dbOwner)")
     print(f"  {display}_readWrite  (readWrite)")
     print(f"  {display}_read       (read)")
-    print(f"\nPlease go to Vault at {_vault_ui(config)} to get your credentials.")
-    print("Vault credential paths:")
-    for path in _vault_paths(config, updated_deployment, updated_db):
-        print(f"  {path}")
-    print(f"\nPassword rotation interval: {config['rotation_days']} days")
-    print("The Owner account is disabled at the first rotation at or after day 30.")
+    print()
+    _print_vault_credentials(config, updated_deployment, updated_db)
+    print()
+    print(f"Password rotation interval: {config['rotation_days']} days")
+    print("Owner policy: disabled at the first rotation at or after day 30.")
+
 
 def delete_database(
     config: dict[str, Any],
@@ -276,8 +313,8 @@ def delete_database(
     )
     if not confirmed:
         example = (
-            f"terraformController.py DeleteDatabase {deployment['display_name']} "
-            f"{db_name} --confirm"
+            f"python3 terraformController.py DeleteDatabase "
+            f"{deployment['display_name']} {db_name} --confirm"
         )
         raise ControllerError(
             f"DeleteDatabase is destructive and requires '--confirm'. Example: {example}"
@@ -352,10 +389,12 @@ def delete_database(
         database=db["display_name"],
     )
     print(
-        f"\nMongoDB database '{db['display_name']}' was successfully deleted from "
+        f"MongoDB database '{db['display_name']}' was successfully deleted from "
         f"{deployment_type_label(deployment)} '{deployment['display_name']}'."
     )
-    print("All three managed MongoDB accounts and their Vault credentials were deleted.")
+    print("Managed accounts removed: Owner, ReadWrite, Read")
+    print("Vault credentials removed.")
+
 
 def rotate_passwords(
     config: dict[str, Any],
@@ -407,7 +446,7 @@ def rotate_passwords(
                     inventory, deployment["display_name"], db_name
                 )
                 require_running(config, deployment_key, deployment)
-                print("Retrying password rotation with a fresh Terraform revision ...")
+                print("Password rotation did not converge on the first attempt; retrying ...")
                 log_event(
                     "password.rotate.recovery_retry",
                     deployment=deployment["display_name"],
@@ -436,7 +475,7 @@ def rotate_passwords(
             raise ControllerError(
                 "Password rotation did not converge after a recovery retry. "
                 "No success was reported. Run RotatePasswords again after correcting "
-                "the Terraform/Kubernetes/Vault error."
+                "the reported infrastructure error."
             ) from last_error
 
         updated_inventory = vault.load_inventory()
@@ -460,7 +499,7 @@ def rotate_passwords(
         rotation_version=updated_db["rotation_version"],
     )
     print(
-        f"\nRotated all three passwords for "
+        f"Rotated all three passwords for "
         f"'{updated_deployment['display_name']}/{updated_db['display_name']}'."
     )
     if updated_db["owner_disabled"]:
@@ -471,7 +510,9 @@ def rotate_passwords(
     else:
         print("Owner status: Enabled.")
     print(f"Last rotated: {updated_db['rotated_at']}")
-    print(f"Please go to Vault at {_vault_ui(config)} to get the current credentials.")
+    print()
+    _print_vault_credentials(config, updated_deployment, updated_db)
+
 
 def disable_owner(
     config: dict[str, Any],
@@ -497,8 +538,8 @@ def disable_owner(
     if not confirmed:
         raise ControllerError(
             "DisableOwner is destructive and requires '--confirm'. Example: "
-            f"terraformController.py DisableOwner {deployment['display_name']} "
-            f"{db['display_name']} --confirm"
+            f"python3 terraformController.py DisableOwner "
+            f"{deployment['display_name']} {db['display_name']} --confirm"
         )
     require_no_active_change(config, deployment_key, deployment)
     require_running(config, deployment_key, deployment)
@@ -550,9 +591,12 @@ def disable_owner(
         database=updated_db["display_name"],
     )
     print(
-        f"\nOwner account '{updated_db['display_name']}_owner' is now Disabled in MongoDB."
+        f"Owner account '{updated_db['display_name']}_owner' is now Disabled in MongoDB."
     )
-    print("Its current Vault credential remains present and will continue to rotate.")
+    print("Its Vault credential remains present and will continue to rotate.")
+    owner_path = _vault_paths(config, updated_deployment, updated_db)[0]
+    print(f"Vault URL: {_vault_browser_url(config, owner_path)}")
+
 
 def list_databases(
     config: dict[str, Any], vault: VaultClient, deployment_name: str | None = None
@@ -599,7 +643,7 @@ def list_database(
     deployment_or_database: str,
     database: str | None = None,
 ) -> None:
-    """Show one database, its three accounts, rotation state, and Vault URL."""
+    """Show one database, its accounts, lifecycle state, and Vault browser URLs."""
 
     inventory = vault.load_inventory()
     _, deployment, db_name = _resolve_database_args(
@@ -619,4 +663,5 @@ def list_database(
     print(f"Deployment type: {deployment_type_label(deployment)}")
     print(f"Created:         {db['created_at']}")
     print(f"Last rotated:    {db['rotated_at']}")
-    print(f"Vault UI:        {_vault_ui(config)}")
+    print()
+    _print_vault_credentials(config, deployment, db)
