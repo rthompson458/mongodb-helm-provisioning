@@ -77,6 +77,19 @@ jobs:
       - name: Validate lifecycle Bash syntax
         run: bash -n terraform-dbaas/scripts/lifecycle.sh
 
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Validate MongoDB management Helm chart
+        run: |
+          helm lint terraform-dbaas/mongodb-chart
+          helm template test-rs-mongodb-management terraform-dbaas/mongodb-chart \
+            --namespace mongodb \
+            --set mongodb.name=test-rs \
+            --set mongodb.provisionerConnectionSecret=tc-test-rs-admin-connection \
+            --set mongodb.adminConnectionSecret=tc-test-rs-admin-connection \
+            >/dev/null
+
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
