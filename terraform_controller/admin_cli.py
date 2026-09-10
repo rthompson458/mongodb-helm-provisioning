@@ -1,18 +1,12 @@
 """Administrator command-line interface for terraformController.
 
 This module is intentionally separate from terraform_controller.cli.
+Customer-facing database/deployment commands belong in terraformController.py;
+platform diagnostics, repair, reconciliation, and guarded recovery belong here.
 
-Customer-facing database/deployment commands belong in terraformController.py.
-Platform diagnostics, repair, reconciliation, and recovery commands belong here.
-
-Keeping the interfaces separate has two goals:
-1. End users see a small DBaaS-oriented command surface.
-2. Platform administrators retain the detailed operation journal and carefully
-   guarded recovery tools needed to support the service.
-
-This file provides an interface boundary, not an authorization boundary.
-Production deployments must still enforce appropriate host, Kubernetes, Vault,
-and execution permissions for administrator access.
+The executable split improves clarity but is not an authorization boundary.
+Production must still restrict host, Kubernetes, Vault, and Terraform access to
+authorized administrators.
 """
 
 from __future__ import annotations
@@ -97,31 +91,31 @@ Use this administrator program for:
   - controlled recovery after interrupted lifecycle work
   - controller-wide Terraform reconciliation
 
-Recovery commands are intentionally guarded and may refuse to run unless the
-controller can prove their safety prerequisites.
+Detailed Git/Terraform output is written to the daily operations log instead of
+being dumped onto the administrator terminal.
 
 Use '<command> --help' for detailed command-specific help.
 """,
         epilog="""Common administrator workflow:
 
 Verify controller-managed resource state:
-  terraformControllerAdmin.py ListManagedResources
+  python3 terraformControllerAdmin.py ListManagedResources
 
 Inspect recent background work:
-  terraformControllerAdmin.py ListOperations
+  python3 terraformControllerAdmin.py ListOperations
 
 Inspect one operation:
-  terraformControllerAdmin.py ListOperation OPERATION_ID
+  python3 terraformControllerAdmin.py ListOperation OPERATION_ID
 
 Reapply managed desired state:
-  terraformControllerAdmin.py Reconcile
+  python3 terraformControllerAdmin.py Reconcile
 
 Exceptional recovery:
-  terraformControllerAdmin.py RecoverDeploymentLock SC9 --confirm
-  terraformControllerAdmin.py RecoverOrphanedResources --confirm
+  python3 terraformControllerAdmin.py RecoverDeploymentLock SC9 --confirm
+  python3 terraformControllerAdmin.py RecoverOrphanedResources --confirm
 
 Normal DBaaS users should use:
-  terraformController.py --help
+  python3 terraformController.py --help
 """,
     )
     parser.add_argument(
@@ -147,7 +141,7 @@ Normal DBaaS users should use:
         "terraformController-managed MongoDB and MongoDBUser custom resources, persistent "
         "volume claims, persistent volumes, and deployment-lock ConfigMaps. Reports "
         "CLEAN only when all six categories are empty.",
-        "  terraformControllerAdmin.py ListManagedResources",
+        "  python3 terraformControllerAdmin.py ListManagedResources",
     )
 
     x = _sub(
@@ -155,9 +149,10 @@ Normal DBaaS users should use:
         "ListOperation",
         "Show detailed status for one background controller operation.",
         "Displays the internal operation ID, command, scope, result, timestamps, "
-        "elapsed time, worker PID, log path, and recorded message. This diagnostic "
-        "detail is intentionally available only on the administrator interface.",
-        "  terraformControllerAdmin.py ListOperation 7c1349abc123",
+        "elapsed time, worker PID, daily operations-log path, and recorded message. "
+        "This diagnostic detail is intentionally available only on the administrator "
+        "interface.",
+        "  python3 terraformControllerAdmin.py ListOperation 7c1349abc123",
     )
     x.add_argument(
         "operation_id",
@@ -171,7 +166,7 @@ Normal DBaaS users should use:
         "List recent background controller operations.",
         "Shows up to 50 recent asynchronous controller operations with their "
         "operation IDs, commands, scopes, results, and elapsed times.",
-        "  terraformControllerAdmin.py ListOperations",
+        "  python3 terraformControllerAdmin.py ListOperations",
     )
 
     x = _sub(
@@ -183,7 +178,7 @@ Normal DBaaS users should use:
         "verifies the recorded target, live MongoDB shardCount, surviving shard "
         "readiness, config servers, mongos, and removed StatefulSets. The lock release "
         "remains Terraform-driven.",
-        "  terraformControllerAdmin.py RecoverDeploymentLock SC9 --confirm",
+        "  python3 terraformControllerAdmin.py RecoverDeploymentLock SC9 --confirm",
     )
     x.add_argument(
         "deployment",
@@ -201,7 +196,7 @@ Normal DBaaS users should use:
         "no terraformController-managed MongoDB custom resources. If both checks pass, "
         "Terraform converges the controller backend to empty desired state and finishes "
         "destroying resources still tracked in state.",
-        "  terraformControllerAdmin.py RecoverOrphanedResources --confirm",
+        "  python3 terraformControllerAdmin.py RecoverOrphanedResources --confirm",
     )
     _confirm(x)
 
@@ -212,7 +207,7 @@ Normal DBaaS users should use:
         "Reloads managed desired state from Vault, refreshes Terraform, reapplies the "
         "complete controller-managed environment, and waits for convergence. Reconcile "
         "refuses to run while a protected ShardedCluster change is active.",
-        "  terraformControllerAdmin.py Reconcile",
+        "  python3 terraformControllerAdmin.py Reconcile",
     )
 
     return parser
@@ -242,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
         log_event("admin.command.started", command=args.command)
 
         # Operation diagnostics must remain available even when Vault/MongoDB is
-        # unhealthy, so these commands intentionally avoid constructing Vault.
+        # unhealthy, so these commands do not construct a Vault client.
         if args.command == "ListOperation":
             print_operation(config_path, args.operation_id)
             log_event("admin.command.succeeded", command=args.command)
@@ -253,8 +248,8 @@ def main(argv: list[str] | None = None) -> int:
             log_event("admin.command.succeeded", command=args.command)
             return 0
 
-        # ListManagedResources needs Vault desired-state inventory plus read-only
-        # Kubernetes queries. It performs no Terraform or Kubernetes mutation.
+        # ListManagedResources combines Vault desired-state inventory with
+        # read-only Kubernetes queries. It performs no managed mutation.
         if args.command == "ListManagedResources":
             vault = VaultClient(config)
             list_managed_resources(config, vault)
@@ -262,7 +257,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         # Orphan cleanup can contain bounded storage waits, so it remains async.
-        # The detached worker re-enters THIS admin entry point, never the public CLI.
+        # The worker re-enters this administrator executable, never the public CLI.
         if args.command == "RecoverOrphanedResources" and not operation_id:
             if not args.confirm:
                 raise ControllerError(

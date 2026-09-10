@@ -1,12 +1,15 @@
 """Read and validate terraformController.config.
 
-The configuration file is intentionally the single place where environment
-specific values live: Vault address, Kubernetes context, Terraform repository,
-MongoDB defaults, sharding defaults, storage, timeouts, and logging.
+The configuration file contains environment-specific values needed to operate
+the MongoDB DBaaS service: Vault, Terraform, Kubernetes, MongoDB defaults,
+sharding defaults, storage, rotation, and runtime timeouts.
 
-This module converts text from the INI file into a typed Python dictionary.
-It fails early on invalid values so later lifecycle code does not need to keep
-re-checking basic configuration rules.
+Logging is intentionally *not* configurable here.  The controller always uses
+predictable daily append-only files under ``logs/`` beside this config file.
+That convention is implemented in runtime_paths.py and logging_component.py.
+
+This module converts INI text into a typed Python dictionary and fails early on
+invalid values so lifecycle code can work with a clean internal contract.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from .common import ControllerError
 
 def _bool(value: str, label: str) -> bool:
     """Parse a human-friendly true/false value from the INI file."""
+
     v = value.strip().lower()
     if v in {"true", "yes", "1", "on"}:
         return True
@@ -36,6 +40,7 @@ def _integer(
     minimum: int,
 ) -> int:
     """Read an integer and enforce the minimum allowed value."""
+
     try:
         value = parser.getint(section, key)
     except ValueError as exc:
@@ -45,44 +50,23 @@ def _integer(
     return value
 
 
-def _expand_path(value: str) -> Path:
-    """Expand ~ and environment variables without deciding relative location."""
-    return Path(os.path.expandvars(os.path.expanduser(value.strip())))
-
-
-def _resolve_config_relative_path(value: str, config_directory: Path) -> Path:
-    """Resolve a config path exactly once.
-
-    Absolute paths stay absolute.
-    Relative paths are resolved from the directory containing the config file,
-    not from whichever directory the user happened to run the controller from.
-    """
-    candidate = _expand_path(value)
-    if candidate.is_absolute():
-        return candidate
-    return (config_directory / candidate).resolve()
-
-
 def load_config(path: Path) -> dict[str, Any]:
-    """Load, validate, normalize, and return all controller configuration.
+    """Load, validate, normalize, and return controller configuration.
 
-    The returned dictionary is the internal configuration contract used by the
-    rest of the package. Paths and environment variables are expanded here so
-    downstream modules receive ready-to-use values.
+    Paths and environment variables are expanded once here.  The normalized
+    config file path is also returned because runtime logs are always stored in
+    a ``logs`` directory beside the selected config file.
     """
+
     path = path.expanduser().resolve()
     if not path.exists():
         raise ControllerError(f"Configuration file does not exist: {path}")
 
-    config_directory = path.parent
-
-    # Disable ConfigParser's old-style % interpolation. Logging filename
-    # formats legitimately contain strftime tokens such as %Y%m%d.
     p = configparser.ConfigParser(interpolation=None)
     p.read(path, encoding="utf-8")
 
-    # Keep the required-field list in one place. Missing configuration is
-    # easier to diagnose here than after Terraform has already started.
+    # Keep the required-field list in one place. Missing configuration is much
+    # easier to diagnose here than after Terraform has started changing state.
     required = {
         "Vault": ["address", "token_environment_variable", "mount", "base_path"],
         "Terraform": [
@@ -119,7 +103,6 @@ def load_config(path: Path) -> dict[str, Any]:
             "replica_set_ready_timeout_seconds",
             "sharded_cluster_ready_timeout_seconds",
         ],
-        "Logging": ["enabled", "level", "directory", "mode"],
     }
     for section, keys in required.items():
         if not p.has_section(section):
@@ -140,8 +123,8 @@ def load_config(path: Path) -> dict[str, Any]:
         p, "Runtime", "sharded_cluster_ready_timeout_seconds", 30
     )
 
-    # Storage has two supported models. static-local needs a host path and node
-    # name; dynamic delegates volume provisioning to a StorageClass.
+    # Storage has two supported models. static-local needs an explicit host path
+    # and node name; dynamic delegates volume provisioning to a StorageClass.
     storage_mode = p.get("Storage", "mode").strip().lower()
     if storage_mode not in {"static-local", "dynamic"}:
         raise ControllerError("Storage mode must be 'static-local' or 'dynamic'.")
@@ -152,31 +135,10 @@ def load_config(path: Path) -> dict[str, Any]:
                     f"Storage '{key}' is required when mode is static-local."
                 )
 
-    # Logging intentionally has only two write modes. This makes the behavior
-    # easy for an operator to understand from the config file.
-    logging_mode = p.get("Logging", "mode").strip().lower()
-    if logging_mode not in {"append", "overwrite"}:
-        raise ControllerError("Logging mode must be 'append' or 'overwrite'.")
-
-    logging_level = p.get("Logging", "level").strip().upper()
-    if logging_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
-        raise ControllerError(
-            "Logging level must be DEBUG, INFO, WARNING, ERROR, or CRITICAL."
-        )
-
-    filename_format = p.get("Logging", "filename_format", fallback="").strip()
-
-    # filename_format is deliberately a file name only. Keeping path selection
-    # in the separate directory setting prevents surprising path traversal.
-    if "/" in filename_format or "\\" in filename_format:
-        raise ControllerError(
-            "Logging filename_format must be a file name only. "
-            "Put directory information in Logging.directory."
-        )
-
     expand = lambda v: os.path.expandvars(os.path.expanduser(v.strip()))
 
     return {
+        "config_path": str(path),
         "vault_address": p.get("Vault", "address").strip().rstrip("/"),
         "vault_token_env": p.get("Vault", "token_environment_variable").strip(),
         "vault_mount": p.get("Vault", "mount").strip().strip("/"),
@@ -213,15 +175,4 @@ def load_config(path: Path) -> dict[str, Any]:
         "job_timeout": job_timeout,
         "rs_ready_timeout": rs_ready_timeout,
         "sc_ready_timeout": sc_ready_timeout,
-        "logging_enabled": _bool(
-            p.get("Logging", "enabled"), "Logging.enabled"
-        ),
-        "logging_level": logging_level,
-        "logging_directory": str(
-            _resolve_config_relative_path(
-                p.get("Logging", "directory"), config_directory
-            )
-        ),
-        "logging_mode": logging_mode,
-        "logging_filename_format": filename_format,
     }

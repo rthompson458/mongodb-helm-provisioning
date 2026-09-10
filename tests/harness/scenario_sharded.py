@@ -61,13 +61,15 @@ def run(runner: HarnessRunner) -> None:
     if not five_shard_status.passed:
         return
 
-    created_db = runner.controller(
+    # Database create/delete are customer-asynchronous just like the surrounding
+    # deployment/topology work. Polling here proves the lifecycle finished, not
+    # merely that the public request was accepted.
+    created_db = runner.controller_async(
         "Create database on ShardedCluster",
         "AddDatabase",
         sc,
         db,
-        expected_text=f"ShardedCluster '{sc}'",
-        timeout=900,
+        timeout=1200,
     )
     if not created_db.passed:
         return
@@ -106,14 +108,13 @@ def run(runner: HarnessRunner) -> None:
     if not disabled.passed:
         return
 
-    deleted_db = runner.controller(
+    deleted_db = runner.controller_async(
         "Delete ShardedCluster database",
         "DeleteDatabase",
         sc,
         db,
         "--confirm",
-        expected_text="was successfully deleted",
-        timeout=900,
+        timeout=1200,
     )
     if not deleted_db.passed:
         return

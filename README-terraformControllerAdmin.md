@@ -1,71 +1,58 @@
 # terraformController Administrator Guide
 
-`terraformControllerAdmin.py` is the **platform-administrator interface** for the MongoDB DBaaS controller.
+`terraformControllerAdmin.py` is the platform-administrator interface for the MongoDB DBaaS controller. It is intentionally separate from the customer-facing `terraformController.py` command.
 
-It is intentionally separate from the customer-facing `terraformController.py` command.
+Use the customer CLI for normal deployment, shard, database, credential, and service-status work. Use the administrator CLI for operation diagnostics, reconciliation, zero-state verification, and exceptional recovery.
 
-The customer interface is for normal DBaaS work: deployment lifecycle, shard lifecycle, database lifecycle, credential lifecycle, and normal service status.
-
-The administrator interface is for **operations, diagnostics, reconciliation, and exceptional recovery**.
-
-> **Important:** separating the executables creates a clean product/interface boundary. It is not, by itself, an authorization boundary. Production deployment must still restrict administrator execution, Kubernetes access, Vault access, host access, and Terraform backend access to authorized operators.
+The executable split is an interface boundary, not an authorization boundary. Production must also restrict administrator host access, Kubernetes privileges, Vault policy, and Terraform backend access.
 
 ---
 
-## Quick start
+## 1. Quick start
 
 Show administrator help:
 
-~~~bash
+```bash
 python3 terraformControllerAdmin.py --help
-~~~
+```
 
 Show command-specific help:
 
-~~~bash
+```bash
 python3 terraformControllerAdmin.py ListManagedResources --help
 python3 terraformControllerAdmin.py ListOperations --help
 python3 terraformControllerAdmin.py ListOperation --help
 python3 terraformControllerAdmin.py Reconcile --help
 python3 terraformControllerAdmin.py RecoverDeploymentLock --help
 python3 terraformControllerAdmin.py RecoverOrphanedResources --help
-~~~
+```
 
-The administrator interface uses the same controller configuration file and Vault token as the public controller:
-
-~~~bash
-export VAULT_TOKEN='<current-vault-token>'
-~~~
-
-Do not store the Vault token in `terraformController.config`.
+The administrator interface uses the same `terraformController.config` and Vault token as the public controller. Do not store the Vault token in the config file.
 
 ---
 
-## Command reference
+## 2. Command reference
 
 | Command | Purpose | Mutation |
 | --- | --- | --- |
-| `ListManagedResources` | List deployment-level controller resources and report zero-state cleanliness | Read-only |
+| `ListManagedResources` | List controller-managed resources and report zero-state cleanliness | Read-only |
 | `ListOperations` | List recent asynchronous controller operations | Read-only |
-| `ListOperation OPERATION_ID` | Show detailed status for one operation | Read-only |
-| `Reconcile` | Reapply the complete Vault-backed desired state through Terraform | Yes |
+| `ListOperation OPERATION_ID` | Show detailed status for one asynchronous operation | Read-only |
+| `Reconcile` | Reapply complete Vault-backed desired state through Terraform | Yes |
 | `RecoverDeploymentLock SC --confirm` | Release a completed but stranded ShardedCluster topology lock after safety validation | Yes |
 | `RecoverOrphanedResources --confirm` | Finish Terraform cleanup after desired-state inventory is already empty | Yes |
 
-These commands are deliberately **not accepted** by `terraformController.py`.
+These commands are deliberately not accepted by `terraformController.py`.
 
 ---
 
-## ListManagedResources
+## 3. ListManagedResources
 
 ```bash
 python3 terraformControllerAdmin.py ListManagedResources
 ```
 
-This is the administrator's read-only **zero-state and leftover-resource check**.
-It combines the controller's Vault-backed deployment inventory with the
-deployment-level Kubernetes resources that must be empty before a clean acceptance
-run:
+This is the read-only zero-state and leftover-resource check. It combines Vault-backed deployment inventory with controller-managed Kubernetes resources:
 
 ```text
 Managed deployments
@@ -91,104 +78,155 @@ Deployment locks:     0
 Status: CLEAN
 ```
 
-If anything remains, the command reports `Status: ATTENTION REQUIRED` and lists
-the resource names by category. Managed MongoDBUser custom resources are included so an orphaned database or controller account cannot be hidden by a CLEAN result. It does not delete, reconcile, or mutate
-anything.
-
-This replaces the need for an administrator to remember several separate
-`kubectl` commands when checking whether the controller is truly at zero.
-
-There is intentionally **no `ListResources` alias**. The explicit
-`ListManagedResources` name makes it clear that the command reports resources
-owned by terraformController rather than every resource in the Kubernetes
-cluster.
+If anything remains, the command reports `ATTENTION REQUIRED` and lists the remaining names by category. The command does not delete or reconcile anything.
 
 ---
 
-## ListOperations
+## 4. Asynchronous operation diagnostics
 
-~~~bash
+Customer operations that currently execute asynchronously include:
+
+```text
+AddReplicaSet
+DeleteReplicaSet
+AddShardedCluster
+DeleteShardedCluster
+AddShard
+DeleteShard
+AddDatabase
+DeleteDatabase
+```
+
+`RecoverOrphanedResources` is also asynchronous on the administrator interface because cleanup can contain bounded storage waits.
+
+The customer CLI intentionally hides internal operation IDs. Administrators can inspect them here.
+
+### ListOperations
+
+```bash
 python3 terraformControllerAdmin.py ListOperations
-~~~
+```
 
-This is the operator view of the controller's local asynchronous operation journal.
+Shows up to 50 recent operations with:
 
-Possible operation results:
+```text
+Operation ID
+Command
+Deployment/scope
+Result
+Elapsed time
+```
 
-~~~text
+Possible results include:
+
+```text
 In Progress
 Succeeded
 Failed
 Interrupted
-~~~
+```
 
-The operation journal is diagnostic controller state. It is not part of the customer-facing DBaaS contract.
+### ListOperation
 
----
-
-## ListOperation
-
-~~~bash
+```bash
 python3 terraformControllerAdmin.py ListOperation 7c1349abc123
-~~~
+```
 
-This command intentionally exposes deeper diagnostic detail than the customer CLI:
+Shows detailed status for one operation:
 
-~~~text
+```text
 Operation ID
 Command
-Deployment / scope
+Deployment/scope
 Result
 Submitted timestamp
 Started timestamp
 Completed timestamp
 Elapsed time
 Worker PID
-Operation log path
+Daily operations-log path
 Recorded result/error message
-~~~
+```
 
-Use it when a background create/delete/topology request appears stalled, an acceptance-test step fails, a detached worker was interrupted, or the exact operation log is needed.
-
-Do not build customer procedures around Operation IDs. They are internal service diagnostics.
+Use this when a background request appears stalled, a test step fails, a detached worker is interrupted, or exact diagnostic evidence is needed.
 
 ---
 
-## Reconcile
+## 5. Runtime log and state layout
 
-~~~bash
+Logging no longer uses a configurable `[Logging]` section.
+
+Structured controller events are appended to:
+
+```text
+logs/controller/controller-YYYYMMDD.log
+```
+
+Detailed Git/Terraform/worker diagnostics are appended to:
+
+```text
+logs/operations/operations-YYYYMMDD.log
+```
+
+Machine-readable asynchronous status records are stored under:
+
+```text
+logs/operations/state/<operation-id>.json
+```
+
+A detached worker may temporarily buffer ordinary stdout/stderr under:
+
+```text
+logs/operations/work/<operation-id>.tmp
+```
+
+When the worker reaches a terminal state, that transcript is appended as one block to the daily operations log and the temporary file is removed. This keeps concurrent worker output from becoming unreadably interleaved.
+
+The daily files are append-only and use the UTC date in the filename. Detailed Git/Terraform output is written here rather than to the customer or administrator terminal.
+
+The JSON operation files are controller state, not logs. They are needed for operation status, interrupted-worker detection, test-harness polling, and safe recovery decisions.
+
+The `logs/` tree is ignored by Git. Ordinary `git clean -fd` leaves ignored files in place. Deleting/recloning the repository or running a command that explicitly removes ignored files, such as `git clean -fdx`, removes local runtime history and operation state.
+
+Controller code must not intentionally write Vault tokens or managed plaintext passwords to the logs or state files.
+
+---
+
+## 6. Reconcile
+
+```bash
 python3 terraformControllerAdmin.py Reconcile
-~~~
+```
 
-`Reconcile` is the normal administrator repair/convergence command.
+`Reconcile` is the normal administrator convergence/repair command. It:
 
-It:
-
-1. reloads managed desired state from Vault;
-2. refreshes the configured Terraform source;
-3. asks Terraform to reapply the complete managed state;
-4. waits for managed MongoDB resources and accounts to converge;
+1. reloads the managed desired state from Vault;
+2. refreshes the Terraform source;
+3. reapplies the complete controller-managed desired state through Terraform;
+4. waits for deployments and managed accounts to converge;
 5. reports the resulting service state.
 
-`Reconcile` does **not invent desired state**. It reapplies state already recorded by the controller.
+`Reconcile` does not invent desired state. It re-applies state already recorded by the controller.
 
-For ShardedClusters, Reconcile refuses to run while a protected managed change is active. This prevents a broad environment-wide apply from racing with shard, database, or credential mutations.
+For ShardedClusters, Reconcile refuses to run while a protected managed change is active so a broad Terraform apply cannot race with shard, database, or credential work.
+
+Routine Git/Terraform output is captured in the daily operations log instead of being printed to the administrator terminal.
 
 ---
 
-## RecoverDeploymentLock
+## 7. RecoverDeploymentLock
 
-~~~bash
+```bash
 python3 terraformControllerAdmin.py RecoverDeploymentLock SC9 --confirm
-~~~
+```
 
-This is **exceptional recovery**, not a normal completion command.
+This is exceptional recovery, not a normal completion command.
 
-Use it only when an interrupted `AddShard` or `DeleteShard` has already reached its recorded target topology but a later controller bookkeeping/storage step failed and left the ShardedCluster deployment lock in place.
+Use it only when an interrupted `AddShard` or `DeleteShard` has already reached its recorded target topology but a later bookkeeping/storage step failed and left the ShardedCluster deployment lock in place.
 
 Before releasing the lock, the controller verifies:
 
-~~~text
+```text
 Active lock category          = topology
 Active lock action            = AddShard or DeleteShard
 Vault desired shard count     = lock target
@@ -198,48 +236,34 @@ Every surviving shard         = Online
 Config servers                = Online
 mongos                        = Online
 Removed StatefulSets          = Absent for DeleteShard
-~~~
+```
 
-Only after those checks pass does Terraform release the exact existing lock.
-
-This gives the administrator a guarded Terraform-driven recovery path instead of manually deleting a lock or bypassing controller safety.
+Only after those checks pass does Terraform release the exact existing lock. Do not manually delete the lock merely to clear an error condition.
 
 ---
 
-## RecoverOrphanedResources
+## 8. RecoverOrphanedResources
 
-~~~bash
+```bash
 python3 terraformControllerAdmin.py RecoverOrphanedResources --confirm
-~~~
+```
 
-This is the most restrictive recovery command.
+This is the most restrictive recovery command. It exists for a partial deployment destroy where desired-state inventory is already empty but Terraform still tracks controller-managed resources that need cleanup.
 
-It exists for a partial deployment destroy where:
+Before mutation is allowed, the controller independently requires:
 
-- the deployment has already been removed from Vault-backed desired-state inventory;
-- the MongoDB custom resource is already gone;
-- Terraform still tracks PVCs, PVs, secrets, or other resources that were not fully destroyed.
-
-Before Terraform is allowed to mutate anything, the command independently requires:
-
-~~~text
+```text
 Vault-backed managed deployment inventory = empty
-Live MongoDB CRs managed by terraformController = none
-~~~
+Live terraformController-managed MongoDB CRs = none
+```
 
 If either check fails, recovery stops.
 
-When both checks pass, the controller sends **empty desired state** to Terraform so Terraform can finish converging its backend state to zero managed resources.
+When both checks pass, Terraform receives empty desired state and finishes converging tracked resources toward zero. Existing storage safeguards remain active: ownership checks, live-pod/PVC-use checks, bounded waits, and refusal instead of unsafe force deletion.
 
-Storage cleanup still uses the normal safeguards: actual PV/PVC ownership checks, legacy-binding detection, live-pod/PVC-use checks, bounded waits for terminating pods, bounded PVC/PV deletion waits, and refusal instead of force-deleting unsafe storage.
+`RecoverOrphanedResources` is asynchronous. A successful submission prints the internal operation ID because this is an administrator workflow:
 
-### Asynchronous administrator operation
-
-`RecoverOrphanedResources` can contain bounded storage waits, so it remains asynchronous.
-
-Example:
-
-~~~text
+```text
 RecoverOrphanedResources request accepted.
 
 Operation ID:   ab0c98165276
@@ -247,142 +271,115 @@ Scope:          controller-state
 Status:         In Progress
 
 Check administrator operation status with:
-  python3 terraformControllerAdmin.py ... ListOperation ab0c98165276
-~~~
-
-Operation IDs are appropriate here because this is an administrator diagnostic workflow.
+  python3 terraformControllerAdmin.py --config /path/to/terraformController.config ListOperation ab0c98165276
+```
 
 ---
 
-## Recovery decision guide
+## 9. Recovery decision guide
 
-### Verify a clean zero-resource starting point
+Verify zero-state:
 
 ```bash
 python3 terraformController.py ListDeployments
 python3 terraformControllerAdmin.py ListManagedResources
 ```
 
-For a clean acceptance-test starting point, the public deployment inventory
-should be empty and the administrator resource inventory should report
-`Status: CLEAN`.
+If normal managed desired state exists and should simply be reapplied:
 
-### Normal service is healthy
-
-Use the public controller:
-
-~~~bash
-python3 terraformController.py ...
-~~~
-
-### Managed state exists and should simply be reapplied
-
-Use:
-
-~~~bash
+```bash
 python3 terraformControllerAdmin.py Reconcile
-~~~
+```
 
-### A topology lock remains, but the target topology is already healthy
+If an AddShard/DeleteShard topology lock remains but the target topology is already healthy, first inspect:
 
-Inspect public service state and administrator operation history:
-
-~~~bash
+```bash
 python3 terraformController.py ListShards SC9
 python3 terraformControllerAdmin.py ListOperations
-~~~
+```
 
-Then, only when the preconditions are understood:
+Then, only after understanding the state:
 
-~~~bash
+```bash
 python3 terraformControllerAdmin.py RecoverDeploymentLock SC9 --confirm
-~~~
+```
 
-### Vault inventory is empty, MongoDB CRs are gone, but Terraform-managed resources remain
+If Vault inventory is empty, managed MongoDB CRs are gone, but Terraform-managed leftovers remain:
 
-Use:
-
-~~~bash
+```bash
 python3 terraformControllerAdmin.py RecoverOrphanedResources --confirm
-~~~
+```
 
-### A live MongoDB deployment still exists
-
-Do **not** use `RecoverOrphanedResources`. Investigate the existing desired state and use the normal lifecycle/Reconcile path.
+If a live managed MongoDB deployment still exists, do not use orphan recovery. Investigate the desired state and use the normal lifecycle/Reconcile path.
 
 ---
 
-## Public vs administrator interface
+## 10. Public vs administrator interface
 
 | Concern | Public CLI | Administrator CLI |
 | --- | --- | --- |
 | Executable | `terraformController.py` | `terraformControllerAdmin.py` |
-| Audience | DBaaS consumer / demo user | Platform operator |
-| Database lifecycle | Yes | No |
+| Audience | DBaaS consumer | Platform operator |
 | Deployment lifecycle | Yes | No |
 | Shard lifecycle | Yes | No |
+| Database lifecycle | Yes | No |
+| Credential lifecycle | Yes | No |
 | Normal service status | Yes | No |
-| Managed-resource / zero-state inventory | No | Yes |
-| Operation journal | No | Yes |
+| Managed-resource zero-state inventory | No | Yes |
+| Operation IDs/journal | No | Yes |
 | Worker PID/log path | No | Yes |
 | Terraform reconciliation | No | Yes |
-| Recovery commands | No | Yes |
+| Guarded recovery | No | Yes |
 
 The public CLI should read like a service product. The administrator CLI should read like an operations runbook.
 
 ---
 
-## Source layout
+## 11. Architecture and source layout
 
-Administrator-facing files:
+Customer entry point:
 
-~~~text
-terraformControllerAdmin.py
-terraform_controller/admin_cli.py
-terraform_controller/maintenance.py
-terraform_controller/async_operations.py
-terraform_controller/deployment_lock.py
-terraform_controller/terraform_runner.py
-~~~
-
-Customer-facing entry point:
-
-~~~text
+```text
 terraformController.py
 terraform_controller/cli.py
-~~~
+```
 
-Shared lifecycle/business modules remain shared so the two interfaces do not duplicate controller logic.
+Administrator entry point:
 
----
+```text
+terraformControllerAdmin.py
+terraform_controller/admin_cli.py
+```
 
-## Logging and evidence
+Shared lifecycle/support modules include:
 
-Both interfaces use the shared structured logging component:
-
-~~~text
+```text
+terraform_controller/deployments.py
+terraform_controller/databases.py
+terraform_controller/maintenance.py
+terraform_controller/deployment_lock.py
+terraform_controller/terraform_runner.py
+terraform_controller/async_operations.py
 terraform_controller/logging_component.py
-~~~
+terraform_controller/runtime_paths.py
+terraform_controller/kube.py
+terraform_controller/vault.py
+```
 
-The administrator operation journal is stored outside the Git working tree under the configured user's local state directory (`XDG_STATE_HOME` when set, otherwise the normal local-state location).
-
-This prevents normal Git reset/clean/branch operations from erasing evidence needed to diagnose interrupted background work.
-
-Controller code should never intentionally write Vault tokens or plaintext managed passwords into these logs or journals.
+Managed infrastructure mutations remain Terraform-driven. The Python controller validates, coordinates, waits, reports, and logs; it does not bypass Terraform to directly mutate managed MongoDB/Vault/Kubernetes lifecycle state.
 
 ---
 
-## Production hardening note
+## 12. Production hardening considerations
 
-The POC separates the customer and administrator **interfaces**.
+This proof of concept establishes a clear interface and recovery model. A production implementation should additionally define:
 
-For production, enforce the same distinction operationally:
+- who may execute `terraformControllerAdmin.py`;
+- durable centralized log retention/forwarding;
+- Terraform backend access controls;
+- Kubernetes RBAC appropriate to customer vs administrator workflows;
+- Vault policies appropriate to credential consumers vs administrators;
+- operational approval/runbook requirements for destructive recovery;
+- backup/retention policy for operation state if local worker state remains part of the production design.
 
-- restrict who can execute `terraformControllerAdmin.py`;
-- restrict Terraform backend access;
-- restrict Kubernetes mutation permissions;
-- restrict Vault administrator policy;
-- retain auditable administrator logs;
-- define an approval/runbook for recovery commands.
-
-A separate executable makes the intended boundary obvious to users and reviewers, while RBAC and deployment controls make the boundary enforceable.
+The local `logs/` convention makes development/support evidence easy to find; production can later map the same controller/operations distinction onto durable worker storage or centralized logging without changing the customer CLI contract.
