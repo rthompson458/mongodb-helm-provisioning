@@ -54,8 +54,8 @@ class AdminStatusTests(unittest.TestCase):
         self.assertNotIn("ATTENTION REQUIRED", text)
         self.assertIn("RS7", text)
         self.assertIn("tc-rs7-admin", text)
-        self.assertIn("PVCs (PersistentVolumeClaims):", text)
-        self.assertIn("PVs (PersistentVolumes):", text)
+        self.assertIn("PVCs (Persistent Volume Claims):", text)
+        self.assertIn("PVs (Persistent Volumes):", text)
         self.assertIn("data-rs7-0", text)
         self.assertIn("rs7-0", text)
 

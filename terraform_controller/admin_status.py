@@ -21,8 +21,8 @@ def list_managed_resources(config: dict[str, Any], vault: VaultClient) -> None:
         ("Managed deployments", "managed_deployments"),
         ("MongoDB resources", "mongodb_resources"),
         ("MongoDB users", "mongodb_users"),
-        ("PVCs (PersistentVolumeClaims)", "pvcs"),
-        ("PVs (PersistentVolumes)", "pvs"),
+        ("PVCs (Persistent Volume Claims)", "pvcs"),
+        ("PVs (Persistent Volumes)", "pvs"),
         ("Deployment locks", "deployment_locks"),
     ]
     clean = all(not resources[key] for _, key in labels)
