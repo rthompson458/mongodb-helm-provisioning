@@ -493,28 +493,6 @@ EOF
     "${K[@]}" -n "${TC_NAMESPACE}" delete configmap "${lock}" --wait=true >/dev/null
     ;;
 
-  create_database)
-    : "${TC_DATABASE:?TC_DATABASE is required}"
-    : "${TC_PLACEHOLDER_COLLECTION:?TC_PLACEHOLDER_COLLECTION is required}"
-    : "${TC_MONGO_IMAGE:?TC_MONGO_IMAGE is required}"
-    db_json=$(json_string "${TC_DATABASE}")
-    placeholder_json=$(json_string "${TC_PLACEHOLDER_COLLECTION}")
-    js="const d=${db_json},p=${placeholder_json},t=db.getSiblingDB(d),c=t.getCollectionNames();if(!c.includes(p))t.createCollection(p);print('TC_RESULT=OK');"
-    export TC_JS_JSON
-    TC_JS_JSON=$(json_string "$js")
-    run_mongo_job
-    ;;
-
-  delete_database)
-    : "${TC_DATABASE:?TC_DATABASE is required}"
-    : "${TC_MONGO_IMAGE:?TC_MONGO_IMAGE is required}"
-    db_json=$(json_string "${TC_DATABASE}")
-    js="const d=${db_json};const n=db.adminCommand({listDatabases:1,nameOnly:true}).databases.map(x=>x.name);if(!n.includes(d)){print('TC_RESULT=ALREADY_ABSENT');quit(0);}const r=db.getSiblingDB(d).dropDatabase();if(!r||r.ok!==1)quit(43);print('TC_RESULT=DELETED');"
-    export TC_JS_JSON
-    TC_JS_JSON=$(json_string "$js")
-    run_mongo_job
-    ;;
-
   validate_deployment_empty)
     : "${TC_MONGO_IMAGE:?TC_MONGO_IMAGE is required}"
     js="const p=new Set(['admin','config','local']);const n=db.adminCommand({listDatabases:1,nameOnly:true}).databases.map(x=>x.name).filter(x=>!p.has(x)).sort();if(n.length){print('TC_BLOCKED='+JSON.stringify(n));quit(42);}print('TC_RESULT=EMPTY');"
