@@ -365,7 +365,7 @@ def public_submission_instructions(
     if status_arguments:
         check_command = shlex.join(
             [
-                sys.executable,
+                "python3",
                 "terraformController.py",
                 "--config",
                 str(config_path.expanduser().resolve()),
