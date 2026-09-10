@@ -1,4 +1,4 @@
-"""Shared low-level helpers used by the terraformController package.
+"""Shared low-level helpers used by the privateWorkerReplacement package.
 
 An intern reading this project should think of this file as the "toolbox."
 It contains validation, date/time formatting, subprocess execution, table
