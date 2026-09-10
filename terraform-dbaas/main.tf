@@ -906,9 +906,6 @@ resource "helm_release" "mongodb_management" {
 # reports its result.
 resource "terraform_data" "lifecycle_operation" {
   count = contains([
-    "create_database",
-    "delete_database",
-    "validate_deployment_empty",
     "verify_database_accounts",
     "verify_database_accounts_owner_disabled",
     "verify_database_users_absent",
