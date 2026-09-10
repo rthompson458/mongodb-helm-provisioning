@@ -1,6 +1,6 @@
-name: Validate terraformController
+name: Validate privateWorkerReplacement
 
-# This repository now contains only the current terraformController/DBaaS effort.
+# This repository now contains only the current privateWorkerReplacement/DBaaS effort.
 # Run the complete validation suite for every pull request and every push to main
 # so structural/documentation/test changes cannot accidentally bypass validation.
 on:
@@ -17,15 +17,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify rename completeness
+        run: |
+          if git grep -n -E 'terraform_controller|terraformController'; then
+            echo "ERROR: retired controller name remains in the repository"
+            exit 1
+          fi
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Validate Python syntax
-        run: python3 -m compileall -q terraformController.py terraform_controller tests
+        run: python3 -m compileall -q privateWorkerReplacement.py privateWorkerReplacementAdmin.py privateWorkerReplacement tests
 
-      - name: Run controller unit tests
+      - name: Run privateWorkerReplacement unit tests
         run: python3 -m unittest discover -s tests -p "test_*.py" -v
 
       - name: Validate live harness no-argument help
