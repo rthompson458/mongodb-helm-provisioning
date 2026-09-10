@@ -181,6 +181,9 @@ locals {
 # follow without changing the controller's deployment/database state model.
 locals {
   mongodb_database_actions = [
+    "create_database",
+    "delete_database",
+    "validate_deployment_empty",
   ]
 
   mongodb_databases = var.operation.action == "create_database" ? [
