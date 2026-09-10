@@ -1,4 +1,4 @@
-"""End-user command-line interface for terraformController.
+"""End-user command-line interface for privateWorkerReplacement.
 
 This module owns public command parsing, help text, configuration loading, and
 dispatch. Business rules stay in lifecycle/status modules and all managed
@@ -57,7 +57,7 @@ from .vault import VaultClient
 # for detached workers. DEFAULT_CONFIG_DISPLAY is the friendly path a person
 # sees and types, while DEFAULT_CONFIG is the Path object used by Python.
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CONFIG_DISPLAY = "./terraformController.config"
+DEFAULT_CONFIG_DISPLAY = "./privateWorkerReplacement.config"
 DEFAULT_CONFIG = Path(DEFAULT_CONFIG_DISPLAY)
 
 
@@ -147,7 +147,7 @@ def build_parser(config_path: Path | None = None) -> argparse.ArgumentParser:
     )
 
     parser = argparse.ArgumentParser(
-        prog="terraformController.py",
+        prog="privateWorkerReplacement.py",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=f"""Terraform-driven MongoDB DBaaS controller.
 
@@ -179,7 +179,7 @@ run in the background. The submitting shell returns promptly with a status
 command to use while the request finishes.
 
 Configured defaults:
-  Configuration file                 = ./terraformController.config
+  Configuration file                 = ./privateWorkerReplacement.config
   AddShardedCluster initial shards   = {configured_shards_text}
     (read from controller configuration)
   AddShard count                     = 1
@@ -191,27 +191,27 @@ Use '<command> --help' for detailed command-specific help.
         epilog="""Typical flows:
 
 ReplicaSet:
-  python3 terraformController.py AddReplicaSet RS1
-  python3 terraformController.py AddDatabase RS1 HouseInfo
-  python3 terraformController.py ListDatabase RS1 HouseInfo
-  python3 terraformController.py ListDatabaseAccounts RS1 HouseInfo
+  python3 privateWorkerReplacement.py AddReplicaSet RS1
+  python3 privateWorkerReplacement.py AddDatabase RS1 HouseInfo
+  python3 privateWorkerReplacement.py ListDatabase RS1 HouseInfo
+  python3 privateWorkerReplacement.py ListDatabaseAccounts RS1 HouseInfo
 
 ShardedCluster:
-  python3 terraformController.py AddShardedCluster SC9
-  python3 terraformController.py ListShards SC9
-  python3 terraformController.py AddShard SC9 2
-  python3 terraformController.py AddDatabase SC9 HouseInfo
+  python3 privateWorkerReplacement.py AddShardedCluster SC9
+  python3 privateWorkerReplacement.py ListShards SC9
+  python3 privateWorkerReplacement.py AddShard SC9 2
+  python3 privateWorkerReplacement.py AddDatabase SC9 HouseInfo
 
 Inventory:
-  python3 terraformController.py ListDeployments
-  python3 terraformController.py ListDatabases
+  python3 privateWorkerReplacement.py ListDeployments
+  python3 privateWorkerReplacement.py ListDatabases
 """,
     )
     parser.add_argument(
         "--config",
         default=DEFAULT_CONFIG_DISPLAY,
         metavar="FILE",
-        help="Optional configuration file. Default: ./terraformController.config",
+        help="Optional configuration file. Default: ./privateWorkerReplacement.config",
     )
     parser.add_argument(
         "--_operation-worker",
@@ -226,7 +226,7 @@ Inventory:
         "AddReplicaSet",
         "Create an empty managed ReplicaSet.",
         "Requests creation of a non-sharded MongoDB ReplicaSet and returns promptly while provisioning continues in the background.",
-        "  python3 terraformController.py AddReplicaSet RS1",
+        "  python3 privateWorkerReplacement.py AddReplicaSet RS1",
     )
     _deployment(x, "REPLICASET")
 
@@ -235,7 +235,7 @@ Inventory:
         "AddShardedCluster",
         "Create an empty managed ShardedCluster.",
         "Requests creation of a MongoDB ShardedCluster and returns promptly while provisioning continues in the background.",
-        f"  python3 terraformController.py AddShardedCluster SC9\n  python3 terraformController.py AddShardedCluster SC9 --shards 5    # configured default: {configured_shards_text}",
+        f"  python3 privateWorkerReplacement.py AddShardedCluster SC9\n  python3 privateWorkerReplacement.py AddShardedCluster SC9 --shards 5    # configured default: {configured_shards_text}",
     )
     _deployment(x, "SHARDED_CLUSTER")
     x.add_argument(
@@ -253,7 +253,7 @@ Inventory:
         "DeleteReplicaSet",
         "Delete an empty managed ReplicaSet.",
         "Requires --confirm. The request runs in the background and is refused while managed databases remain.",
-        "  python3 terraformController.py DeleteReplicaSet RS1 --confirm",
+        "  python3 privateWorkerReplacement.py DeleteReplicaSet RS1 --confirm",
     )
     _deployment(x, "REPLICASET")
     _confirm(x)
@@ -263,7 +263,7 @@ Inventory:
         "DeleteShardedCluster",
         "Delete an empty managed ShardedCluster.",
         "Requires --confirm. The request runs in the background and is refused while managed databases remain.",
-        "  python3 terraformController.py DeleteShardedCluster SC9 --confirm",
+        "  python3 privateWorkerReplacement.py DeleteShardedCluster SC9 --confirm",
     )
     _deployment(x, "SHARDED_CLUSTER")
     _confirm(x)
@@ -273,7 +273,7 @@ Inventory:
         "ListDeployments",
         "List all managed ReplicaSets and ShardedClusters.",
         "Shows deployment name, type, live phase, topology, MongoDB version, and managed database count.",
-        "  python3 terraformController.py ListDeployments",
+        "  python3 privateWorkerReplacement.py ListDeployments",
     )
 
     x = _sub(
@@ -281,7 +281,7 @@ Inventory:
         "ListDeployment",
         "Show one managed deployment.",
         "Shows detailed service status for either a ReplicaSet or ShardedCluster.",
-        "  python3 terraformController.py ListDeployment SC9",
+        "  python3 privateWorkerReplacement.py ListDeployment SC9",
     )
     _deployment(x)
 
@@ -289,8 +289,8 @@ Inventory:
         sp,
         "ListReplicaSets",
         "List managed ReplicaSets.",
-        "Lists only terraformController-managed ReplicaSet deployments.",
-        "  python3 terraformController.py ListReplicaSets",
+        "Lists only privateWorkerReplacement-managed ReplicaSet deployments.",
+        "  python3 privateWorkerReplacement.py ListReplicaSets",
     )
 
     x = _sub(
@@ -298,7 +298,7 @@ Inventory:
         "ListReplicaSet",
         "Show one managed ReplicaSet.",
         "Shows one ReplicaSet, live phase, members, MongoDB version, and database count.",
-        "  python3 terraformController.py ListReplicaSet RS1",
+        "  python3 privateWorkerReplacement.py ListReplicaSet RS1",
     )
     _deployment(x, "REPLICASET")
 
@@ -306,8 +306,8 @@ Inventory:
         sp,
         "ListShardedClusters",
         "List managed ShardedClusters.",
-        "Lists only terraformController-managed ShardedCluster deployments.",
-        "  python3 terraformController.py ListShardedClusters",
+        "Lists only privateWorkerReplacement-managed ShardedCluster deployments.",
+        "  python3 privateWorkerReplacement.py ListShardedClusters",
     )
 
     x = _sub(
@@ -315,7 +315,7 @@ Inventory:
         "ListShardedCluster",
         "Show one managed ShardedCluster.",
         "Shows cluster phase, topology, database count, and individual shard status.",
-        "  python3 terraformController.py ListShardedCluster SC9",
+        "  python3 privateWorkerReplacement.py ListShardedCluster SC9",
     )
     _deployment(x, "SHARDED_CLUSTER")
 
@@ -324,7 +324,7 @@ Inventory:
         "ListShards",
         "List shard creation/readiness status.",
         "With no cluster name, shows shards across all managed ShardedClusters. With a cluster name, shows detailed shard, config-server, mongos, and active-change status.",
-        "  python3 terraformController.py ListShards\n  python3 terraformController.py ListShards SC9",
+        "  python3 privateWorkerReplacement.py ListShards\n  python3 privateWorkerReplacement.py ListShards SC9",
     )
     x.add_argument(
         "deployment",
@@ -338,7 +338,7 @@ Inventory:
         "AddShard",
         "Add one or more shards to a Running ShardedCluster.",
         "COUNT defaults to 1. The request runs in the background; use ListShards to monitor readiness.",
-        "  python3 terraformController.py AddShard SC9\n  python3 terraformController.py AddShard SC9 2",
+        "  python3 privateWorkerReplacement.py AddShard SC9\n  python3 privateWorkerReplacement.py AddShard SC9 2",
     )
     _deployment(x, "SHARDED_CLUSTER")
     x.add_argument(
@@ -355,7 +355,7 @@ Inventory:
         "DeleteShard",
         "Remove one or more shards from a ShardedCluster.",
         "COUNT defaults to 1 and --confirm is required. The request runs in the background. At least one shard must remain.",
-        "  python3 terraformController.py DeleteShard SC9 --confirm\n  python3 terraformController.py DeleteShard SC9 2 --confirm",
+        "  python3 privateWorkerReplacement.py DeleteShard SC9 --confirm\n  python3 privateWorkerReplacement.py DeleteShard SC9 2 --confirm",
     )
     _deployment(x, "SHARDED_CLUSTER")
     x.add_argument(
@@ -373,7 +373,7 @@ Inventory:
         "AddDatabase",
         "Create a database on a ready ReplicaSet or ShardedCluster.",
         "The request runs in the background. Terraform creates the database, its three managed accounts, and Vault credentials. Use ListDatabase to monitor database lifecycle status.",
-        "  python3 terraformController.py AddDatabase RS1 HouseInfo\n  python3 terraformController.py AddDatabase SC9 HouseInfo\n  python3 terraformController.py AddDatabase HouseInfo    # only one deployment exists",
+        "  python3 privateWorkerReplacement.py AddDatabase RS1 HouseInfo\n  python3 privateWorkerReplacement.py AddDatabase SC9 HouseInfo\n  python3 privateWorkerReplacement.py AddDatabase HouseInfo    # only one deployment exists",
     )
     _database_target(x)
 
@@ -382,7 +382,7 @@ Inventory:
         "DeleteDatabase",
         "Delete a database and its managed accounts.",
         "Requires --confirm and runs in the background. Confirmation authorizes deletion of the database and contents, managed MongoDB users, Vault credentials, and lifecycle metadata.",
-        "  python3 terraformController.py DeleteDatabase SC9 HouseInfo --confirm\n  python3 terraformController.py DeleteDatabase HouseInfo --confirm",
+        "  python3 privateWorkerReplacement.py DeleteDatabase SC9 HouseInfo --confirm\n  python3 privateWorkerReplacement.py DeleteDatabase HouseInfo --confirm",
     )
     _database_target(x)
     _confirm(x)
@@ -392,7 +392,7 @@ Inventory:
         "ListDatabases",
         "List databases and their lifecycle status.",
         "Shows database inventory only: deployment, database name, and status. Account details are intentionally excluded; use ListDatabaseAccounts for those.",
-        "  python3 terraformController.py ListDatabases\n  python3 terraformController.py ListDatabases SC9",
+        "  python3 privateWorkerReplacement.py ListDatabases\n  python3 privateWorkerReplacement.py ListDatabases SC9",
     )
     x.add_argument(
         "deployment",
@@ -406,7 +406,7 @@ Inventory:
         "ListDatabase",
         "Show status for one database.",
         "Shows database-level information only: deployment, deployment type, database name, lifecycle status, and creation time.",
-        "  python3 terraformController.py ListDatabase SC9 HouseInfo\n  python3 terraformController.py ListDatabase HouseInfo    # only one deployment exists",
+        "  python3 privateWorkerReplacement.py ListDatabase SC9 HouseInfo\n  python3 privateWorkerReplacement.py ListDatabase HouseInfo    # only one deployment exists",
     )
     _database_target(x)
 
@@ -415,7 +415,7 @@ Inventory:
         "ListDatabaseAccounts",
         "Show the three managed accounts for one database.",
         "Shows Owner, ReadWrite, and Read accounts, enabled/disabled state, rotation timing, last rotation, Vault paths, and complete browser-ready Vault URLs.",
-        "  python3 terraformController.py ListDatabaseAccounts SC9 HouseInfo\n  python3 terraformController.py ListDatabaseAccounts HouseInfo    # only one deployment exists",
+        "  python3 privateWorkerReplacement.py ListDatabaseAccounts SC9 HouseInfo\n  python3 privateWorkerReplacement.py ListDatabaseAccounts HouseInfo    # only one deployment exists",
     )
     _database_target(x)
 
@@ -424,7 +424,7 @@ Inventory:
         "RotatePasswords",
         "Rotate all three managed database passwords.",
         "Performs deployment health checks first, rotates Owner/ReadWrite/Read credentials through Terraform, updates Vault, and verifies MongoDB authentication.",
-        "  python3 terraformController.py RotatePasswords SC9 HouseInfo\n  python3 terraformController.py RotatePasswords HouseInfo",
+        "  python3 privateWorkerReplacement.py RotatePasswords SC9 HouseInfo\n  python3 privateWorkerReplacement.py RotatePasswords HouseInfo",
     )
     _database_target(x)
 
@@ -433,7 +433,7 @@ Inventory:
         "DisableOwner",
         "Disable the database Owner account.",
         "Requires --confirm and a ready deployment. The Owner Vault credential remains managed and continues to rotate.",
-        "  python3 terraformController.py DisableOwner SC9 HouseInfo --confirm",
+        "  python3 privateWorkerReplacement.py DisableOwner SC9 HouseInfo --confirm",
     )
     _database_target(x)
     _confirm(x)
