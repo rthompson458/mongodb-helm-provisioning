@@ -1,4 +1,4 @@
-"""Unit tests for terraformController configuration validation."""
+"""Unit tests for privateWorkerReplacement configuration validation."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from terraform_controller.common import ControllerError
-from terraform_controller.config import load_config
+from privateWorkerReplacement.common import ControllerError
+from privateWorkerReplacement.config import load_config
 
 
 VALID_CONFIG = """
@@ -21,7 +21,7 @@ base_path = mongodb
 repository_url = https://example.invalid/repo.git
 branch = main
 subdirectory = terraform-dbaas
-cache_directory = ~/.cache/terraformController
+cache_directory = ~/.cache/privateWorkerReplacement
 backend_namespace = mongodb
 backend_secret_suffix = test
 
@@ -70,7 +70,7 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             config_dir = Path(temp) / "config-home"
             config_dir.mkdir()
-            path = config_dir / "terraformController.config"
+            path = config_dir / "privateWorkerReplacement.config"
             path.write_text(text, encoding="utf-8")
             return load_config(path), config_dir.resolve(), path.resolve()
 

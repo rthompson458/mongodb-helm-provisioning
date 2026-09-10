@@ -6,7 +6,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from terraform_controller import kube
+from privateWorkerReplacement import kube
 
 
 class KubeStatusTests(unittest.TestCase):
@@ -29,7 +29,7 @@ class KubeStatusTests(unittest.TestCase):
             kube.list_json(
                 self.config,
                 "pv",
-                label_selector="app.kubernetes.io/managed-by=terraformController",
+                label_selector="app.kubernetes.io/managed-by=privateWorkerReplacement",
                 namespaced=False,
             )
 

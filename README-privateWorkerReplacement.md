@@ -1,8 +1,8 @@
-# terraformController Customer Guide
+# privateWorkerReplacement Customer Guide
 
-`terraformController.py` is the normal MongoDB Database as a Service (DBaaS) command-line interface. This document is the primary user manual for creating and managing MongoDB ReplicaSets, ShardedClusters, shards, databases, and database credentials.
+`privateWorkerReplacement.py` is the normal MongoDB Database as a Service (DBaaS) command-line interface. This document is the primary user manual for creating and managing MongoDB ReplicaSets, ShardedClusters, shards, databases, and database credentials.
 
-Platform diagnostics, Terraform reconciliation, operation IDs, and recovery commands are intentionally separated into `terraformControllerAdmin.py`. See `README-terraformControllerAdmin.md` if you are operating the platform rather than consuming the DBaaS service.
+Platform diagnostics, Terraform reconciliation, operation IDs, and recovery commands are intentionally separated into `privateWorkerReplacementAdmin.py`. See `README-privateWorkerReplacementAdmin.md` if you are operating the platform rather than consuming the DBaaS service.
 
 ---
 
@@ -11,13 +11,13 @@ Platform diagnostics, Terraform reconciliation, operation IDs, and recovery comm
 Run the program with no command to show the full customer command list:
 
 ```bash
-python3 terraformController.py
+python3 privateWorkerReplacement.py
 ```
 
 This is intentionally equivalent to:
 
 ```bash
-python3 terraformController.py --help
+python3 privateWorkerReplacement.py --help
 ```
 
 Both forms print help and exit successfully.
@@ -25,24 +25,24 @@ Both forms print help and exit successfully.
 Show detailed help for one command:
 
 ```bash
-python3 terraformController.py AddReplicaSet --help
-python3 terraformController.py AddShardedCluster --help
-python3 terraformController.py AddDatabase --help
-python3 terraformController.py DeleteDatabase --help
-python3 terraformController.py ListDatabase --help
-python3 terraformController.py ListDatabaseAccounts --help
+python3 privateWorkerReplacement.py AddReplicaSet --help
+python3 privateWorkerReplacement.py AddShardedCluster --help
+python3 privateWorkerReplacement.py AddDatabase --help
+python3 privateWorkerReplacement.py DeleteDatabase --help
+python3 privateWorkerReplacement.py ListDatabase --help
+python3 privateWorkerReplacement.py ListDatabaseAccounts --help
 ```
 
 The controller uses this configuration file in the current working directory by default:
 
 ```text
-./terraformController.config
+./privateWorkerReplacement.config
 ```
 
 To intentionally use another configuration file:
 
 ```bash
-python3 terraformController.py --config ./alternate-terraformController.config ListDeployments
+python3 privateWorkerReplacement.py --config ./alternate-privateWorkerReplacement.config ListDeployments
 ```
 
 Do not store the Vault token in the configuration file. The local development environment expects the token in the configured environment variable, normally `VAULT_TOKEN`.
@@ -97,7 +97,7 @@ A ShardedCluster is managed as one deployment even though MongoDB implements eac
 Request a ReplicaSet:
 
 ```bash
-python3 terraformController.py AddReplicaSet RS1
+python3 privateWorkerReplacement.py AddReplicaSet RS1
 ```
 
 The request is asynchronous. The command returns after the request has been accepted while provisioning continues in the background.
@@ -105,43 +105,43 @@ The request is asynchronous. The command returns after the request has been acce
 Check readiness:
 
 ```bash
-python3 terraformController.py ListReplicaSet RS1
+python3 privateWorkerReplacement.py ListReplicaSet RS1
 ```
 
 When the ReplicaSet is `Running`, request a database:
 
 ```bash
-python3 terraformController.py AddDatabase RS1 HouseInfo
+python3 privateWorkerReplacement.py AddDatabase RS1 HouseInfo
 ```
 
 Database creation is also asynchronous. Use the status command printed by the controller while the request finishes:
 
 ```bash
-python3 terraformController.py ListDatabase RS1 HouseInfo
+python3 privateWorkerReplacement.py ListDatabase RS1 HouseInfo
 ```
 
 When the database reports `Ready`, inspect its three managed accounts and Vault credential locations:
 
 ```bash
-python3 terraformController.py ListDatabaseAccounts RS1 HouseInfo
+python3 privateWorkerReplacement.py ListDatabaseAccounts RS1 HouseInfo
 ```
 
 Delete the database when it is no longer needed:
 
 ```bash
-python3 terraformController.py DeleteDatabase RS1 HouseInfo --confirm
+python3 privateWorkerReplacement.py DeleteDatabase RS1 HouseInfo --confirm
 ```
 
 Database deletion is asynchronous. Confirm that it is gone with:
 
 ```bash
-python3 terraformController.py ListDatabases RS1
+python3 privateWorkerReplacement.py ListDatabases RS1
 ```
 
 After all user databases are removed, delete the ReplicaSet:
 
 ```bash
-python3 terraformController.py DeleteReplicaSet RS1 --confirm
+python3 privateWorkerReplacement.py DeleteReplicaSet RS1 --confirm
 ```
 
 ### ShardedCluster workflow
@@ -149,64 +149,64 @@ python3 terraformController.py DeleteReplicaSet RS1 --confirm
 Request a ShardedCluster using the configured default shard count:
 
 ```bash
-python3 terraformController.py AddShardedCluster SC9
+python3 privateWorkerReplacement.py AddShardedCluster SC9
 ```
 
 Or specify the initial shard count:
 
 ```bash
-python3 terraformController.py AddShardedCluster SC9 --shards 5
+python3 privateWorkerReplacement.py AddShardedCluster SC9 --shards 5
 ```
 
 Check cluster and shard readiness:
 
 ```bash
-python3 terraformController.py ListShardedCluster SC9
-python3 terraformController.py ListShards SC9
+python3 privateWorkerReplacement.py ListShardedCluster SC9
+python3 privateWorkerReplacement.py ListShards SC9
 ```
 
 Add shards:
 
 ```bash
-python3 terraformController.py AddShard SC9
-python3 terraformController.py AddShard SC9 2
+python3 privateWorkerReplacement.py AddShard SC9
+python3 privateWorkerReplacement.py AddShard SC9 2
 ```
 
 Remove shards while retaining at least one:
 
 ```bash
-python3 terraformController.py DeleteShard SC9 --confirm
-python3 terraformController.py DeleteShard SC9 2 --confirm
+python3 privateWorkerReplacement.py DeleteShard SC9 --confirm
+python3 privateWorkerReplacement.py DeleteShard SC9 2 --confirm
 ```
 
 Create a database after the cluster is fully ready:
 
 ```bash
-python3 terraformController.py AddDatabase SC9 Orders
+python3 privateWorkerReplacement.py AddDatabase SC9 Orders
 ```
 
 Inspect database status:
 
 ```bash
-python3 terraformController.py ListDatabase SC9 Orders
+python3 privateWorkerReplacement.py ListDatabase SC9 Orders
 ```
 
 Inspect account and Vault credential details:
 
 ```bash
-python3 terraformController.py ListDatabaseAccounts SC9 Orders
+python3 privateWorkerReplacement.py ListDatabaseAccounts SC9 Orders
 ```
 
 Delete the database:
 
 ```bash
-python3 terraformController.py DeleteDatabase SC9 Orders --confirm
+python3 privateWorkerReplacement.py DeleteDatabase SC9 Orders --confirm
 ```
 
 After the cluster contains no managed user databases, delete the cluster:
 
 ```bash
-python3 terraformController.py DeleteShardedCluster SC9 --confirm
+python3 privateWorkerReplacement.py DeleteShardedCluster SC9 --confirm
 ```
 
 ---
@@ -228,14 +228,14 @@ ListShards [SHARDED_CLUSTER]
 Examples:
 
 ```bash
-python3 terraformController.py ListDeployments
-python3 terraformController.py ListDeployment RS1
-python3 terraformController.py ListReplicaSets
-python3 terraformController.py ListReplicaSet RS1
-python3 terraformController.py ListShardedClusters
-python3 terraformController.py ListShardedCluster SC9
-python3 terraformController.py ListShards
-python3 terraformController.py ListShards SC9
+python3 privateWorkerReplacement.py ListDeployments
+python3 privateWorkerReplacement.py ListDeployment RS1
+python3 privateWorkerReplacement.py ListReplicaSets
+python3 privateWorkerReplacement.py ListReplicaSet RS1
+python3 privateWorkerReplacement.py ListShardedClusters
+python3 privateWorkerReplacement.py ListShardedCluster SC9
+python3 privateWorkerReplacement.py ListShards
+python3 privateWorkerReplacement.py ListShards SC9
 ```
 
 ### ReplicaSet lifecycle
@@ -248,8 +248,8 @@ DeleteReplicaSet REPLICASET --confirm
 Examples:
 
 ```bash
-python3 terraformController.py AddReplicaSet RS1
-python3 terraformController.py DeleteReplicaSet RS1 --confirm
+python3 privateWorkerReplacement.py AddReplicaSet RS1
+python3 privateWorkerReplacement.py DeleteReplicaSet RS1 --confirm
 ```
 
 ### ShardedCluster lifecycle
@@ -264,13 +264,13 @@ DeleteShard SHARDED_CLUSTER [COUNT] --confirm
 Examples:
 
 ```bash
-python3 terraformController.py AddShardedCluster SC9
-python3 terraformController.py AddShardedCluster SC9 --shards 5
-python3 terraformController.py AddShard SC9
-python3 terraformController.py AddShard SC9 2
-python3 terraformController.py DeleteShard SC9 --confirm
-python3 terraformController.py DeleteShard SC9 2 --confirm
-python3 terraformController.py DeleteShardedCluster SC9 --confirm
+python3 privateWorkerReplacement.py AddShardedCluster SC9
+python3 privateWorkerReplacement.py AddShardedCluster SC9 --shards 5
+python3 privateWorkerReplacement.py AddShard SC9
+python3 privateWorkerReplacement.py AddShard SC9 2
+python3 privateWorkerReplacement.py DeleteShard SC9 --confirm
+python3 privateWorkerReplacement.py DeleteShard SC9 2 --confirm
+python3 privateWorkerReplacement.py DeleteShardedCluster SC9 --confirm
 ```
 
 ### Database lifecycle and status
@@ -290,14 +290,14 @@ ListDatabaseAccounts DATABASE
 Examples:
 
 ```bash
-python3 terraformController.py AddDatabase RS1 HouseInfo
-python3 terraformController.py AddDatabase SC9 Orders
-python3 terraformController.py AddDatabase HouseInfo
-python3 terraformController.py ListDatabases
-python3 terraformController.py ListDatabases SC9
-python3 terraformController.py ListDatabase SC9 Orders
-python3 terraformController.py ListDatabaseAccounts SC9 Orders
-python3 terraformController.py DeleteDatabase SC9 Orders --confirm
+python3 privateWorkerReplacement.py AddDatabase RS1 HouseInfo
+python3 privateWorkerReplacement.py AddDatabase SC9 Orders
+python3 privateWorkerReplacement.py AddDatabase HouseInfo
+python3 privateWorkerReplacement.py ListDatabases
+python3 privateWorkerReplacement.py ListDatabases SC9
+python3 privateWorkerReplacement.py ListDatabase SC9 Orders
+python3 privateWorkerReplacement.py ListDatabaseAccounts SC9 Orders
+python3 privateWorkerReplacement.py DeleteDatabase SC9 Orders --confirm
 ```
 
 The one-argument database form is valid only when exactly one managed deployment exists. If more than one deployment exists, specify the deployment explicitly.
@@ -314,8 +314,8 @@ DisableOwner DATABASE --confirm
 Examples:
 
 ```bash
-python3 terraformController.py RotatePasswords RS1 HouseInfo
-python3 terraformController.py DisableOwner RS1 HouseInfo --confirm
+python3 privateWorkerReplacement.py RotatePasswords RS1 HouseInfo
+python3 privateWorkerReplacement.py DisableOwner RS1 HouseInfo --confirm
 ```
 
 ---
@@ -349,7 +349,7 @@ Status:         Creation requested
 The request is being processed in the background.
 
 Check service status with:
-  python3 terraformController.py --config ./terraformController.config ListDatabase RS1 HouseInfo
+  python3 privateWorkerReplacement.py --config ./privateWorkerReplacement.config ListDatabase RS1 HouseInfo
 ```
 
 The worker resolves the configuration file to an absolute path internally so the detached process remains reliable. That internal path is not shown in normal customer instructions.
@@ -366,7 +366,7 @@ The public CLI intentionally does not expose:
 - Terraform state details;
 - deployment-lock recovery mechanics.
 
-If an asynchronous request appears not to complete, use the normal public status commands first. A platform administrator can inspect the private operation status and daily operation diagnostics with `terraformControllerAdmin.py`.
+If an asynchronous request appears not to complete, use the normal public status commands first. A platform administrator can inspect the private operation status and daily operation diagnostics with `privateWorkerReplacementAdmin.py`.
 
 `RotatePasswords` and `DisableOwner` currently remain synchronous. Their underlying Terraform/Git output is captured in the operations log rather than printed to the terminal.
 
@@ -374,7 +374,7 @@ If an asynchronous request appears not to complete, use the normal public status
 
 ## 6. ReplicaSet behavior
 
-`AddReplicaSet` creates an empty managed ReplicaSet using values from `terraformController.config`, including MongoDB version, member count, storage class, storage size, and storage model.
+`AddReplicaSet` creates an empty managed ReplicaSet using values from `privateWorkerReplacement.config`, including MongoDB version, member count, storage class, storage size, and storage model.
 
 Typical current development defaults are:
 
@@ -391,7 +391,7 @@ Creation is not complete merely because the request was accepted. The ReplicaSet
 Check:
 
 ```bash
-python3 terraformController.py ListReplicaSet RS1
+python3 privateWorkerReplacement.py ListReplicaSet RS1
 ```
 
 `DeleteReplicaSet` requires `--confirm` and is allowed only when the ReplicaSet has no managed user databases. MongoDB system databases such as `admin`, `config`, and `local` do not count as user databases.
@@ -400,7 +400,7 @@ python3 terraformController.py ListReplicaSet RS1
 
 ## 7. ShardedCluster behavior
 
-`AddShardedCluster` creates an empty managed ShardedCluster. If `--shards` is omitted, the initial shard count comes from `terraformController.config`. The current repository configuration uses three shards.
+`AddShardedCluster` creates an empty managed ShardedCluster. If `--shards` is omitted, the initial shard count comes from `privateWorkerReplacement.config`. The current repository configuration uses three shards.
 
 Typical topology defaults are:
 
@@ -427,8 +427,8 @@ No conflicting managed change is active
 `AddShard` defaults to one shard when COUNT is omitted.
 
 ```bash
-python3 terraformController.py AddShard SC9
-python3 terraformController.py AddShard SC9 2
+python3 privateWorkerReplacement.py AddShard SC9
+python3 privateWorkerReplacement.py AddShard SC9 2
 ```
 
 The controller safely stages storage and topology changes through Terraform and waits for the target topology to become healthy before releasing the deployment lock.
@@ -438,8 +438,8 @@ The controller safely stages storage and topology changes through Terraform and 
 `DeleteShard` also defaults to one shard and requires `--confirm`.
 
 ```bash
-python3 terraformController.py DeleteShard SC9 --confirm
-python3 terraformController.py DeleteShard SC9 3 --confirm
+python3 privateWorkerReplacement.py DeleteShard SC9 --confirm
+python3 privateWorkerReplacement.py DeleteShard SC9 3 --confirm
 ```
 
 A ShardedCluster must retain at least one shard. If SC9 currently has four shards:
@@ -497,7 +497,7 @@ Unavailable
 ### AddDatabase
 
 ```bash
-python3 terraformController.py AddDatabase RS1 HouseInfo
+python3 privateWorkerReplacement.py AddDatabase RS1 HouseInfo
 ```
 
 The public request is asynchronous. Inside the worker, the controller:
@@ -518,7 +518,7 @@ Use `ListDatabase` or `ListDatabases` to follow database lifecycle status. After
 ### DeleteDatabase
 
 ```bash
-python3 terraformController.py DeleteDatabase RS1 HouseInfo --confirm
+python3 privateWorkerReplacement.py DeleteDatabase RS1 HouseInfo --confirm
 ```
 
 Deletion is destructive and asynchronous. `--confirm` authorizes deletion of:
@@ -534,7 +534,7 @@ The worker reports success only after the database lifecycle has been removed, m
 Use:
 
 ```bash
-python3 terraformController.py ListDatabases RS1
+python3 privateWorkerReplacement.py ListDatabases RS1
 ```
 
 to confirm that the database is gone.
@@ -556,7 +556,7 @@ There are no arbitrary AddUser/DeleteUser/ChangeRole commands in this MVP. The t
 Account information is shown with:
 
 ```bash
-python3 terraformController.py ListDatabaseAccounts RS1 HouseInfo
+python3 privateWorkerReplacement.py ListDatabaseAccounts RS1 HouseInfo
 ```
 
 This command owns account-related status. It shows the three managed accounts, account type, Enabled/Disabled state, rotation information, logical Vault paths, and browser-ready Vault URLs.
@@ -620,12 +620,12 @@ The hidden controller-admin credential is infrastructure state and is not part o
 
 ## 11. Password rotation and Owner policy
 
-The rotation interval comes from `terraformController.config`; the current development value is 30 days.
+The rotation interval comes from `privateWorkerReplacement.config`; the current development value is 30 days.
 
 Rotate all three passwords:
 
 ```bash
-python3 terraformController.py RotatePasswords RS1 HouseInfo
+python3 privateWorkerReplacement.py RotatePasswords RS1 HouseInfo
 ```
 
 The controller rotates Owner, ReadWrite, and Read credentials and verifies authentication. `ListDatabaseAccounts` shows the last rotation time and the remaining time until the next rotation.
@@ -643,7 +643,7 @@ Disabling the Owner prevents MongoDB login, but the Owner credential remains in 
 Administratively disable the Owner early:
 
 ```bash
-python3 terraformController.py DisableOwner RS1 HouseInfo --confirm
+python3 privateWorkerReplacement.py DisableOwner RS1 HouseInfo --confirm
 ```
 
 The command prints the complete browser URL for the retained Owner credential. `ListDatabaseAccounts` then reports the Owner account as Disabled while the ReadWrite and Read accounts remain Enabled.
@@ -655,7 +655,7 @@ The command prints the complete browser URL for the retained Owner credential. `
 ### ListDeployments
 
 ```bash
-python3 terraformController.py ListDeployments
+python3 privateWorkerReplacement.py ListDeployments
 ```
 
 Shows each managed deployment, deployment type, live phase, topology summary, MongoDB version, and managed database count.
@@ -663,8 +663,8 @@ Shows each managed deployment, deployment type, live phase, topology summary, Mo
 ### ListReplicaSet / ListShardedCluster
 
 ```bash
-python3 terraformController.py ListReplicaSet RS1
-python3 terraformController.py ListShardedCluster SC9
+python3 privateWorkerReplacement.py ListReplicaSet RS1
+python3 privateWorkerReplacement.py ListShardedCluster SC9
 ```
 
 Use these targeted views while a deployment is being created or deleted and for normal health checks.
@@ -674,13 +674,13 @@ Use these targeted views while a deployment is being created or deleted and for 
 All ShardedClusters:
 
 ```bash
-python3 terraformController.py ListShards
+python3 privateWorkerReplacement.py ListShards
 ```
 
 One ShardedCluster:
 
 ```bash
-python3 terraformController.py ListShards SC9
+python3 privateWorkerReplacement.py ListShards SC9
 ```
 
 Shard status can include states such as:
@@ -700,8 +700,8 @@ The targeted view also reports config-server status, mongos status, and any acti
 ### ListDatabases
 
 ```bash
-python3 terraformController.py ListDatabases
-python3 terraformController.py ListDatabases RS1
+python3 privateWorkerReplacement.py ListDatabases
+python3 privateWorkerReplacement.py ListDatabases RS1
 ```
 
 `ListDatabases` is database inventory only. It shows:
@@ -718,7 +718,7 @@ It does not list account rows.
 ### ListDatabase
 
 ```bash
-python3 terraformController.py ListDatabase RS1 HouseInfo
+python3 privateWorkerReplacement.py ListDatabase RS1 HouseInfo
 ```
 
 `ListDatabase` shows one database and database-level information such as:
@@ -736,7 +736,7 @@ It does not serve as the account-detail view.
 ### ListDatabaseAccounts
 
 ```bash
-python3 terraformController.py ListDatabaseAccounts RS1 HouseInfo
+python3 privateWorkerReplacement.py ListDatabaseAccounts RS1 HouseInfo
 ```
 
 `ListDatabaseAccounts` shows the three managed accounts, their Enabled/Disabled state, password-rotation timing, last-rotation information, logical Vault paths, and complete browser-ready Vault URLs.
@@ -774,7 +774,7 @@ Detailed implementation diagnostics are preserved in the operations log for admi
 
 ## 14. Runtime logs
 
-Logging is convention-based and does not have a `[Logging]` section in `terraformController.config`.
+Logging is convention-based and does not have a `[Logging]` section in `privateWorkerReplacement.config`.
 
 Daily structured controller log:
 
@@ -828,7 +828,7 @@ If a request fails because Git/Terraform execution failed, the customer receives
 logs/operations/operations-YYYYMMDD.log
 ```
 
-Normal customers should use service status commands rather than operation IDs. Platform administrators can use `terraformControllerAdmin.py ListOperations` and `ListOperation` when deeper diagnosis is needed.
+Normal customers should use service status commands rather than operation IDs. Platform administrators can use `privateWorkerReplacementAdmin.py ListOperations` and `ListOperation` when deeper diagnosis is needed.
 
 ---
 
@@ -860,18 +860,18 @@ Python does not bypass Terraform to directly create/delete MongoDB deployments, 
 
 ## 17. Getting administrator help
 
-Normal DBaaS work should remain in `terraformController.py`.
+Normal DBaaS work should remain in `privateWorkerReplacement.py`.
 
 If deeper platform diagnostics or recovery are required, an authorized administrator can run:
 
 ```bash
-python3 terraformControllerAdmin.py
+python3 privateWorkerReplacementAdmin.py
 ```
 
 or:
 
 ```bash
-python3 terraformControllerAdmin.py --help
+python3 privateWorkerReplacementAdmin.py --help
 ```
 
-See `README-terraformControllerAdmin.md` for the administrator command reference and recovery rules.
+See `README-privateWorkerReplacementAdmin.md` for the administrator command reference and recovery rules.

@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Sequence
 
-from terraform_controller.async_operations import list_operation_records
+from privateWorkerReplacement.async_operations import list_operation_records
 
 from .models import AsyncOperation, HarnessContext, StepResult
 
@@ -175,11 +175,11 @@ class HarnessRunner:
         expected_text: str | None = None,
         timeout: int | None = None,
     ) -> StepResult:
-        """Run a synchronous terraformController.py command."""
+        """Run a synchronous privateWorkerReplacement.py command."""
 
         command = [
             self.context.python,
-            "terraformController.py",
+            "privateWorkerReplacement.py",
             "--config",
             str(self.context.config_path),
             *arguments,
@@ -198,7 +198,7 @@ class HarnessRunner:
         The customer CLI intentionally does not print Operation IDs. The live
         acceptance harness is an internal engineering tool, so it reads the
         private operation journal directly to correlate the newly submitted
-        request before polling it through terraformControllerAdmin.py.
+        request before polling it through privateWorkerReplacementAdmin.py.
         """
 
         before_ids = {
@@ -208,7 +208,7 @@ class HarnessRunner:
 
         command = [
             self.context.python,
-            "terraformController.py",
+            "privateWorkerReplacement.py",
             "--config",
             str(self.context.config_path),
             *arguments,
@@ -278,7 +278,7 @@ class HarnessRunner:
 
         status_command = [
             self.context.python,
-            "terraformControllerAdmin.py",
+            "privateWorkerReplacementAdmin.py",
             "--config",
             str(self.context.config_path),
             "ListOperation",

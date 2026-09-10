@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from terraform_controller import cli
+from privateWorkerReplacement import cli
 
 
 class CliTests(unittest.TestCase):
@@ -134,10 +134,10 @@ class CliTests(unittest.TestCase):
     def test_public_help_is_customer_facing(self) -> None:
         help_text = cli.build_parser().format_help()
         self.assertIn("Terraform-driven MongoDB DBaaS controller", help_text)
-        self.assertIn("python3 terraformController.py", help_text)
+        self.assertIn("python3 privateWorkerReplacement.py", help_text)
         self.assertIn("database create/delete requests", help_text)
         self.assertIn("ListDatabaseAccounts", help_text)
-        self.assertIn("./terraformController.config", help_text)
+        self.assertIn("./privateWorkerReplacement.config", help_text)
         self.assertNotIn("ListManagedResources", help_text)
         self.assertNotIn("ListOperation", help_text)
         self.assertNotIn("RecoverDeploymentLock", help_text)
@@ -146,9 +146,9 @@ class CliTests(unittest.TestCase):
 
     def test_public_default_config_is_current_directory_file(self) -> None:
         args = cli.build_parser().parse_args(["ListDeployments"])
-        self.assertEqual(args.config, "./terraformController.config")
-        self.assertEqual(cli.DEFAULT_CONFIG_DISPLAY, "./terraformController.config")
-        self.assertEqual(cli.DEFAULT_CONFIG, Path("terraformController.config"))
+        self.assertEqual(args.config, "./privateWorkerReplacement.config")
+        self.assertEqual(cli.DEFAULT_CONFIG_DISPLAY, "./privateWorkerReplacement.config")
+        self.assertEqual(cli.DEFAULT_CONFIG, Path("privateWorkerReplacement.config"))
 
     def test_public_help_shows_live_configured_shard_default(self) -> None:
         configured = cli._configured_default_shards(cli.DEFAULT_CONFIG)

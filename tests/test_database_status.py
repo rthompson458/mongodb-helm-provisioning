@@ -9,7 +9,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from terraform_controller import cli, database_status
+from privateWorkerReplacement import cli, database_status
 from helpers import FakeVault, deployment_inventory
 
 
@@ -18,7 +18,7 @@ class DatabaseStatusTests(unittest.TestCase):
         self.temp = TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.config = {
-            "config_path": str(Path(self.temp.name) / "terraformController.config"),
+            "config_path": str(Path(self.temp.name) / "privateWorkerReplacement.config"),
             "rotation_days": 30,
             "vault_address": "http://127.0.0.1:8200",
             "vault_mount": "secret",

@@ -21,7 +21,7 @@ class StepResult:
 
 @dataclass
 class AsyncOperation:
-    """Accepted terraformController asynchronous operation."""
+    """Accepted privateWorkerReplacement asynchronous operation."""
 
     operation_id: str
     command: list[str]

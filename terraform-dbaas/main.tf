@@ -191,7 +191,7 @@ resource "kubernetes_config_map_v1" "controller_ops_manager_projects" {
     namespace = var.mongodb_namespace
 
     labels = {
-      "app.kubernetes.io/managed-by" = "terraformController"
+      "app.kubernetes.io/managed-by" = "privateWorkerReplacement"
     }
   }
 
@@ -366,7 +366,7 @@ resource "kubernetes_manifest" "replica_set" {
       name      = each.key
       namespace = var.mongodb_namespace
       labels = {
-        "app.kubernetes.io/managed-by" = "terraformController"
+        "app.kubernetes.io/managed-by" = "privateWorkerReplacement"
         "dbaas.replica-set"            = each.key
       }
     }
@@ -435,7 +435,7 @@ resource "kubernetes_manifest" "sharded_cluster" {
       name      = each.key
       namespace = var.mongodb_namespace
       labels = {
-        "app.kubernetes.io/managed-by" = "terraformController"
+        "app.kubernetes.io/managed-by" = "privateWorkerReplacement"
         "dbaas.deployment"             = each.key
         "dbaas.deployment-type"        = "ShardedCluster"
       }
@@ -547,7 +547,7 @@ resource "vault_kv_secret_v2" "replica_set_metadata" {
     members_per_shard           = tostring(each.value.members_per_shard)
     mongos_count                = tostring(each.value.mongos_count)
     config_server_count         = tostring(each.value.config_server_count)
-    managed_by                  = "terraformController"
+    managed_by                  = "privateWorkerReplacement"
   })
 
   custom_metadata {
@@ -555,7 +555,7 @@ resource "vault_kv_secret_v2" "replica_set_metadata" {
 
     data = {
       type       = "deployment-metadata"
-      managed_by = "terraformController"
+      managed_by = "privateWorkerReplacement"
     }
   }
 
@@ -583,7 +583,7 @@ resource "vault_kv_secret_v2" "database_metadata" {
     owner_disabled_at = each.value.owner_disabled_at
     rotation_version  = tostring(each.value.rotation_version)
     rotated_at        = each.value.rotated_at
-    managed_by        = "terraformController"
+    managed_by        = "privateWorkerReplacement"
   })
 
   custom_metadata {
@@ -591,7 +591,7 @@ resource "vault_kv_secret_v2" "database_metadata" {
 
     data = {
       type       = "database-metadata"
-      managed_by = "terraformController"
+      managed_by = "privateWorkerReplacement"
       deployment = each.value.deployment_name
     }
   }
@@ -633,7 +633,7 @@ resource "kubernetes_secret_v1" "controller_admin_password" {
     namespace = var.mongodb_namespace
 
     labels = {
-      "app.kubernetes.io/managed-by" = "terraformController"
+      "app.kubernetes.io/managed-by" = "privateWorkerReplacement"
       "dbaas.replica-set"            = each.key
       "dbaas.account-type"           = "controller-admin"
     }
@@ -658,7 +658,7 @@ resource "kubernetes_manifest" "controller_admin" {
       name      = "tc-${each.key}-admin"
       namespace = var.mongodb_namespace
       labels = {
-        "app.kubernetes.io/managed-by" = "terraformController"
+        "app.kubernetes.io/managed-by" = "privateWorkerReplacement"
         "dbaas.replica-set"            = each.key
         "dbaas.account-type"           = "controller-admin"
       }
@@ -735,7 +735,7 @@ resource "vault_kv_secret_v2" "database_account" {
     max_versions = 5
 
     data = {
-      managed_by   = "terraformController"
+      managed_by   = "privateWorkerReplacement"
       deployment   = each.value.deployment_name
       database     = each.value.database_name
       account_type = each.value.account_type
@@ -751,7 +751,7 @@ resource "kubernetes_secret_v1" "database_account_password" {
     namespace = var.mongodb_namespace
 
     labels = {
-      "app.kubernetes.io/managed-by" = "terraformController"
+      "app.kubernetes.io/managed-by" = "privateWorkerReplacement"
       "dbaas.replica-set"            = each.value.deployment_key
       "dbaas.database"               = each.value.database_key
       "dbaas.account-type"           = each.value.account_key
@@ -783,7 +783,7 @@ resource "kubernetes_manifest" "database_account" {
       name      = each.value.resource_name
       namespace = var.mongodb_namespace
       labels = {
-        "app.kubernetes.io/managed-by" = "terraformController"
+        "app.kubernetes.io/managed-by" = "privateWorkerReplacement"
         "dbaas.replica-set"            = each.value.deployment_key
         "dbaas.database"               = each.value.database_key
         "dbaas.account-type"           = each.value.account_key

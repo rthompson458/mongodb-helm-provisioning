@@ -7,7 +7,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
-from terraform_controller import admin_status
+from privateWorkerReplacement import admin_status
 from helpers import FakeVault
 
 

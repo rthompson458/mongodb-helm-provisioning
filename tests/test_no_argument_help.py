@@ -24,19 +24,19 @@ class NoArgumentHelpTests(unittest.TestCase):
         )
 
     def test_public_cli_without_arguments_prints_help_and_succeeds(self) -> None:
-        result = self._run_without_arguments("terraformController.py")
+        result = self._run_without_arguments("privateWorkerReplacement.py")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("usage: terraformController.py", result.stdout)
+        self.assertIn("usage: privateWorkerReplacement.py", result.stdout)
         self.assertIn("Terraform-driven MongoDB DBaaS controller", result.stdout)
         self.assertIn("ListDatabaseAccounts", result.stdout)
         self.assertEqual(result.stderr, "")
 
     def test_admin_cli_without_arguments_prints_help_and_succeeds(self) -> None:
-        result = self._run_without_arguments("terraformControllerAdmin.py")
+        result = self._run_without_arguments("privateWorkerReplacementAdmin.py")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("usage: terraformControllerAdmin.py", result.stdout)
+        self.assertIn("usage: privateWorkerReplacementAdmin.py", result.stdout)
         self.assertIn("platform administration interface", result.stdout)
         self.assertIn("ListManagedResources", result.stdout)
         self.assertEqual(result.stderr, "")

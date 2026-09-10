@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from terraform_controller import deployment_lock
+from privateWorkerReplacement import deployment_lock
 
 from helpers import FakeVault, deployment_inventory, topology_lock
 

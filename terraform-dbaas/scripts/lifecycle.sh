@@ -27,7 +27,7 @@ metadata:
   name: ${job}
   namespace: ${TC_NAMESPACE}
   labels:
-    app.kubernetes.io/managed-by: terraformController
+    app.kubernetes.io/managed-by: privateWorkerReplacement
     dbaas.deployment: ${TC_DEPLOYMENT}
 spec:
   backoffLimit: 0
@@ -35,7 +35,7 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/managed-by: terraformController
+        app.kubernetes.io/managed-by: privateWorkerReplacement
         dbaas.deployment: ${TC_DEPLOYMENT}
     spec:
       restartPolicy: Never
@@ -215,7 +215,7 @@ kind: PersistentVolume
 metadata:
   name: ${pv}
   labels:
-    app.kubernetes.io/managed-by: terraformController
+    app.kubernetes.io/managed-by: privateWorkerReplacement
     dbaas.deployment: ${TC_DEPLOYMENT}
     dbaas.sharded-cluster: ${TC_DEPLOYMENT}
     dbaas.component: ${component}
@@ -388,7 +388,7 @@ kind: PersistentVolume
 metadata:
   name: ${pv}
   labels:
-    app.kubernetes.io/managed-by: terraformController
+    app.kubernetes.io/managed-by: privateWorkerReplacement
     dbaas.replica-set: ${TC_DEPLOYMENT}
     dbaas.member: "${i}"
 spec:
@@ -461,7 +461,7 @@ metadata:
   name: ${lock}
   namespace: ${TC_NAMESPACE}
   labels:
-    app.kubernetes.io/managed-by: terraformController
+    app.kubernetes.io/managed-by: privateWorkerReplacement
     dbaas.deployment: ${TC_DEPLOYMENT}
     dbaas.lock: deployment
 data:

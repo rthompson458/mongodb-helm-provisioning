@@ -9,8 +9,8 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from terraform_controller import logging_component
-from terraform_controller.runtime_paths import controller_log_path, operations_log_path
+from privateWorkerReplacement import logging_component
+from privateWorkerReplacement.runtime_paths import controller_log_path, operations_log_path
 
 
 class LoggingTests(unittest.TestCase):
@@ -37,7 +37,7 @@ class LoggingTests(unittest.TestCase):
             handler.flush()
 
     def _config(self, root: Path) -> dict[str, str]:
-        config_path = root / "terraformController.config"
+        config_path = root / "privateWorkerReplacement.config"
         config_path.write_text("[dummy]\n", encoding="utf-8")
         return {"config_path": str(config_path)}
 

@@ -47,7 +47,7 @@ def require_deployment(
     key, _ = normalize_deployment(name)
     if key not in inventory:
         raise ControllerError(
-            f"MongoDB deployment '{name}' does not exist in terraformController. "
+            f"MongoDB deployment '{name}' does not exist in privateWorkerReplacement. "
             "Use ListDeployments to see available deployments."
         )
     deployment = inventory[key]
@@ -74,7 +74,7 @@ def resolve_deployment(
         return require_deployment(inventory, name)
     if not inventory:
         raise ControllerError(
-            "No terraformController-managed MongoDB deployments exist. "
+            "No privateWorkerReplacement-managed MongoDB deployments exist. "
             "Create one first with AddReplicaSet or AddShardedCluster."
         )
     if len(inventory) == 1:
@@ -204,15 +204,15 @@ def _check_new_name(
     live = kube.get_json(config, "mongodb", key)
     if live is not None:
         labels = live.get("metadata", {}).get("labels", {})
-        if labels.get("app.kubernetes.io/managed-by") != "terraformController":
+        if labels.get("app.kubernetes.io/managed-by") != "privateWorkerReplacement":
             raise ControllerError(
                 f"Kubernetes MongoDB resource '{key}' already exists outside "
-                "terraformController; automatic adoption is blocked."
+                "privateWorkerReplacement; automatic adoption is blocked."
             )
         spec_type = str(live.get("spec", {}).get("type", ""))
         if spec_type and spec_type != deployment_type:
             raise ControllerError(
-                f"An incomplete terraformController Kubernetes resource named '{key}' "
+                f"An incomplete privateWorkerReplacement Kubernetes resource named '{key}' "
                 f"exists as type '{spec_type}', not '{deployment_type}'."
             )
 
@@ -342,7 +342,7 @@ def _delete_deployment(
     if not confirmed:
         raise ControllerError(
             f"{command} is destructive and requires '--confirm'. "
-            f"Example: terraformController.py {command} {name} --confirm"
+            f"Example: privateWorkerReplacement.py {command} {name} --confirm"
         )
     inventory = vault.load_inventory()
     key, item = require_deployment(inventory, name, expected_type)
@@ -574,7 +574,7 @@ def delete_shard(
     if not confirmed:
         raise ControllerError(
             "DeleteShard is destructive and requires '--confirm'. "
-            f"Example: terraformController.py DeleteShard {name} {count} --confirm"
+            f"Example: privateWorkerReplacement.py DeleteShard {name} {count} --confirm"
         )
 
     inventory = vault.load_inventory()
@@ -700,7 +700,7 @@ def list_deployments(config: dict[str, Any], vault: VaultClient) -> None:
     """List all managed ReplicaSets and ShardedClusters."""
     inventory = vault.load_inventory()
     if not inventory:
-        print("No terraformController-managed MongoDB deployments exist.")
+        print("No privateWorkerReplacement-managed MongoDB deployments exist.")
         return
     rows = [
         _deployment_row(config, key, inventory[key])
@@ -720,7 +720,7 @@ def list_replica_sets(config: dict[str, Any], vault: VaultClient) -> None:
         if deployment_type_label(inventory[key]) == "ReplicaSet"
     ]
     if not rows:
-        print("No terraformController-managed ReplicaSets exist.")
+        print("No privateWorkerReplacement-managed ReplicaSets exist.")
         return
     print_table(
         ("REPLICA SET", "TYPE", "PHASE", "TOPOLOGY", "MONGODB", "DATABASES"),
@@ -736,7 +736,7 @@ def list_sharded_clusters(config: dict[str, Any], vault: VaultClient) -> None:
         if deployment_type_label(inventory[key]) == "ShardedCluster"
     ]
     if not rows:
-        print("No terraformController-managed ShardedClusters exist.")
+        print("No privateWorkerReplacement-managed ShardedClusters exist.")
         return
     print_table(
         (
@@ -883,7 +883,7 @@ def list_shards(
         if deployment_type_label(inventory[key]) == "ShardedCluster"
     ]
     if not clusters:
-        print("No terraformController-managed ShardedClusters exist.")
+        print("No privateWorkerReplacement-managed ShardedClusters exist.")
         return
 
     rows: list[tuple[str, ...]] = []

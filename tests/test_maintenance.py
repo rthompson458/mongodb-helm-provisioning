@@ -7,7 +7,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
-from terraform_controller import maintenance
+from privateWorkerReplacement import maintenance
 
 from helpers import FakeVault, deployment_inventory, online_sc_status, topology_lock
 
@@ -239,7 +239,7 @@ class MaintenanceTests(unittest.TestCase):
                     self.config, vault, confirmed=True
                 )
 
-        self.assertIn("live terraformController-managed MongoDB", str(ctx.exception))
+        self.assertIn("live privateWorkerReplacement-managed MongoDB", str(ctx.exception))
         apply_mock.assert_not_called()
 
 
