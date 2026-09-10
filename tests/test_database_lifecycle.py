@@ -21,6 +21,7 @@ class DatabaseLifecycleTests(unittest.TestCase):
             "rs_ready_timeout": 30,
             "sc_ready_timeout": 30,
             "vault_address": "http://127.0.0.1:8200",
+            "vault_mount": "secret",
             "vault_base_path": "mongodb",
         }
 
@@ -204,6 +205,18 @@ class DatabaseLifecycleTests(unittest.TestCase):
         self.assertIn("houseinfo", calls[0][0]["rs1"]["databases"])
         self.assertNotIn("houseinfo", calls[1][0]["rs1"]["databases"])
         self.assertEqual(calls[2][1]["action"], "verify_database_users_absent")
+
+    def test_vault_browser_url_is_complete(self) -> None:
+        vault = FakeVault(deployment_inventory(with_db=True))
+        deployment = vault.inventory["rs1"]
+        db = deployment["databases"]["houseinfo"]
+        path = databases._vault_paths(self.config, deployment, db)[0]
+        url = databases._vault_browser_url(self.config, path)
+        self.assertEqual(
+            url,
+            "http://127.0.0.1:8200/ui/vault/secrets/secret/show/"
+            "mongodb/RS1/HouseInfo/HouseInfo_owner",
+        )
 
 
 if __name__ == "__main__":
