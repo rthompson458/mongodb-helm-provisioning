@@ -1,4 +1,4 @@
-"""Unit tests for structured controller logging."""
+"""Unit tests for controller and operation logging."""
 
 from __future__ import annotations
 
@@ -6,25 +6,25 @@ import json
 import logging
 import tempfile
 import unittest
-from datetime import datetime as RealDatetime
+from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
 
 from terraform_controller import logging_component
+from terraform_controller.runtime_paths import controller_log_path, operations_log_path
 
 
 class LoggingTests(unittest.TestCase):
-    """Verify file naming, append/overwrite rules, and structured content."""
+    """Verify predictable daily paths, append behavior, and structured content."""
 
     def setUp(self) -> None:
-        # configure_logging is intentionally process-global in production.
-        # Reset it between unit tests so each test gets a fresh temp directory.
-        logging_component._CONFIGURED = False
-        logging_component._LOG_PATH = None
-        logger = logging.getLogger(logging_component.LOGGER_NAME)
-        logger.handlers.clear()
+        self._reset_logging()
 
     def tearDown(self) -> None:
+        self._reset_logging()
+
+    def _reset_logging(self) -> None:
+        """Reset the process-global logger so each test gets its own temp config."""
+
         logger = logging.getLogger(logging_component.LOGGER_NAME)
         for handler in list(logger.handlers):
             handler.close()
@@ -33,65 +33,32 @@ class LoggingTests(unittest.TestCase):
         logging_component._LOG_PATH = None
 
     def _flush(self) -> None:
-        """Flush all active controller handlers before a test reads the file."""
-        for handler in logging.getLogger(
-            logging_component.LOGGER_NAME
-        ).handlers:
+        for handler in logging.getLogger(logging_component.LOGGER_NAME).handlers:
             handler.flush()
 
-    def test_blank_filename_format_uses_controller_log(self) -> None:
+    def _config(self, root: Path) -> dict[str, str]:
+        config_path = root / "terraformController.config"
+        config_path.write_text("[dummy]\n", encoding="utf-8")
+        return {"config_path": str(config_path)}
+
+    def test_controller_log_uses_fixed_daily_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            config = {
-                "logging_enabled": True,
-                "logging_level": "INFO",
-                "logging_directory": temp,
-                "logging_mode": "append",
-                "logging_filename_format": "",
-            }
+            root = Path(temp)
+            config = self._config(root)
             path = logging_component.configure_logging(config)
-            self.assertEqual(Path(path).name, "Controller.log")
 
-    def test_formatted_filename_uses_standard_strftime_tokens(self) -> None:
+            expected_name = f"controller-{datetime.now(timezone.utc):%Y%m%d}.log"
+            self.assertEqual(path.name, expected_name)
+            self.assertEqual(path.parent, root / "logs" / "controller")
+
+    def test_controller_log_appends_existing_content(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            config = {
-                "logging_enabled": True,
-                "logging_level": "INFO",
-                "logging_directory": temp,
-                "logging_mode": "append",
-                "logging_filename_format": "Controller-%Y%m%d-%H%M.log",
-            }
-
-            class FixedDatetime:
-                """Minimal datetime stand-in with a deterministic now()."""
-
-                @classmethod
-                def now(cls, tz=None):
-                    return RealDatetime(2026, 9, 8, 16, 7, 42, tzinfo=tz)
-
-            with patch.object(
-                logging_component,
-                "datetime",
-                FixedDatetime,
-            ):
-                path = logging_component.configure_logging(config)
-
-            self.assertEqual(
-                Path(path).name,
-                "Controller-20260908-1607.log",
-            )
-
-    def test_append_keeps_existing_file_contents(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            path = Path(temp) / "Controller.log"
+            root = Path(temp)
+            config = self._config(root)
+            path = controller_log_path(Path(config["config_path"]))
+            path.parent.mkdir(parents=True)
             path.write_text("PREVIOUS\n", encoding="utf-8")
 
-            config = {
-                "logging_enabled": True,
-                "logging_level": "INFO",
-                "logging_directory": temp,
-                "logging_mode": "append",
-                "logging_filename_format": "",
-            }
             logging_component.configure_logging(config)
             logging_component.log_event("test.append")
             self._flush()
@@ -100,35 +67,10 @@ class LoggingTests(unittest.TestCase):
             self.assertTrue(content.startswith("PREVIOUS\n"))
             self.assertIn("test.append", content)
 
-    def test_overwrite_replaces_existing_file_contents(self) -> None:
+    def test_controller_log_contains_structured_event_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            path = Path(temp) / "Controller.log"
-            path.write_text("PREVIOUS\n", encoding="utf-8")
-
-            config = {
-                "logging_enabled": True,
-                "logging_level": "INFO",
-                "logging_directory": temp,
-                "logging_mode": "overwrite",
-                "logging_filename_format": "",
-            }
-            logging_component.configure_logging(config)
-            logging_component.log_event("test.overwrite")
-            self._flush()
-
-            content = path.read_text(encoding="utf-8")
-            self.assertNotIn("PREVIOUS", content)
-            self.assertIn("test.overwrite", content)
-
-    def test_log_contains_structured_event_fields(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            config = {
-                "logging_enabled": True,
-                "logging_level": "INFO",
-                "logging_directory": temp,
-                "logging_mode": "append",
-                "logging_filename_format": "",
-            }
+            root = Path(temp)
+            config = self._config(root)
             path = logging_component.configure_logging(config)
             logging_component.log_event(
                 "test.event",
@@ -137,21 +79,59 @@ class LoggingTests(unittest.TestCase):
             )
             self._flush()
 
-            lines = Path(path).read_text(encoding="utf-8").splitlines()
+            lines = path.read_text(encoding="utf-8").splitlines()
             payload = json.loads(lines[-1])
             self.assertEqual(payload["event"], "test.event")
             self.assertEqual(payload["deployment"], "SC9")
             self.assertEqual(payload["shard_count"], 3)
 
-    def test_disabled_logging_returns_no_file(self) -> None:
+    def test_process_diagnostic_goes_to_daily_operations_log(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            config = {
-                "logging_enabled": False,
-                "logging_directory": temp,
-            }
-            path = logging_component.configure_logging(config)
-            self.assertIsNone(path)
-            self.assertEqual(list(Path(temp).iterdir()), [])
+            root = Path(temp)
+            config = self._config(root)
+            path = logging_component.append_process_diagnostic(
+                config,
+                ["terraform", "apply"],
+                returncode=0,
+                stdout="Apply complete!\n",
+                label="Terraform apply",
+            )
+
+            self.assertEqual(
+                path,
+                operations_log_path(Path(config["config_path"])),
+            )
+            self.assertEqual(path.parent, root / "logs" / "operations")
+            content = path.read_text(encoding="utf-8")
+            self.assertIn("Terraform apply", content)
+            self.assertIn("$ terraform apply", content)
+            self.assertIn("Apply complete!", content)
+
+    def test_operation_log_is_append_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config = self._config(root)
+            path = operations_log_path(Path(config["config_path"]))
+
+            logging_component.append_process_diagnostic(
+                config,
+                ["git", "fetch"],
+                returncode=0,
+                stdout="first\n",
+                label="Git fetch",
+            )
+            logging_component.append_process_diagnostic(
+                config,
+                ["terraform", "init"],
+                returncode=0,
+                stdout="second\n",
+                label="Terraform initialization",
+            )
+
+            content = path.read_text(encoding="utf-8")
+            self.assertIn("first", content)
+            self.assertIn("second", content)
+            self.assertLess(content.index("first"), content.index("second"))
 
 
 if __name__ == "__main__":
