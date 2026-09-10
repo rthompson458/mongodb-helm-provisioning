@@ -81,7 +81,7 @@ class DatabaseStatusTests(unittest.TestCase):
         ):
             text = self._capture(database_status.list_databases, self.config, vault)
 
-        self.assertIn("newdata", text)
+        self.assertIn("NewData", text)
         self.assertIn("Creating", text)
 
     def test_active_delete_database_is_reported_as_deleting(self) -> None:
