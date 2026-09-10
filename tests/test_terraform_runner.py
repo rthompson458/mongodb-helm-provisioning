@@ -1,4 +1,4 @@
-"""Regression tests for terraformController's shared Terraform execution lock."""
+"""Regression tests for Terraform serialization and quiet diagnostic handling."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from terraform_controller import terraform_runner
+from terraform_controller.common import ControllerError
 
 
 class TerraformRunnerLockTests(unittest.TestCase):
@@ -116,6 +117,70 @@ with _terraform_execution_lock({"terraform_cache": cache}):
                 msg=f"stdout:\n{stdout}\nstderr:\n{stderr}",
             )
             self.assertEqual(marker.read_text(encoding="utf-8"), "acquired")
+
+
+class TerraformRunnerOutputTests(unittest.TestCase):
+    """Keep Git/Terraform implementation chatter off interactive terminals."""
+
+    def test_diagnostic_command_is_captured_and_logged(self) -> None:
+        completed = subprocess.CompletedProcess(
+            ["terraform", "apply"],
+            0,
+            stdout="Apply complete!\n",
+            stderr="",
+        )
+        with (
+            patch.object(
+                terraform_runner,
+                "run_process",
+                return_value=completed,
+            ) as run_mock,
+            patch.object(
+                terraform_runner,
+                "append_process_diagnostic",
+                return_value=Path("/tmp/operations.log"),
+            ) as log_mock,
+        ):
+            terraform_runner._run_diagnostic(
+                {"config_path": "/tmp/terraformController.config"},
+                ["terraform", "apply"],
+                label="Terraform apply",
+            )
+
+        self.assertTrue(run_mock.call_args.kwargs["capture"])
+        self.assertFalse(run_mock.call_args.kwargs["check"])
+        log_mock.assert_called_once()
+        self.assertEqual(log_mock.call_args.kwargs["stdout"], "Apply complete!\n")
+
+    def test_diagnostic_failure_is_concise_and_points_to_log(self) -> None:
+        completed = subprocess.CompletedProcess(
+            ["terraform", "apply"],
+            1,
+            stdout="very noisy terraform details\n",
+            stderr="provider failed\n",
+        )
+        with (
+            patch.object(terraform_runner, "run_process", return_value=completed),
+            patch.object(
+                terraform_runner,
+                "append_process_diagnostic",
+                return_value=Path(
+                    "/tmp/logs/operations/operations-20260910.log"
+                ),
+            ),
+        ):
+            with self.assertRaises(ControllerError) as ctx:
+                terraform_runner._run_diagnostic(
+                    {"config_path": "/tmp/terraformController.config"},
+                    ["terraform", "apply"],
+                    label="Terraform apply",
+                )
+
+        message = str(ctx.exception)
+        self.assertIn("Terraform apply failed with exit code 1", message)
+        self.assertIn("operations-20260910.log", message)
+        self.assertNotIn("very noisy terraform details", message)
+        self.assertNotIn("provider failed", message)
 
 
 if __name__ == "__main__":
