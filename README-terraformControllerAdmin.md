@@ -35,7 +35,13 @@ python3 terraformControllerAdmin.py RecoverDeploymentLock --help
 python3 terraformControllerAdmin.py RecoverOrphanedResources --help
 ```
 
-The administrator interface uses the same `terraformController.config` and Vault token as the public controller. Do not store the Vault token in the config file.
+The administrator interface uses the same Vault token as the public controller and assumes this configuration file in the current working directory:
+
+```text
+./terraformController.config
+```
+
+Use `--config FILE` only when another configuration file is intentionally selected. Do not store the Vault token in the config file.
 
 ---
 
@@ -66,8 +72,8 @@ This is the read-only managed-resource inventory and zero-state check. It combin
 Managed deployments
 MongoDB resources
 MongoDB users
-PVCs
-PVs
+PVCs (Persistent Volume Claims)
+PVs (Persistent Volumes)
 Deployment locks
 ```
 
@@ -76,12 +82,12 @@ A clean environment reports:
 ```text
 terraformController Managed Resource Inventory
 
-Managed deployments:  0
-MongoDB resources:    0
-MongoDB users:        0
-PVCs:                 0
-PVs:                  0
-Deployment locks:     0
+Managed deployments:             0
+MongoDB resources:               0
+MongoDB users:                   0
+PVCs (Persistent Volume Claims): 0
+PVs (Persistent Volumes):        0
+Deployment locks:                0
 
 Status: CLEAN
 ```
@@ -94,7 +100,7 @@ Status: MANAGED RESOURCES PRESENT
 
 and lists the managed names by category.
 
-`MANAGED RESOURCES PRESENT` is neutral inventory information. It does not, by itself, mean the environment is unhealthy. A healthy active deployment is expected to have managed MongoDB resources, MongoDB users, PVCs, and PVs.
+`MANAGED RESOURCES PRESENT` is neutral inventory information. It does not, by itself, mean the environment is unhealthy. A healthy active deployment is expected to have managed MongoDB resources, MongoDB users, Persistent Volume Claims, and Persistent Volumes.
 
 The command does not delete, reconcile, or repair anything.
 
@@ -289,8 +295,10 @@ Scope:          controller-state
 Status:         In Progress
 
 Check administrator operation status with:
-  python3 terraformControllerAdmin.py --config /path/to/terraformController.config ListOperation ab0c98165276
+  python3 terraformControllerAdmin.py --config ./terraformController.config ListOperation ab0c98165276
 ```
+
+The detached recovery worker resolves the configuration file to an absolute path internally. Routine administrator instructions continue to show the friendlier `./terraformController.config` path.
 
 ---
 
