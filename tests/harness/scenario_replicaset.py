@@ -36,13 +36,14 @@ def run(runner: HarnessRunner) -> None:
     if not listed_rs.passed:
         return
 
-    created_db = runner.controller(
+    # AddDatabase is customer-asynchronous. The harness waits for the private
+    # operation result before ListDatabase verifies the created accounts.
+    created_db = runner.controller_async(
         "Create database on ReplicaSet",
         "AddDatabase",
         rs,
         db,
-        expected_text=f"MongoDB database '{db}' was successfully created",
-        timeout=900,
+        timeout=1200,
     )
     if not created_db.passed:
         return
@@ -92,14 +93,13 @@ def run(runner: HarnessRunner) -> None:
     if not disabled.passed:
         return
 
-    deleted_db = runner.controller(
+    deleted_db = runner.controller_async(
         "Delete ReplicaSet database",
         "DeleteDatabase",
         rs,
         db,
         "--confirm",
-        expected_text="was successfully deleted",
-        timeout=900,
+        timeout=1200,
     )
     if not deleted_db.passed:
         return
