@@ -63,7 +63,8 @@ Harness
   -> Python validation/orchestration
   -> detached worker for asynchronous customer requests
   -> Terraform
-  -> lifecycle.sh where required
+  -> mongodb-chart Helm Jobs for logical database create/delete
+  -> lifecycle.sh for storage, locks, and runtime verification where required
   -> Kubernetes / MongoDB Operator / Ops Manager / Vault / MongoDB
 ```
 
