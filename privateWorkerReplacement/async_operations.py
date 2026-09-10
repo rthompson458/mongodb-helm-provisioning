@@ -1,4 +1,4 @@
-"""Detached long-running operation support for terraformController.
+"""Detached long-running operation support for privateWorkerReplacement.
 
 Customer requests that can take meaningful time return control to the shell
 while a detached worker runs the normal Terraform-driven lifecycle. This
@@ -191,7 +191,7 @@ def launch_operation(
     command: str,
     deployment: str,
     worker_arguments: Sequence[str],
-    entrypoint_name: str = "terraformController.py",
+    entrypoint_name: str = "privateWorkerReplacement.py",
 ) -> dict[str, Any]:
     """Launch a detached worker that executes the normal lifecycle function."""
 
@@ -429,7 +429,7 @@ def print_operations(config_path: Path) -> None:
 
     records = list_operation_records(config_path)
     if not records:
-        print("No terraformController asynchronous operations have been recorded.")
+        print("No privateWorkerReplacement asynchronous operations have been recorded.")
         return
 
     print("OPERATION ID  COMMAND                 DEPLOYMENT          RESULT       ELAPSED")
@@ -457,7 +457,7 @@ def public_submission_instructions(
 
     ``config_path`` is the resolved path used by the worker. ``config_display``
     is the cleaner path originally supplied by the user, normally
-    ``./terraformController.config``. Keeping them separate prevents internal
+    ``./privateWorkerReplacement.config``. Keeping them separate prevents internal
     absolute paths from leaking into routine customer instructions.
     """
 
@@ -477,7 +477,7 @@ def public_submission_instructions(
         check_command = shlex.join(
             [
                 "python3",
-                "terraformController.py",
+                "privateWorkerReplacement.py",
                 "--config",
                 config_display or str(config_path),
                 *status_arguments,
@@ -498,13 +498,13 @@ def admin_submission_instructions(
 
     The worker still uses the resolved absolute path internally. The displayed
     command uses the path the administrator supplied, which is normally the
-    friendlier ``./terraformController.config`` form.
+    friendlier ``./privateWorkerReplacement.config`` form.
     """
 
     check_command = shlex.join(
         [
             "python3",
-            "terraformControllerAdmin.py",
+            "privateWorkerReplacementAdmin.py",
             "--config",
             config_display or str(config_path),
             "ListOperation",
