@@ -848,7 +848,13 @@ Python performs orchestration:
 - formats customer-facing results;
 - records structured and diagnostic logs.
 
-Managed mutations remain Terraform-driven directly or through:
+Managed mutations remain Terraform-driven. Database materialization, database deletion, and empty-deployment validation use the database-management Helm chart:
+
+```text
+terraform-dbaas/mongodb-chart/
+```
+
+Storage, deployment-lock, and credential-verification operations that do not fit a long-lived resource continue through:
 
 ```text
 terraform-dbaas/scripts/lifecycle.sh
