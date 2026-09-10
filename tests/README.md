@@ -17,7 +17,16 @@ Run all unit tests:
 python3 -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-The unit suite covers command parsing, configuration validation, deployment/database lifecycle ordering, ShardedCluster locking, Kubernetes status interpretation, logging, asynchronous operation state, maintenance/recovery, Vault inventory, and lifecycle-script regressions.
+The unit suite covers command parsing, configuration validation, deployment/database lifecycle ordering, database lifecycle/status presentation, database-account presentation, ShardedCluster locking, Kubernetes status interpretation, logging, asynchronous operation state, maintenance/recovery, Vault inventory, and lifecycle-script regressions.
+
+The suite also contains end-to-end CLI-entry-point regression tests for the no-argument behavior:
+
+```bash
+python3 terraformController.py
+python3 terraformControllerAdmin.py
+```
+
+Both commands must print their full help text, exit with code `0`, and avoid the argparse `COMMAND` error.
 
 GitHub Actions runs this suite as part of the repository validation workflow.
 
@@ -46,6 +55,8 @@ Harness
 The harness does not treat an asynchronous request acknowledgement as success. It correlates the private operation-state record and polls `terraformControllerAdmin.py ListOperation` until the operation reports a terminal result.
 
 That rule applies to deployment, shard, and database create/delete requests.
+
+Database status and account status are tested separately. `ListDatabase` verifies database-level lifecycle/service state. `ListDatabaseAccounts` verifies the three managed account rows and credential-facing output.
 
 ---
 
@@ -91,12 +102,13 @@ The ReplicaSet scenario:
 1. asynchronously creates a temporary ReplicaSet;
 2. waits for operation success and verifies ReplicaSet status;
 3. asynchronously creates a database;
-4. waits for operation success and verifies the three managed accounts;
-5. verifies ReplicaSet deletion is blocked while the database exists;
-6. rotates all three database passwords;
-7. disables the Owner account;
-8. asynchronously deletes the database and waits for success;
-9. asynchronously deletes the ReplicaSet and waits for success.
+4. waits for operation success and verifies `ListDatabase` reports the database `Ready`;
+5. verifies `ListDatabaseAccounts` reports the three managed accounts;
+6. verifies ReplicaSet deletion is blocked while the database exists;
+7. rotates all three database passwords;
+8. disables the Owner account;
+9. asynchronously deletes the database and waits for success;
+10. asynchronously deletes the ReplicaSet and waits for success.
 
 ### ShardedCluster
 
@@ -112,7 +124,7 @@ The ShardedCluster scenario exercises:
 - three-shard cluster creation;
 - targeted and global shard status;
 - 3 -> 5 shard expansion;
-- asynchronous database creation and account verification;
+- asynchronous database creation;
 - 5 -> 4 shard contraction while the database remains present;
 - password rotation;
 - Owner disable;
@@ -141,7 +153,7 @@ python3 tests/run_harness.py \
   --allow-destructive
 ```
 
-The current complete acceptance run contains **33 tests** across preflight, ReplicaSet, ShardedCluster, and locking profiles.
+The current complete acceptance run contains **34 tests** across preflight, ReplicaSet, ShardedCluster, and locking profiles.
 
 ---
 
@@ -223,7 +235,7 @@ At the end, the harness reports pass/fail totals plus elapsed time for each prof
 A successful complete run should end with:
 
 ```text
-HARNESS SUMMARY: 33 passed / 0 failed
+HARNESS SUMMARY: 34 passed / 0 failed
 ```
 
 ---
@@ -283,6 +295,8 @@ Deployment locks:     0
 Status: CLEAN
 ```
 
+If managed resources intentionally exist, `ListManagedResources` reports `MANAGED RESOURCES PRESENT`; that status alone is not a failure. Destructive acceptance testing should still begin from the documented clean baseline so temporary test resources do not collide with existing managed state.
+
 ---
 
 ## 9. Recommended validation workflow after changes
@@ -293,8 +307,8 @@ For ordinary code/documentation changes:
 1. Run/observe GitHub Actions unit and static validation.
 2. Confirm the development environment reports CLEAN before destructive testing.
 3. Run the focused live profile if the change is narrow.
-4. Run the complete 33-test `all` profile before calling a broad lifecycle change accepted.
+4. Run the complete 34-test `all` profile before calling a broad lifecycle or CLI-contract change accepted.
 5. Verify ListManagedResources reports CLEAN after the run.
 ```
 
-Changes to asynchronous execution, Terraform orchestration, logging, deployment locking, storage cleanup, database lifecycle, or customer command semantics should receive a fresh complete live acceptance run because they cross multiple profiles.
+Changes to asynchronous execution, Terraform orchestration, logging, deployment locking, storage cleanup, database lifecycle, database status/account command semantics, or customer command behavior should receive a fresh complete live acceptance run because they cross multiple profiles.
