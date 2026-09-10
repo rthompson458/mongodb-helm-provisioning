@@ -355,7 +355,7 @@ python3 tests/run_harness.py --profile preflight
 Complete live acceptance run:
 
 ```bash
-python3 tests/run_harness.py --profile all --allow-mutations --allow-destructive
+python3 tests/run_harness.py --profile all --allow-changes
 ```
 
 The complete live harness covers ReplicaSet lifecycle, ShardedCluster lifecycle, database/account lifecycle, password rotation, Owner disable, shard expansion/contraction, the one-shard minimum, storage cleanup, asynchronous request polling, and deployment-lock concurrency. It is fail-fast and cleans successful temporary scenarios.
