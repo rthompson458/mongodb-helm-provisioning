@@ -76,7 +76,7 @@ def run(runner: HarnessRunner) -> None:
 
     ctx = runner.context
     sc = ctx.lock_cluster
-    db = f"LOCKDB_{ctx.suffix}"
+    db = f"LockDB_{ctx.run_id}"
 
     created = runner.controller_async(
         "Create lock-test ShardedCluster",
