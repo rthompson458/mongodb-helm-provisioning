@@ -166,16 +166,18 @@ def list_databases(
             )
             seen.add((deployment_key, database_key))
 
-    # During the first AddDatabase stage the database may not yet be committed
-    # to Vault inventory. Include that journal entry so users immediately see
-    # the database as Creating instead of seeing a misleading empty list.
+    # AddDatabase can be Creating before its Vault inventory entry exists.
+    # DeleteDatabase can also remain In Progress briefly after its inventory
+    # entry is removed while account/storage verification finishes. Keep both
+    # active states visible so public status never claims the database vanished
+    # before the asynchronous operation reaches a terminal result.
     selected_keys = {key for key, _ in deployments}
     for (deployment_key, database_key), (status, display) in sorted(active_changes.items()):
-        if status != "Creating" or (deployment_key, database_key) in seen:
+        if (deployment_key, database_key) in seen:
             continue
         if deployment_key not in selected_keys or deployment_key not in inventory:
             continue
-        rows.append((inventory[deployment_key]["display_name"], display, "Creating"))
+        rows.append((inventory[deployment_key]["display_name"], display, status))
 
     if not rows:
         if deployment_name:
@@ -202,17 +204,17 @@ def list_database(
     deployment_key, deployment, db_name = _resolve_database_args(
         config, inventory, deployment_or_database, database
     )
-    db_key, display = normalize_database(db_name)
+    db_key, _ = normalize_database(db_name)
     active_changes = _active_database_changes(config, inventory)
 
     db = deployment["databases"].get(db_key)
     if db is None:
         active = active_changes.get((deployment_key, db_key))
-        if active and active[0] == "Creating":
+        if active:
             print(f"Deployment:      {deployment['display_name']}")
             print(f"Deployment Type: {deployment_type_label(deployment)}")
             print(f"Database:        {active[1]}")
-            print("Status:          Creating")
+            print(f"Status:          {active[0]}")
             return
         raise ControllerError(
             f"Database '{db_name}' does not exist on "
