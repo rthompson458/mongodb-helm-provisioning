@@ -27,7 +27,7 @@ def list_managed_resources(config: dict[str, Any], vault: VaultClient) -> None:
     ]
     clean = all(not resources[key] for _, key in labels)
 
-    print("terraformController Managed Resource Inventory")
+    print("privateWorkerReplacement Managed Resource Inventory")
     print()
     label_width = max(len(label) + 1 for label, _ in labels)
     for label, key in labels:
