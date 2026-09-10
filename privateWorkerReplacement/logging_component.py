@@ -29,7 +29,7 @@ from typing import Any, Sequence
 
 from .runtime_paths import controller_log_path, operations_log_path
 
-LOGGER_NAME = "terraformController"
+LOGGER_NAME = "privateWorkerReplacement"
 
 _CONFIGURED = False
 _LOG_PATH: Path | None = None
