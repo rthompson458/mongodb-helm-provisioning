@@ -49,6 +49,12 @@ python3 tests/run_harness.py --help
 
 No live tests run when no arguments are supplied. An actual harness run requires an explicit `--profile`.
 
+`--help` is global harness help. For example, this is safe and does not run the locking profile:
+
+```bash
+python3 tests/run_harness.py --profile locking --help
+```
+
 For lifecycle profiles, the real execution path is:
 
 ```text
@@ -145,16 +151,16 @@ The read-only `preflight` profile does not require `--allow-changes`.
 
 ### `--config FILE`
 
-Optional. The harness assumes the configuration file is in the current directory:
+Optional. The harness assumes the configuration file is in the current working directory:
 
 ```text
 ./terraformController.config
 ```
 
-Use `--config FILE` only when the configuration file is somewhere else:
+Use `--config FILE` only when another configuration file is intentionally selected:
 
 ```bash
-python3 tests/run_harness.py --profile preflight --config /other/location/terraformController.config
+python3 tests/run_harness.py --profile preflight --config ./alternate-terraformController.config
 ```
 
 ### `--verbose`

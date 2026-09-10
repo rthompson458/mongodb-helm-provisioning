@@ -53,7 +53,12 @@ from .controller import (
 from .logging_component import configure_logging, log_event, log_exception
 from .vault import VaultClient
 
-DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "terraformController.config"
+# Keep these values separate on purpose. REPO_ROOT locates the controller code
+# for detached workers. DEFAULT_CONFIG_DISPLAY is the friendly path a person
+# sees and types, while DEFAULT_CONFIG is the Path object used by Python.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_CONFIG_DISPLAY = "./terraformController.config"
+DEFAULT_CONFIG = Path(DEFAULT_CONFIG_DISPLAY)
 
 
 def _config_path_from_argv(argv: list[str]) -> Path:
@@ -174,10 +179,11 @@ run in the background. The submitting shell returns promptly with a status
 command to use while the request finishes.
 
 Configured defaults:
-  AddShardedCluster initial shards = {configured_shards_text}
+  Configuration file                 = ./terraformController.config
+  AddShardedCluster initial shards   = {configured_shards_text}
     (read from controller configuration)
-  AddShard count                  = 1
-  DeleteShard count               = 1
+  AddShard count                     = 1
+  DeleteShard count                  = 1
 
 Run this program with no command, or use -h/--help, to show this help.
 Use '<command> --help' for detailed command-specific help.
@@ -203,9 +209,9 @@ Inventory:
     )
     parser.add_argument(
         "--config",
-        default=str(DEFAULT_CONFIG),
+        default=DEFAULT_CONFIG_DISPLAY,
         metavar="FILE",
-        help="Configuration file",
+        help="Optional configuration file. Default: ./terraformController.config",
     )
     parser.add_argument(
         "--_operation-worker",
@@ -559,6 +565,9 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(raw_argv)
     logging_ready = False
+    # Preserve the friendly path exactly as argparse received it for follow-up
+    # instructions, then resolve a separate absolute path for actual file I/O.
+    config_display = str(args.config)
     config_path = Path(args.config).expanduser().resolve()
     operation_id = getattr(args, "_operation_worker", None)
 
@@ -572,7 +581,7 @@ def main(argv: list[str] | None = None) -> int:
             _validate_async_submission(args)
             state = launch_operation(
                 config_path,
-                DEFAULT_CONFIG.parent,
+                REPO_ROOT,
                 command=args.command,
                 deployment=_async_deployment(args),
                 worker_arguments=_async_worker_arguments(args),
@@ -585,6 +594,7 @@ def main(argv: list[str] | None = None) -> int:
                     details=details,
                     status_text=status_text,
                     status_arguments=status_arguments,
+                    config_display=config_display,
                 )
             )
             log_event(

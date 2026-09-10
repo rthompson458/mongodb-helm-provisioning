@@ -1,7 +1,7 @@
 """Detached long-running operation support for terraformController.
 
 Customer requests that can take meaningful time return control to the shell
-while a detached worker runs the normal Terraform-driven lifecycle.  This
+while a detached worker runs the normal Terraform-driven lifecycle. This
 module owns the small operation journal used by administrators and the test
 harness to determine whether that worker is queued, running, succeeded, failed,
 or was interrupted.
@@ -13,10 +13,10 @@ Runtime files are intentionally easy to find:
     logs/operations/work/<operation>.tmp     temporary worker transcript
 
 The temporary transcript is merged into the daily operations log when the
-worker reaches a terminal result.  Keeping one private transcript while a worker
+worker reaches a terminal result. Keeping one private transcript while a worker
 runs prevents two background jobs from mixing their ordinary stdout/stderr.
 
-This module coordinates execution only.  It never performs MongoDB, Kubernetes,
+This module coordinates execution only. It never performs MongoDB, Kubernetes,
 Vault, storage, or topology mutations itself.
 """
 
@@ -127,7 +127,7 @@ def list_operation_records(config_path: Path) -> list[dict[str, Any]]:
             records.append(json.loads(path.read_text(encoding="utf-8")))
         except (OSError, json.JSONDecodeError):
             # A damaged status file should not make every other operation
-            # invisible.  ListOperation on that exact ID will still fail loudly.
+            # invisible. ListOperation on that exact ID will still fail loudly.
             continue
     return sorted(records, key=lambda item: item.get("submitted_at", ""), reverse=True)
 
@@ -195,7 +195,7 @@ def launch_operation(
 ) -> dict[str, Any]:
     """Launch a detached worker that executes the normal lifecycle function."""
 
-    # This is a local UX guard against obvious double-submits.  ShardedCluster
+    # This is a local UX guard against obvious double-submits. ShardedCluster
     # cross-process safety still comes from the Terraform-created deployment
     # lock, which remains the authoritative mutation lock.
     for existing in list_operation_records(config_path):
@@ -222,6 +222,9 @@ def launch_operation(
     work_path.parent.mkdir(parents=True, exist_ok=True)
     entrypoint = repo_root / entrypoint_name
 
+    # The detached worker receives an absolute config path on purpose. A
+    # background process must not depend on the user's shell directory after
+    # the foreground command has returned.
     worker_command = [
         sys.executable,
         str(entrypoint),
@@ -448,12 +451,14 @@ def public_submission_instructions(
     details: Sequence[tuple[str, str]],
     status_text: str,
     status_arguments: Sequence[str] | None = None,
+    config_display: str | None = None,
 ) -> str:
     """Return a customer acknowledgement without operation internals.
 
-    ``details`` allows deployment requests and database requests to show the
-    fields that actually matter to the customer without pretending a database
-    name is a deployment name.
+    ``config_path`` is the resolved path used by the worker. ``config_display``
+    is the cleaner path originally supplied by the user, normally
+    ``./terraformController.config``. Keeping them separate prevents internal
+    absolute paths from leaking into routine customer instructions.
     """
 
     lines = [f"{state['command']} request accepted.", ""]
@@ -474,7 +479,7 @@ def public_submission_instructions(
                 "python3",
                 "terraformController.py",
                 "--config",
-                str(config_path.expanduser().resolve()),
+                config_display or str(config_path),
                 *status_arguments,
             ]
         )
@@ -486,15 +491,22 @@ def public_submission_instructions(
 def admin_submission_instructions(
     config_path: Path,
     state: dict[str, Any],
+    *,
+    config_display: str | None = None,
 ) -> str:
-    """Return administrator-facing async details and exact journal command."""
+    """Return administrator-facing async details and exact journal command.
+
+    The worker still uses the resolved absolute path internally. The displayed
+    command uses the path the administrator supplied, which is normally the
+    friendlier ``./terraformController.config`` form.
+    """
 
     check_command = shlex.join(
         [
             "python3",
             "terraformControllerAdmin.py",
             "--config",
-            str(config_path.expanduser().resolve()),
+            config_display or str(config_path),
             "ListOperation",
             state["operation_id"],
         ]

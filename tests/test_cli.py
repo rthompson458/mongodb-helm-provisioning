@@ -137,23 +137,30 @@ class CliTests(unittest.TestCase):
         self.assertIn("python3 terraformController.py", help_text)
         self.assertIn("database create/delete requests", help_text)
         self.assertIn("ListDatabaseAccounts", help_text)
+        self.assertIn("./terraformController.config", help_text)
         self.assertNotIn("ListManagedResources", help_text)
         self.assertNotIn("ListOperation", help_text)
         self.assertNotIn("RecoverDeploymentLock", help_text)
         self.assertNotIn("RecoverOrphanedResources", help_text)
         self.assertNotIn("Reconcile", help_text)
 
+    def test_public_default_config_is_current_directory_file(self) -> None:
+        args = cli.build_parser().parse_args(["ListDeployments"])
+        self.assertEqual(args.config, "./terraformController.config")
+        self.assertEqual(cli.DEFAULT_CONFIG_DISPLAY, "./terraformController.config")
+        self.assertEqual(cli.DEFAULT_CONFIG, Path("terraformController.config"))
+
     def test_public_help_shows_live_configured_shard_default(self) -> None:
         configured = cli._configured_default_shards(cli.DEFAULT_CONFIG)
         self.assertIsNotNone(configured)
         help_text = cli.build_parser(cli.DEFAULT_CONFIG).format_help()
         self.assertIn(
-            f"AddShardedCluster initial shards = {configured}",
+            f"AddShardedCluster initial shards   = {configured}",
             help_text,
         )
         self.assertIn("(read from controller configuration)", help_text)
-        self.assertIn("AddShard count                  = 1", help_text)
-        self.assertIn("DeleteShard count               = 1", help_text)
+        self.assertIn("AddShard count                     = 1", help_text)
+        self.assertIn("DeleteShard count                  = 1", help_text)
 
     def test_add_sharded_cluster_help_labels_configured_default(self) -> None:
         with mock.patch.object(cli, "_configured_default_shards", return_value=7):
@@ -175,9 +182,9 @@ class CliTests(unittest.TestCase):
 
     def test_config_path_prescan_honors_custom_config(self) -> None:
         selected = cli._config_path_from_argv(
-            ["--config", "/tmp/customer-controller.conf", "--help"]
+            ["--config", "./customer-controller.conf", "--help"]
         )
-        self.assertEqual(selected, Path("/tmp/customer-controller.conf"))
+        self.assertEqual(selected, Path("customer-controller.conf"))
 
     def test_add_and_delete_shard_help_state_default_one(self) -> None:
         parser = cli.build_parser(cli.DEFAULT_CONFIG)

@@ -36,7 +36,12 @@ from .controller import (
 from .logging_component import configure_logging, log_event, log_exception
 from .vault import VaultClient
 
-DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "terraformController.config"
+# Keep these values separate on purpose. REPO_ROOT locates the administrator
+# entry point for detached recovery workers. DEFAULT_CONFIG_DISPLAY is the
+# friendly path an operator sees and types; DEFAULT_CONFIG is the Path object.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_CONFIG_DISPLAY = "./terraformController.config"
+DEFAULT_CONFIG = Path(DEFAULT_CONFIG_DISPLAY)
 
 
 def _confirm(parser: argparse.ArgumentParser) -> None:
@@ -91,6 +96,9 @@ Use this administrator program for:
   - controlled recovery after interrupted lifecycle work
   - controller-wide Terraform reconciliation
 
+Default configuration file:
+  ./terraformController.config
+
 Detailed Git/Terraform output is written to the daily operations log instead of
 being dumped onto the administrator terminal.
 
@@ -121,9 +129,9 @@ Normal DBaaS users should use:
     )
     parser.add_argument(
         "--config",
-        default=str(DEFAULT_CONFIG),
+        default=DEFAULT_CONFIG_DISPLAY,
         metavar="FILE",
-        help="Controller configuration file. Uses terraformController.config by default.",
+        help="Optional configuration file. Default: ./terraformController.config",
     )
     parser.add_argument(
         "--_operation-worker",
@@ -234,6 +242,9 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(raw_argv)
     logging_ready = False
+    # Keep the display form separate from the absolute path used for file I/O.
+    # This lets normal instructions stay readable while workers remain reliable.
+    config_display = str(args.config)
     config_path = Path(args.config).expanduser().resolve()
     operation_id = getattr(args, "_operation_worker", None)
 
@@ -272,13 +283,19 @@ def main(argv: list[str] | None = None) -> int:
                 )
             state = launch_operation(
                 config_path,
-                DEFAULT_CONFIG.parent,
+                REPO_ROOT,
                 command=args.command,
                 deployment="controller-state",
                 worker_arguments=_recover_orphans_worker_arguments(args),
                 entrypoint_name="terraformControllerAdmin.py",
             )
-            print(admin_submission_instructions(config_path, state))
+            print(
+                admin_submission_instructions(
+                    config_path,
+                    state,
+                    config_display=config_display,
+                )
+            )
             log_event(
                 "admin.command.accepted",
                 command=args.command,
