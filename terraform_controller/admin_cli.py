@@ -94,6 +94,7 @@ Use this administrator program for:
 Detailed Git/Terraform output is written to the daily operations log instead of
 being dumped onto the administrator terminal.
 
+Run this program with no command, or use -h/--help, to show this help.
 Use '<command> --help' for detailed command-specific help.
 """,
         epilog="""Common administrator workflow:
@@ -223,9 +224,15 @@ def _recover_orphans_worker_arguments(args: argparse.Namespace) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Parse and execute one administrator command."""
+    """Parse and execute one administrator command; no command prints help."""
 
-    args = build_parser().parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    parser = build_parser()
+    if not raw_argv:
+        parser.print_help()
+        return 0
+
+    args = parser.parse_args(raw_argv)
     logging_ready = False
     config_path = Path(args.config).expanduser().resolve()
     operation_id = getattr(args, "_operation_worker", None)

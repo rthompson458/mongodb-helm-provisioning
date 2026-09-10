@@ -8,11 +8,19 @@ Platform diagnostics, Terraform reconciliation, operation IDs, and recovery comm
 
 ## 1. Basic usage
 
-Show the full customer command list:
+Run the program with no command to show the full customer command list:
+
+```bash
+python3 terraformController.py
+```
+
+This is intentionally equivalent to:
 
 ```bash
 python3 terraformController.py --help
 ```
+
+Both forms print help and exit successfully.
 
 Show detailed help for one command:
 
@@ -22,6 +30,7 @@ python3 terraformController.py AddShardedCluster --help
 python3 terraformController.py AddDatabase --help
 python3 terraformController.py DeleteDatabase --help
 python3 terraformController.py ListDatabase --help
+python3 terraformController.py ListDatabaseAccounts --help
 ```
 
 The controller uses `terraformController.config` by default. To use another configuration file:
@@ -99,10 +108,16 @@ When the ReplicaSet is `Running`, request a database:
 python3 terraformController.py AddDatabase RS1 HouseInfo
 ```
 
-Database creation is also asynchronous. Use the status command printed by the controller while the request finishes. After the database appears, inspect it with:
+Database creation is also asynchronous. Use the status command printed by the controller while the request finishes:
 
 ```bash
 python3 terraformController.py ListDatabase RS1 HouseInfo
+```
+
+When the database reports `Ready`, inspect its three managed accounts and Vault credential locations:
+
+```bash
+python3 terraformController.py ListDatabaseAccounts RS1 HouseInfo
 ```
 
 Delete the database when it is no longer needed:
@@ -164,13 +179,19 @@ Create a database after the cluster is fully ready:
 python3 terraformController.py AddDatabase SC9 Orders
 ```
 
-Inspect it:
+Inspect database status:
 
 ```bash
 python3 terraformController.py ListDatabase SC9 Orders
 ```
 
-Delete it:
+Inspect account and Vault credential details:
+
+```bash
+python3 terraformController.py ListDatabaseAccounts SC9 Orders
+```
+
+Delete the database:
 
 ```bash
 python3 terraformController.py DeleteDatabase SC9 Orders --confirm
@@ -246,7 +267,7 @@ python3 terraformController.py DeleteShard SC9 2 --confirm
 python3 terraformController.py DeleteShardedCluster SC9 --confirm
 ```
 
-### Database lifecycle
+### Database lifecycle and status
 
 ```text
 AddDatabase DEPLOYMENT DATABASE
@@ -256,6 +277,8 @@ DeleteDatabase DATABASE --confirm
 ListDatabases [DEPLOYMENT]
 ListDatabase DEPLOYMENT DATABASE
 ListDatabase DATABASE
+ListDatabaseAccounts DEPLOYMENT DATABASE
+ListDatabaseAccounts DATABASE
 ```
 
 Examples:
@@ -267,6 +290,7 @@ python3 terraformController.py AddDatabase HouseInfo
 python3 terraformController.py ListDatabases
 python3 terraformController.py ListDatabases SC9
 python3 terraformController.py ListDatabase SC9 Orders
+python3 terraformController.py ListDatabaseAccounts SC9 Orders
 python3 terraformController.py DeleteDatabase SC9 Orders --confirm
 ```
 
@@ -383,7 +407,7 @@ MongoDB:            8.0.29
 The deployment is not ready for database work until:
 
 ```text
-MongoDB phase       = Running
+MongoDB phase        = Running
 Every expected shard = Online
 Config servers       = Online
 mongos                = Online
@@ -443,6 +467,25 @@ Before `AddDatabase`, `DeleteDatabase`, `RotatePasswords`, or `DisableOwner` pro
 
 Unsafe requests fail rather than bypassing the service protections.
 
+### Database status values
+
+Database status is intentionally separate from account status. Database-level commands can report:
+
+```text
+Creating
+Ready
+Deleting
+Unavailable
+```
+
+`Creating` can appear immediately after an asynchronous `AddDatabase` request, including before the database has been committed to the normal Vault-backed managed inventory.
+
+`Deleting` appears while an asynchronous `DeleteDatabase` request is active.
+
+`Ready` means no active add/delete operation exists and the parent deployment is healthy enough for database service. For a ShardedCluster, that includes the expected shards, config servers, and mongos being Online.
+
+`Unavailable` means the database is known to the controller but its parent deployment is not sufficiently healthy for normal service.
+
 ### AddDatabase
 
 ```bash
@@ -462,7 +505,7 @@ The public request is asynchronous. Inside the worker, the controller:
 
 MongoDB does not retain a truly empty database, so the controller materializes the database before it commits managed account state.
 
-After creation, `ListDatabase` displays the three accounts and full Vault browser URLs.
+Use `ListDatabase` or `ListDatabases` to follow database lifecycle status. After the database is `Ready`, use `ListDatabaseAccounts` to see account, rotation, and Vault credential details.
 
 ### DeleteDatabase
 
@@ -502,6 +545,14 @@ Every managed application database receives exactly three accounts:
 
 There are no arbitrary AddUser/DeleteUser/ChangeRole commands in this MVP. The three-account model is intentionally fixed and predictable.
 
+Account information is shown with:
+
+```bash
+python3 terraformController.py ListDatabaseAccounts RS1 HouseInfo
+```
+
+This command owns account-related status. It shows the three managed accounts, account type, Enabled/Disabled state, rotation information, logical Vault paths, and browser-ready Vault URLs.
+
 ---
 
 ## 10. Vault credential locations and browser URLs
@@ -528,7 +579,7 @@ mongodb/SC9/Orders/Orders_readWrite
 mongodb/SC9/Orders/Orders_read
 ```
 
-`ListDatabase`, database creation results, password rotation results, and relevant Owner output provide complete browser-ready Vault URLs.
+`ListDatabaseAccounts`, password rotation results, and relevant Owner output provide complete browser-ready Vault URLs.
 
 With this development configuration:
 
@@ -569,7 +620,7 @@ Rotate all three passwords:
 python3 terraformController.py RotatePasswords RS1 HouseInfo
 ```
 
-The controller rotates Owner, ReadWrite, and Read credentials and verifies authentication. `ListDatabase` shows the last rotation time and the remaining time until the next rotation.
+The controller rotates Owner, ReadWrite, and Read credentials and verifies authentication. `ListDatabaseAccounts` shows the last rotation time and the remaining time until the next rotation.
 
 The Owner policy is:
 
@@ -587,7 +638,7 @@ Administratively disable the Owner early:
 python3 terraformController.py DisableOwner RS1 HouseInfo --confirm
 ```
 
-The command prints the complete browser URL for the retained Owner credential.
+The command prints the complete browser URL for the retained Owner credential. `ListDatabaseAccounts` then reports the Owner account as Disabled while the ReadWrite and Read accounts remain Enabled.
 
 ---
 
@@ -638,15 +689,51 @@ Unknown
 
 The targeted view also reports config-server status, mongos status, and any active managed topology change. READY/DESIRED/UPDATED member counts are retained because they are useful when a shard is converging or degraded.
 
-### ListDatabases / ListDatabase
+### ListDatabases
 
 ```bash
 python3 terraformController.py ListDatabases
 python3 terraformController.py ListDatabases RS1
+```
+
+`ListDatabases` is database inventory only. It shows:
+
+```text
+DEPLOYMENT   DATABASE     STATUS
+RS1          HouseInfo    Ready
+RS1          Inventory    Creating
+SC9          Orders       Deleting
+```
+
+It does not list account rows.
+
+### ListDatabase
+
+```bash
 python3 terraformController.py ListDatabase RS1 HouseInfo
 ```
 
-`ListDatabases` provides a concise account/status view. `ListDatabase` adds creation/rotation timestamps and the full Vault credential paths and browser URLs.
+`ListDatabase` shows one database and database-level information such as:
+
+```text
+Deployment:       RS1
+Deployment Type:  ReplicaSet
+Database:         HouseInfo
+Status:           Ready
+Created:          <timestamp>
+```
+
+It does not serve as the account-detail view.
+
+### ListDatabaseAccounts
+
+```bash
+python3 terraformController.py ListDatabaseAccounts RS1 HouseInfo
+```
+
+`ListDatabaseAccounts` shows the three managed accounts, their Enabled/Disabled state, password-rotation timing, last-rotation information, logical Vault paths, and complete browser-ready Vault URLs.
+
+Use this command when the question is about database credentials or account state rather than database lifecycle state.
 
 ---
 
@@ -658,9 +745,9 @@ Normal users should see:
 
 - whether a request was accepted;
 - which deployment/database it applies to;
-- whether work is pending, Running, complete, blocked, or failed;
+- whether work is Creating, Ready, Deleting, Unavailable, Running, blocked, or failed as appropriate to the resource;
 - which normal status command to run next;
-- account and credential information needed to use the database;
+- account and credential information when they explicitly request account details;
 - complete Vault browser URLs where credentials can be retrieved.
 
 Normal users should not see routine:
@@ -767,7 +854,13 @@ Python does not bypass Terraform to directly create/delete MongoDB deployments, 
 
 Normal DBaaS work should remain in `terraformController.py`.
 
-If deeper platform diagnostics or recovery are required, an authorized administrator can start with:
+If deeper platform diagnostics or recovery are required, an authorized administrator can run:
+
+```bash
+python3 terraformControllerAdmin.py
+```
+
+or:
 
 ```bash
 python3 terraformControllerAdmin.py --help

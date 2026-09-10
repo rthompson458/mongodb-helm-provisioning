@@ -136,6 +136,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("Terraform-driven MongoDB DBaaS controller", help_text)
         self.assertIn("python3 terraformController.py", help_text)
         self.assertIn("database create/delete requests", help_text)
+        self.assertIn("ListDatabaseAccounts", help_text)
         self.assertNotIn("ListManagedResources", help_text)
         self.assertNotIn("ListOperation", help_text)
         self.assertNotIn("RecoverDeploymentLock", help_text)
@@ -170,7 +171,7 @@ class CliTests(unittest.TestCase):
             "Default: 7 (read from controller configuration)",
             normalized_help,
         )
-        self.assertIn("uses configured default: 7 shard(s)", normalized_help)
+        self.assertIn("configured default: 7", normalized_help)
 
     def test_config_path_prescan_honors_custom_config(self) -> None:
         selected = cli._config_path_from_argv(
@@ -203,8 +204,9 @@ class CliTests(unittest.TestCase):
         delete_help = " ".join(
             subparsers.choices["DeleteDatabase"].format_help().split()
         )
-        self.assertIn("submitting shell returns promptly", add_help)
-        self.assertIn("request runs in the background", delete_help)
+        self.assertIn("request runs in the background", add_help)
+        self.assertIn("Use ListDatabase", add_help)
+        self.assertIn("runs in the background", delete_help)
 
 
 if __name__ == "__main__":

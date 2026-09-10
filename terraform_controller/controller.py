@@ -2,17 +2,22 @@
 
 The implementation is intentionally split by responsibility:
 - deployments.py: ReplicaSet, ShardedCluster, and shard lifecycle/status
-- databases.py: database, account, Vault credential, and rotation lifecycle
-- maintenance.py: administrator inventory, reconciliation, and recovery
+- databases.py: database mutation, Vault credential, and rotation lifecycle
+- database_status.py: read-only database and account status
+- admin_status.py: administrator resource-inventory presentation
+- maintenance.py: reconciliation and recovery
 """
 
 from .databases import (
     add_database,
     delete_database,
     disable_owner,
-    list_database,
-    list_databases,
     rotate_passwords,
+)
+from .database_status import (
+    list_database,
+    list_database_accounts,
+    list_databases,
 )
 from .deployments import (
     add_replica_set,
@@ -29,8 +34,8 @@ from .deployments import (
     list_sharded_clusters,
     list_shards,
 )
+from .admin_status import list_managed_resources
 from .maintenance import (
-    list_managed_resources,
     reconcile,
     recover_deployment_lock,
     recover_orphaned_resources,
@@ -47,6 +52,7 @@ __all__ = [
     "delete_sharded_cluster",
     "disable_owner",
     "list_database",
+    "list_database_accounts",
     "list_databases",
     "list_deployment",
     "list_deployments",

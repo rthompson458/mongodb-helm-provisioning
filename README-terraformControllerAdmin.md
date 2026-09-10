@@ -2,7 +2,7 @@
 
 `terraformControllerAdmin.py` is the platform-administrator interface for the MongoDB DBaaS controller. It is intentionally separate from the customer-facing `terraformController.py` command.
 
-Use the customer CLI for normal deployment, shard, database, credential, and service-status work. Use the administrator CLI for operation diagnostics, reconciliation, zero-state verification, and exceptional recovery.
+Use the customer CLI for normal deployment, shard, database, credential, and service-status work. Use the administrator CLI for operation diagnostics, reconciliation, managed-resource inventory, and exceptional recovery.
 
 The executable split is an interface boundary, not an authorization boundary. Production must also restrict administrator host access, Kubernetes privileges, Vault policy, and Terraform backend access.
 
@@ -10,11 +10,19 @@ The executable split is an interface boundary, not an authorization boundary. Pr
 
 ## 1. Quick start
 
-Show administrator help:
+Run the program with no command to show the full administrator help screen:
+
+```bash
+python3 terraformControllerAdmin.py
+```
+
+This is intentionally equivalent to:
 
 ```bash
 python3 terraformControllerAdmin.py --help
 ```
+
+Both forms print help and exit successfully.
 
 Show command-specific help:
 
@@ -35,7 +43,7 @@ The administrator interface uses the same `terraformController.config` and Vault
 
 | Command | Purpose | Mutation |
 | --- | --- | --- |
-| `ListManagedResources` | List controller-managed resources and report zero-state cleanliness | Read-only |
+| `ListManagedResources` | List controller-managed resources and report whether managed resources are present | Read-only |
 | `ListOperations` | List recent asynchronous controller operations | Read-only |
 | `ListOperation OPERATION_ID` | Show detailed status for one asynchronous operation | Read-only |
 | `Reconcile` | Reapply complete Vault-backed desired state through Terraform | Yes |
@@ -52,7 +60,7 @@ These commands are deliberately not accepted by `terraformController.py`.
 python3 terraformControllerAdmin.py ListManagedResources
 ```
 
-This is the read-only zero-state and leftover-resource check. It combines Vault-backed deployment inventory with controller-managed Kubernetes resources:
+This is the read-only managed-resource inventory and zero-state check. It combines Vault-backed deployment inventory with controller-managed Kubernetes resources:
 
 ```text
 Managed deployments
@@ -78,7 +86,17 @@ Deployment locks:     0
 Status: CLEAN
 ```
 
-If anything remains, the command reports `ATTENTION REQUIRED` and lists the remaining names by category. The command does not delete or reconcile anything.
+When legitimate controller-managed resources exist, the command reports:
+
+```text
+Status: MANAGED RESOURCES PRESENT
+```
+
+and lists the managed names by category.
+
+`MANAGED RESOURCES PRESENT` is neutral inventory information. It does not, by itself, mean the environment is unhealthy. A healthy active deployment is expected to have managed MongoDB resources, MongoDB users, PVCs, and PVs.
+
+The command does not delete, reconcile, or repair anything.
 
 ---
 
@@ -278,7 +296,7 @@ Check administrator operation status with:
 
 ## 9. Recovery decision guide
 
-Verify zero-state:
+Verify managed state:
 
 ```bash
 python3 terraformController.py ListDeployments
@@ -320,12 +338,13 @@ If a live managed MongoDB deployment still exists, do not use orphan recovery. I
 | --- | --- | --- |
 | Executable | `terraformController.py` | `terraformControllerAdmin.py` |
 | Audience | DBaaS consumer | Platform operator |
+| No-argument behavior | Full public help | Full administrator help |
 | Deployment lifecycle | Yes | No |
 | Shard lifecycle | Yes | No |
 | Database lifecycle | Yes | No |
 | Credential lifecycle | Yes | No |
 | Normal service status | Yes | No |
-| Managed-resource zero-state inventory | No | Yes |
+| Managed-resource inventory | No | Yes |
 | Operation IDs/journal | No | Yes |
 | Worker PID/log path | No | Yes |
 | Terraform reconciliation | No | Yes |
@@ -349,6 +368,7 @@ Administrator entry point:
 ```text
 terraformControllerAdmin.py
 terraform_controller/admin_cli.py
+terraform_controller/admin_status.py
 ```
 
 Shared lifecycle/support modules include:
@@ -356,6 +376,7 @@ Shared lifecycle/support modules include:
 ```text
 terraform_controller/deployments.py
 terraform_controller/databases.py
+terraform_controller/database_status.py
 terraform_controller/maintenance.py
 terraform_controller/deployment_lock.py
 terraform_controller/terraform_runner.py
