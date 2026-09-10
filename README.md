@@ -1,6 +1,6 @@
 # MongoDB DBaaS Provisioning
 
-Terraform-driven MongoDB Database as a Service proof of concept for ReplicaSet and ShardedCluster deployments managed through the MongoDB Kubernetes Operator, Ops Manager, Vault, Kubernetes, and Terraform-owned lifecycle scripts.
+Terraform-driven MongoDB Database as a Service proof of concept for ReplicaSet and ShardedCluster deployments managed through the MongoDB Kubernetes Operator, Ops Manager, Vault, Kubernetes, Terraform, and a Terraform-managed Helm database-management chart.
 
 ## Start here
 
@@ -382,11 +382,14 @@ See `tests/README.md` for profile-by-profile details.
 
 **Terraform performs managed changes.**
 
-Python parses/validates requests, reads desired state and live status, coordinates lifecycle steps, waits for convergence, reports customer/admin results, and records logs. Managed MongoDB, Kubernetes, Vault, storage, account, and lock mutations remain Terraform-driven directly or through:
+Python parses/validates requests, reads desired state and live status, coordinates lifecycle steps, waits for convergence, reports customer/admin results, and records logs. Managed MongoDB, Kubernetes, Vault, storage, account, and lock mutations remain Terraform-driven. Database materialization and controlled database operations use Noah's Helm-chart pattern folded into the shared Terraform model, while storage, locking, and bounded runtime verification remain in the lifecycle script:
 
 ```text
+terraform-dbaas/mongodb-chart/
 terraform-dbaas/scripts/lifecycle.sh
 ```
+
+There is still one desired-state model: Deployment → Database → three database-specific accounts. The Helm chart consumes that state rather than creating a separate mission/workspace model.
 
 ## Documentation map
 
