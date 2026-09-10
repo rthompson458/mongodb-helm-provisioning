@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .runner import HarnessRunner
 
-TEST_COUNT = 9
+TEST_COUNT = 10
 
 
 def run(runner: HarnessRunner) -> None:
@@ -36,8 +36,8 @@ def run(runner: HarnessRunner) -> None:
     if not listed_rs.passed:
         return
 
-    # AddDatabase is customer-asynchronous. The harness waits for the private
-    # operation result before ListDatabase verifies the created accounts.
+    # AddDatabase is customer-asynchronous. The operation must finish before the
+    # database-level view can report Ready and the account view can be checked.
     created_db = runner.controller_async(
         "Create database on ReplicaSet",
         "AddDatabase",
@@ -49,13 +49,23 @@ def run(runner: HarnessRunner) -> None:
         return
 
     listed_db = runner.controller(
-        "List database on ReplicaSet",
+        "List database status on ReplicaSet",
         "ListDatabase",
+        rs,
+        db,
+        expected_text="Status:          Ready",
+    )
+    if not listed_db.passed:
+        return
+
+    listed_accounts = runner.controller(
+        "List database accounts on ReplicaSet",
+        "ListDatabaseAccounts",
         rs,
         db,
         expected_text=f"{db}_owner",
     )
-    if not listed_db.passed:
+    if not listed_accounts.passed:
         return
 
     blocked_delete = runner.controller_async(
