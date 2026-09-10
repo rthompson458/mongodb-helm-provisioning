@@ -201,7 +201,7 @@ locals {
       collection = ""
       newName    = ""
     }
-  ] : var.operation.action == "validate_deployment_empty" ? [
+    ] : var.operation.action == "validate_deployment_empty" ? [
     {
       id         = var.operation.operation_id != "" ? var.operation.operation_id : var.operation.nonce
       action     = "validateDeploymentEmpty"
@@ -875,13 +875,13 @@ resource "helm_release" "mongodb_management" {
   values = [
     yamlencode({
       mongodb = {
-        name                         = var.operation.deployment
+        name                        = var.operation.deployment
         provisionerConnectionSecret = "tc-${var.operation.deployment}-admin-connection"
         adminConnectionSecret       = "tc-${var.operation.deployment}-admin-connection"
       }
-      mongoImage                 = var.mongo_image
-      mongodbDatabases           = local.mongodb_databases
-      mongodbDatabaseOperations  = local.mongodb_database_operations
+      mongoImage                = var.mongo_image
+      mongodbDatabases          = local.mongodb_databases
+      mongodbDatabaseOperations = local.mongodb_database_operations
     })
   ]
 
