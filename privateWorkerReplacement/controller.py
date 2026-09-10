@@ -1,4 +1,4 @@
-"""Compatibility facade for terraformController lifecycle functions.
+"""Compatibility facade for privateWorkerReplacement lifecycle functions.
 
 The implementation is intentionally split by responsibility:
 - deployments.py: ReplicaSet, ShardedCluster, and shard lifecycle/status

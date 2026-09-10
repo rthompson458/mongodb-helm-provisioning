@@ -6,8 +6,8 @@ The MongoDB DBaaS controller exposes two intentionally separate command-line int
 
 | Interface | Audience | Responsibility |
 | --- | --- | --- |
-| `terraformController.py` | DBaaS user / customer demo | Normal service lifecycle and status |
-| `terraformControllerAdmin.py` | Platform administrator | Diagnostics, reconciliation, and exceptional recovery |
+| `privateWorkerReplacement.py` | DBaaS user / customer demo | Normal service lifecycle and status |
+| `privateWorkerReplacementAdmin.py` | Platform administrator | Diagnostics, reconciliation, and exceptional recovery |
 
 This separation keeps customer workflows service-oriented while preserving the deeper controls needed to operate and recover the platform.
 
@@ -146,14 +146,14 @@ An asynchronous public request follows this model:
 
 ```text
 Customer
-  -> terraformController.py
+  -> privateWorkerReplacement.py
      -> validate obvious command-line safety requirements
      -> create private operation-state record
      -> start detached worker
      -> return customer acknowledgement
 
 Detached worker
-  -> same terraformController.py lifecycle implementation
+  -> same privateWorkerReplacement.py lifecycle implementation
   -> Python validation/orchestration
   -> Terraform
   -> lifecycle.sh where required
@@ -162,7 +162,7 @@ Detached worker
   -> mark operation Succeeded or Failed
 ```
 
-The public response deliberately hides the operation ID. The acceptance harness is internal engineering tooling, so it correlates the private state entry and polls detailed status through `terraformControllerAdmin.py ListOperation`.
+The public response deliberately hides the operation ID. The acceptance harness is internal engineering tooling, so it correlates the private state entry and polls detailed status through `privateWorkerReplacementAdmin.py ListOperation`.
 
 Database create/delete uses the same model as deployment and shard lifecycle. Moving those requests to a worker changes only how the user waits; it does not change the underlying Terraform-driven lifecycle or safety checks.
 
@@ -170,7 +170,7 @@ Read-only database status also consults the operation journal so the public CLI 
 
 ## Logging and operation state
 
-Runtime evidence uses one predictable tree beside `terraformController.config`:
+Runtime evidence uses one predictable tree beside `privateWorkerReplacement.config`:
 
 ```text
 logs/
@@ -197,27 +197,27 @@ The `logs/` tree is ignored by Git. Ordinary `git clean -fd` leaves it alone; de
 The two CLIs are separate interfaces over shared controller modules:
 
 ```text
-terraformController.py
-  -> terraform_controller/cli.py
+privateWorkerReplacement.py
+  -> privateWorkerReplacement/cli.py
 
-terraformControllerAdmin.py
-  -> terraform_controller/admin_cli.py
-     -> terraform_controller/admin_status.py
+privateWorkerReplacementAdmin.py
+  -> privateWorkerReplacement/admin_cli.py
+     -> privateWorkerReplacement/admin_status.py
 
 Customer database status/account presentation:
-  -> terraform_controller/database_status.py
+  -> privateWorkerReplacement/database_status.py
 
 Both use shared lifecycle/support modules:
-  terraform_controller/deployments.py
-  terraform_controller/databases.py
-  terraform_controller/maintenance.py
-  terraform_controller/deployment_lock.py
-  terraform_controller/terraform_runner.py
-  terraform_controller/async_operations.py
-  terraform_controller/logging_component.py
-  terraform_controller/runtime_paths.py
-  terraform_controller/kube.py
-  terraform_controller/vault.py
+  privateWorkerReplacement/deployments.py
+  privateWorkerReplacement/databases.py
+  privateWorkerReplacement/maintenance.py
+  privateWorkerReplacement/deployment_lock.py
+  privateWorkerReplacement/terraform_runner.py
+  privateWorkerReplacement/async_operations.py
+  privateWorkerReplacement/logging_component.py
+  privateWorkerReplacement/runtime_paths.py
+  privateWorkerReplacement/kube.py
+  privateWorkerReplacement/vault.py
 ```
 
 This avoids duplicating lifecycle logic and preserves the Terraform-driven mutation boundary.
@@ -239,10 +239,10 @@ The intended operating model is:
 
 ```text
 DBaaS customer
-  -> python3 terraformController.py ...
+  -> python3 privateWorkerReplacement.py ...
 
 Authorized service operator
-  -> python3 terraformControllerAdmin.py ...
+  -> python3 privateWorkerReplacementAdmin.py ...
   -> privileged supporting infrastructure
 ```
 
@@ -251,13 +251,13 @@ Authorized service operator
 Customer manual:
 
 ```text
-README-terraformController.md
+README-privateWorkerReplacement.md
 ```
 
 Administrator runbook:
 
 ```text
-README-terraformControllerAdmin.md
+README-privateWorkerReplacementAdmin.md
 ```
 
 Testing guide:

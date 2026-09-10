@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run live end-to-end terraformController scenarios.
+"""Run live end-to-end privateWorkerReplacement scenarios.
 
 This file is intentionally a thin entry point. Scenario logic lives in the
 tests/harness package so the harness remains readable and easy to extend.
@@ -37,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         description=(
-            "Live end-to-end test harness for terraformController. "
+            "Live end-to-end test harness for privateWorkerReplacement. "
             "Choose a profile explicitly before running tests."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -72,7 +72,7 @@ Common commands:
     python3 tests/run_harness.py --profile all --allow-changes
 
 Configuration:
-  ./terraformController.config is used by default. Use --config FILE only when
+  ./privateWorkerReplacement.config is used by default. Use --config FILE only when
   the configuration file is somewhere else.
 """,
     )
@@ -87,11 +87,11 @@ Configuration:
     )
     parser.add_argument(
         "--config",
-        default="./terraformController.config",
+        default="./privateWorkerReplacement.config",
         metavar="FILE",
         help=(
             "Optional controller configuration file. "
-            "Default: ./terraformController.config"
+            "Default: ./privateWorkerReplacement.config"
         ),
     )
     parser.add_argument(
@@ -177,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     runner = HarnessRunner(context)
 
-    print("terraformController Live Test Harness")
+    print("privateWorkerReplacement Live Test Harness")
     print("=" * 68)
     print(f"Profile: {args.profile}")
     print(f"Config:  {config_display}")

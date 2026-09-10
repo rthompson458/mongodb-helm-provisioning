@@ -313,7 +313,7 @@ def delete_database(
     )
     if not confirmed:
         example = (
-            f"python3 terraformController.py DeleteDatabase "
+            f"python3 privateWorkerReplacement.py DeleteDatabase "
             f"{deployment['display_name']} {db_name} --confirm"
         )
         raise ControllerError(
@@ -538,7 +538,7 @@ def disable_owner(
     if not confirmed:
         raise ControllerError(
             "DisableOwner is destructive and requires '--confirm'. Example: "
-            f"python3 terraformController.py DisableOwner "
+            f"python3 privateWorkerReplacement.py DisableOwner "
             f"{deployment['display_name']} {db['display_name']} --confirm"
         )
     require_no_active_change(config, deployment_key, deployment)

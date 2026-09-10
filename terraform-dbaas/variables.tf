@@ -1,5 +1,5 @@
 variable "deployments" {
-  description = "ReplicaSets, ShardedClusters, databases, and account lifecycle state managed by terraformController"
+  description = "ReplicaSets, ShardedClusters, databases, and account lifecycle state managed by privateWorkerReplacement"
 
   type = map(object({
     display_name                = string
@@ -74,7 +74,7 @@ variable "deployments" {
 }
 
 variable "operation" {
-  description = "One-shot lifecycle operation requested by terraformController"
+  description = "One-shot lifecycle operation requested by privateWorkerReplacement"
   type = object({
     action          = string
     deployment      = string
@@ -144,7 +144,7 @@ variable "vault_mount" {
 }
 
 variable "vault_base_path" {
-  description = "Base Vault path for terraformController-managed MongoDB resources"
+  description = "Base Vault path for privateWorkerReplacement-managed MongoDB resources"
   type        = string
   default     = "mongodb"
 }

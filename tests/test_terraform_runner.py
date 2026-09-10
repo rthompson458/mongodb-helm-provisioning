@@ -11,8 +11,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-from terraform_controller import terraform_runner
-from terraform_controller.common import ControllerError
+from privateWorkerReplacement import terraform_runner
+from privateWorkerReplacement.common import ControllerError
 
 
 class TerraformRunnerLockTests(unittest.TestCase):
@@ -78,7 +78,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, sys.argv[1])
-from terraform_controller.terraform_runner import _terraform_execution_lock
+from privateWorkerReplacement.terraform_runner import _terraform_execution_lock
 
 cache = Path(sys.argv[2])
 marker = Path(sys.argv[3])
@@ -142,7 +142,7 @@ class TerraformRunnerOutputTests(unittest.TestCase):
             ) as log_mock,
         ):
             terraform_runner._run_diagnostic(
-                {"config_path": "/tmp/terraformController.config"},
+                {"config_path": "/tmp/privateWorkerReplacement.config"},
                 ["terraform", "apply"],
                 label="Terraform apply",
             )
@@ -171,7 +171,7 @@ class TerraformRunnerOutputTests(unittest.TestCase):
         ):
             with self.assertRaises(ControllerError) as ctx:
                 terraform_runner._run_diagnostic(
-                    {"config_path": "/tmp/terraformController.config"},
+                    {"config_path": "/tmp/privateWorkerReplacement.config"},
                     ["terraform", "apply"],
                     label="Terraform apply",
                 )

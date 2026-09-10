@@ -1,4 +1,4 @@
-"""Read terraformController desired-state metadata and credentials from Vault.
+"""Read privateWorkerReplacement desired-state metadata and credentials from Vault.
 
 Vault is the durable metadata source used to reconstruct Terraform input.  The
 controller does not directly write lifecycle state here; Terraform owns those

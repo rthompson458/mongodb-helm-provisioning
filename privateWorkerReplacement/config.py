@@ -1,4 +1,4 @@
-"""Read and validate terraformController.config.
+"""Read and validate privateWorkerReplacement.config.
 
 The configuration file contains environment-specific values needed to operate
 the MongoDB DBaaS service: Vault, Terraform, Kubernetes, MongoDB defaults,

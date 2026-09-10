@@ -1,4 +1,4 @@
-"""Shared test fixtures for terraformController unit tests.
+"""Shared test fixtures for privateWorkerReplacement unit tests.
 
 This module intentionally contains test data builders only.  Keeping common
 fixtures here prevents every test file from carrying a large copy of the same

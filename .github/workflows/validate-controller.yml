@@ -1,13 +1,16 @@
-name: Validate terraformController
+name: Validate privateWorkerReplacement
 
-# This repository now contains only the current terraformController/DBaaS effort.
+# This repository contains the current privateWorkerReplacement/DBaaS effort.
 # Run the complete validation suite for every pull request and every push to main
-# so structural/documentation/test changes cannot accidentally bypass validation.
+# so structural, documentation, test, and runtime changes receive the same gate.
 on:
   pull_request:
   push:
     branches:
       - main
+
+permissions:
+  contents: read
 
 jobs:
   validate:
@@ -17,15 +20,55 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Keep the retired identities from creeping back into paths, imports,
+      # documentation, examples, labels, or runtime strings. The old names are
+      # constructed from pieces so this audit does not itself contain them.
+      - name: Verify rename completeness
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          retired = ("terraform" + "_controller", "terraform" + "Controller")
+          tracked = subprocess.check_output(["git", "ls-files", "-z"]).split(b"\0")
+          hits = []
+
+          for raw in tracked:
+              if not raw:
+                  continue
+              path_text = raw.decode("utf-8")
+              if any(name in path_text for name in retired):
+                  hits.append(f"PATH: {path_text}")
+                  continue
+
+              path = Path(path_text)
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except (UnicodeDecodeError, OSError):
+                  continue
+              for line_number, line in enumerate(text.splitlines(), start=1):
+                  if any(name in line for name in retired):
+                      hits.append(f"TEXT: {path_text}:{line_number}: {line}")
+
+          if hits:
+              print("ERROR: retired controller identity still exists:")
+              print("\n".join(hits))
+              sys.exit(1)
+
+          print("Rename audit passed: no retired names remain in tracked paths or text files.")
+          PY
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Validate Python syntax
-        run: python3 -m compileall -q terraformController.py terraform_controller tests
+        run: python3 -m compileall -q privateWorkerReplacement.py privateWorkerReplacementAdmin.py privateWorkerReplacement tests
 
-      - name: Run controller unit tests
+      - name: Run privateWorkerReplacement unit tests
         run: python3 -m unittest discover -s tests -p "test_*.py" -v
 
       - name: Validate live harness no-argument help

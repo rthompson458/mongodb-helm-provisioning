@@ -1,6 +1,6 @@
-# terraformController Test Suite
+# privateWorkerReplacement Test Suite
 
-The terraformController test suite has two jobs:
+The privateWorkerReplacement test suite has two jobs:
 
 1. **Fast unit/regression tests** validate controller logic without touching a live MongoDB environment.
 2. **The live end-to-end harness** drives the real customer CLI against Kubernetes, Ops Manager, Vault, Terraform, and MongoDB.
@@ -22,8 +22,8 @@ The unit suite covers command parsing, configuration validation, deployment/data
 The suite also contains end-to-end CLI-entry-point regression tests for no-argument help behavior:
 
 ```bash
-python3 terraformController.py
-python3 terraformControllerAdmin.py
+python3 privateWorkerReplacement.py
+python3 privateWorkerReplacementAdmin.py
 python3 tests/run_harness.py
 ```
 
@@ -59,7 +59,7 @@ For lifecycle profiles, the real execution path is:
 
 ```text
 Harness
-  -> terraformController.py
+  -> privateWorkerReplacement.py
   -> Python validation/orchestration
   -> detached worker for asynchronous customer requests
   -> Terraform
@@ -67,7 +67,7 @@ Harness
   -> Kubernetes / MongoDB Operator / Ops Manager / Vault / MongoDB
 ```
 
-The harness does not treat an asynchronous request acknowledgement as success. It correlates the private operation-state record and polls `terraformControllerAdmin.py ListOperation` until the operation reports a terminal result.
+The harness does not treat an asynchronous request acknowledgement as success. It correlates the private operation-state record and polls `privateWorkerReplacementAdmin.py ListOperation` until the operation reports a terminal result.
 
 Database status and account status are tested separately. `ListDatabase` verifies database-level lifecycle/service state. `ListDatabaseAccounts` verifies the three managed account rows and credential-facing output.
 
@@ -154,13 +154,13 @@ The read-only `preflight` profile does not require `--allow-changes`.
 Optional. The harness assumes the configuration file is in the current working directory:
 
 ```text
-./terraformController.config
+./privateWorkerReplacement.config
 ```
 
 Use `--config FILE` only when another configuration file is intentionally selected:
 
 ```bash
-python3 tests/run_harness.py --profile preflight --config ./alternate-terraformController.config
+python3 tests/run_harness.py --profile preflight --config ./alternate-privateWorkerReplacement.config
 ```
 
 ### `--verbose`
@@ -247,7 +247,7 @@ After a failed run, temporary managed resources may intentionally remain so the 
 Use the normal Terraform-driven lifecycle/recovery path. An administrator can inspect managed resource state with:
 
 ```bash
-python3 terraformControllerAdmin.py ListManagedResources
+python3 privateWorkerReplacementAdmin.py ListManagedResources
 ```
 
 A completely empty environment reports:

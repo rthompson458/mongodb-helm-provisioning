@@ -1,11 +1,11 @@
-"""Unit tests for the administrator-only terraformController CLI."""
+"""Unit tests for the administrator-only privateWorkerReplacement CLI."""
 
 from __future__ import annotations
 
 import unittest
 from pathlib import Path
 
-from terraform_controller import admin_cli
+from privateWorkerReplacement import admin_cli
 
 
 class AdminCliTests(unittest.TestCase):
@@ -86,18 +86,18 @@ class AdminCliTests(unittest.TestCase):
         self.assertIn("RecoverOrphanedResources", help_text)
         self.assertIn("Reconcile", help_text)
         self.assertIn("NOT the DBaaS end-user interface", help_text)
-        self.assertIn("./terraformController.config", help_text)
+        self.assertIn("./privateWorkerReplacement.config", help_text)
 
     def test_admin_default_config_is_current_directory_file(self) -> None:
         args = admin_cli.build_parser().parse_args(["ListOperations"])
-        self.assertEqual(args.config, "./terraformController.config")
+        self.assertEqual(args.config, "./privateWorkerReplacement.config")
         self.assertEqual(
             admin_cli.DEFAULT_CONFIG_DISPLAY,
-            "./terraformController.config",
+            "./privateWorkerReplacement.config",
         )
         self.assertEqual(
             admin_cli.DEFAULT_CONFIG,
-            Path("terraformController.config"),
+            Path("privateWorkerReplacement.config"),
         )
 
 

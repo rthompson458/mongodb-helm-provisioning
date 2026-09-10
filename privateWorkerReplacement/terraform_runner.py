@@ -1,4 +1,4 @@
-"""Prepare and execute the Terraform module used by terraformController.
+"""Prepare and execute the Terraform module used by privateWorkerReplacement.
 
 This file is the bridge between Python orchestration and Terraform. Python
 builds desired-state JSON and a small one-shot operation description, then this
@@ -52,7 +52,7 @@ def _check_version() -> None:
         raise ControllerError("Could not determine Terraform version.") from exc
     if (major, minor) < (1, 11):
         raise ControllerError(
-            f"Terraform {version} is installed; terraformController requires 1.11 or newer."
+            f"Terraform {version} is installed; privateWorkerReplacement requires 1.11 or newer."
         )
 
 
@@ -110,7 +110,7 @@ def _terraform_execution_lock(config: dict[str, Any]):
 
     cache: Path = config["terraform_cache"]
     cache.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = cache.parent / f".{cache.name}.terraformController.lock"
+    lock_path = cache.parent / f".{cache.name}.privateWorkerReplacement.lock"
 
     with lock_path.open("a+", encoding="utf-8") as handle:
         log_event("terraform.execution_lock.waiting", lock_file=str(lock_path))

@@ -6,8 +6,8 @@ import os
 import unittest
 from unittest.mock import patch
 
-from terraform_controller.common import ControllerError
-from terraform_controller.vault import VaultClient
+from privateWorkerReplacement.common import ControllerError
+from privateWorkerReplacement.vault import VaultClient
 
 
 CONFIG = {

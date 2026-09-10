@@ -8,7 +8,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
-from terraform_controller import deployments
+from privateWorkerReplacement import deployments
 
 from helpers import FakeVault, deployment_inventory, online_sc_status, topology_lock
 

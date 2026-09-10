@@ -32,7 +32,7 @@ class HarnessCliTests(unittest.TestCase):
         self.assertIn("FULL GAUNTLET", result.stdout)
         self.assertIn("--profile", result.stdout)
         self.assertEqual(result.stderr, "")
-        self.assertNotIn("terraformController Live Test Harness\n=", result.stdout)
+        self.assertNotIn("privateWorkerReplacement Live Test Harness\n=", result.stdout)
 
     def test_help_explains_profiles_safety_and_default_config(self) -> None:
         result = self._run("--help")
@@ -43,7 +43,7 @@ class HarnessCliTests(unittest.TestCase):
         self.assertIn("--allow-changes", result.stdout)
         self.assertNotIn("--allow-mutations", result.stdout)
         self.assertNotIn("--allow-destructive", result.stdout)
-        self.assertIn("./terraformController.config", result.stdout)
+        self.assertIn("./privateWorkerReplacement.config", result.stdout)
         self.assertIn(
             "python3 tests/run_harness.py --profile all --allow-changes",
             result.stdout,

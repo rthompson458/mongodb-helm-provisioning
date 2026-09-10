@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from terraform_controller.async_operations import (
+from privateWorkerReplacement.async_operations import (
     ASYNC_COMMANDS,
     admin_submission_instructions,
     create_operation,
@@ -19,7 +19,7 @@ from terraform_controller.async_operations import (
     operation_directory,
     public_submission_instructions,
 )
-from terraform_controller.common import ControllerError
+from privateWorkerReplacement.common import ControllerError
 
 
 class AsyncOperationTests(unittest.TestCase):
@@ -29,7 +29,7 @@ class AsyncOperationTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.config_path = self.root / "checkout" / "terraformController.config"
+        self.config_path = self.root / "checkout" / "privateWorkerReplacement.config"
         self.config_path.parent.mkdir()
         self.config_path.write_text("[dummy]\n", encoding="utf-8")
 
@@ -113,12 +113,12 @@ class AsyncOperationTests(unittest.TestCase):
             details=[("ShardedCluster", "SC9")],
             status_text="Topology change requested",
             status_arguments=["ListShards", "SC9"],
-            config_display="./terraformController.config",
+            config_display="./privateWorkerReplacement.config",
         )
         self.assertIn("AddShard request accepted.", text)
         self.assertIn("ShardedCluster: SC9", text)
-        self.assertIn("python3 terraformController.py", text)
-        self.assertIn("--config ./terraformController.config", text)
+        self.assertIn("python3 privateWorkerReplacement.py", text)
+        self.assertIn("--config ./privateWorkerReplacement.config", text)
         self.assertIn("ListShards SC9", text)
         self.assertNotIn(str(self.config_path.resolve()), text)
         self.assertNotIn("/usr/bin/python3", text)
@@ -139,12 +139,12 @@ class AsyncOperationTests(unittest.TestCase):
             details=[("Deployment", "RS1"), ("Database", "HouseInfo")],
             status_text="Creation requested",
             status_arguments=["ListDatabase", "RS1", "HouseInfo"],
-            config_display="./terraformController.config",
+            config_display="./privateWorkerReplacement.config",
         )
         self.assertIn("Deployment:     RS1", text)
         self.assertIn("Database:       HouseInfo", text)
         self.assertIn("ListDatabase RS1 HouseInfo", text)
-        self.assertIn("--config ./terraformController.config", text)
+        self.assertIn("--config ./privateWorkerReplacement.config", text)
 
     def test_admin_submission_exposes_exact_operation_diagnostics(self) -> None:
         state = create_operation(
@@ -156,12 +156,12 @@ class AsyncOperationTests(unittest.TestCase):
         text = admin_submission_instructions(
             self.config_path,
             state,
-            config_display="./terraformController.config",
+            config_display="./privateWorkerReplacement.config",
         )
         self.assertIn("Operation ID:", text)
         self.assertIn(state["operation_id"], text)
-        self.assertIn("python3 terraformControllerAdmin.py", text)
-        self.assertIn("--config ./terraformController.config", text)
+        self.assertIn("python3 privateWorkerReplacementAdmin.py", text)
+        self.assertIn("--config ./privateWorkerReplacement.config", text)
         self.assertNotIn(str(self.config_path.resolve()), text)
         self.assertNotIn("/usr/bin/python3", text)
         self.assertIn("ListOperation", text)

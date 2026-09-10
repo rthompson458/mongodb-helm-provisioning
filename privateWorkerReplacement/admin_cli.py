@@ -1,7 +1,7 @@
-"""Administrator command-line interface for terraformController.
+"""Administrator command-line interface for privateWorkerReplacement.
 
-This module is intentionally separate from terraform_controller.cli.
-Customer-facing database/deployment commands belong in terraformController.py;
+This module is intentionally separate from privateWorkerReplacement.cli.
+Customer-facing database/deployment commands belong in privateWorkerReplacement.py;
 platform diagnostics, repair, reconciliation, and guarded recovery belong here.
 
 The executable split improves clarity but is not an authorization boundary.
@@ -40,7 +40,7 @@ from .vault import VaultClient
 # entry point for detached recovery workers. DEFAULT_CONFIG_DISPLAY is the
 # friendly path an operator sees and types; DEFAULT_CONFIG is the Path object.
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CONFIG_DISPLAY = "./terraformController.config"
+DEFAULT_CONFIG_DISPLAY = "./privateWorkerReplacement.config"
 DEFAULT_CONFIG = Path(DEFAULT_CONFIG_DISPLAY)
 
 
@@ -76,14 +76,14 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the platform-administrator CLI contract."""
 
     parser = argparse.ArgumentParser(
-        prog="terraformControllerAdmin.py",
+        prog="privateWorkerReplacementAdmin.py",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="""terraformController platform administration interface.
+        description="""privateWorkerReplacement platform administration interface.
 
 This program is for authorized platform administrators and service operators.
 It is NOT the DBaaS end-user interface.
 
-Use terraformController.py for normal:
+Use privateWorkerReplacement.py for normal:
   - ReplicaSet and ShardedCluster lifecycle
   - shard lifecycle
   - database lifecycle
@@ -97,7 +97,7 @@ Use this administrator program for:
   - controller-wide Terraform reconciliation
 
 Default configuration file:
-  ./terraformController.config
+  ./privateWorkerReplacement.config
 
 Detailed Git/Terraform output is written to the daily operations log instead of
 being dumped onto the administrator terminal.
@@ -108,30 +108,30 @@ Use '<command> --help' for detailed command-specific help.
         epilog="""Common administrator workflow:
 
 Verify controller-managed resource state:
-  python3 terraformControllerAdmin.py ListManagedResources
+  python3 privateWorkerReplacementAdmin.py ListManagedResources
 
 Inspect recent background work:
-  python3 terraformControllerAdmin.py ListOperations
+  python3 privateWorkerReplacementAdmin.py ListOperations
 
 Inspect one operation:
-  python3 terraformControllerAdmin.py ListOperation OPERATION_ID
+  python3 privateWorkerReplacementAdmin.py ListOperation OPERATION_ID
 
 Reapply managed desired state:
-  python3 terraformControllerAdmin.py Reconcile
+  python3 privateWorkerReplacementAdmin.py Reconcile
 
 Exceptional recovery:
-  python3 terraformControllerAdmin.py RecoverDeploymentLock SC9 --confirm
-  python3 terraformControllerAdmin.py RecoverOrphanedResources --confirm
+  python3 privateWorkerReplacementAdmin.py RecoverDeploymentLock SC9 --confirm
+  python3 privateWorkerReplacementAdmin.py RecoverOrphanedResources --confirm
 
 Normal DBaaS users should use:
-  python3 terraformController.py --help
+  python3 privateWorkerReplacement.py --help
 """,
     )
     parser.add_argument(
         "--config",
         default=DEFAULT_CONFIG_DISPLAY,
         metavar="FILE",
-        help="Optional configuration file. Default: ./terraformController.config",
+        help="Optional configuration file. Default: ./privateWorkerReplacement.config",
     )
     parser.add_argument(
         "--_operation-worker",
@@ -147,10 +147,10 @@ Normal DBaaS users should use:
         "ListManagedResources",
         "List controller-managed deployment resources and zero-state status.",
         "Read-only administrator inventory of Vault-backed managed deployments, "
-        "terraformController-managed MongoDB and MongoDBUser custom resources, persistent "
+        "privateWorkerReplacement-managed MongoDB and MongoDBUser custom resources, persistent "
         "volume claims, persistent volumes, and deployment-lock ConfigMaps. Reports "
         "CLEAN only when all six categories are empty.",
-        "  python3 terraformControllerAdmin.py ListManagedResources",
+        "  python3 privateWorkerReplacementAdmin.py ListManagedResources",
     )
 
     x = _sub(
@@ -161,7 +161,7 @@ Normal DBaaS users should use:
         "elapsed time, worker PID, daily operations-log path, and recorded message. "
         "This diagnostic detail is intentionally available only on the administrator "
         "interface.",
-        "  python3 terraformControllerAdmin.py ListOperation 7c1349abc123",
+        "  python3 privateWorkerReplacementAdmin.py ListOperation 7c1349abc123",
     )
     x.add_argument(
         "operation_id",
@@ -175,7 +175,7 @@ Normal DBaaS users should use:
         "List recent background controller operations.",
         "Shows up to 50 recent asynchronous controller operations with their "
         "operation IDs, commands, scopes, results, and elapsed times.",
-        "  python3 terraformControllerAdmin.py ListOperations",
+        "  python3 privateWorkerReplacementAdmin.py ListOperations",
     )
 
     x = _sub(
@@ -187,7 +187,7 @@ Normal DBaaS users should use:
         "verifies the recorded target, live MongoDB shardCount, surviving shard "
         "readiness, config servers, mongos, and removed StatefulSets. The lock release "
         "remains Terraform-driven.",
-        "  python3 terraformControllerAdmin.py RecoverDeploymentLock SC9 --confirm",
+        "  python3 privateWorkerReplacementAdmin.py RecoverDeploymentLock SC9 --confirm",
     )
     x.add_argument(
         "deployment",
@@ -202,10 +202,10 @@ Normal DBaaS users should use:
         "Finish Terraform cleanup after desired-state inventory is already empty.",
         "Exceptional controller-state recovery. The command is allowed only when "
         "Vault-backed managed deployment inventory is empty AND Kubernetes contains "
-        "no terraformController-managed MongoDB custom resources. If both checks pass, "
+        "no privateWorkerReplacement-managed MongoDB custom resources. If both checks pass, "
         "Terraform converges the controller backend to empty desired state and finishes "
         "destroying resources still tracked in state.",
-        "  python3 terraformControllerAdmin.py RecoverOrphanedResources --confirm",
+        "  python3 privateWorkerReplacementAdmin.py RecoverOrphanedResources --confirm",
     )
     _confirm(x)
 
@@ -216,7 +216,7 @@ Normal DBaaS users should use:
         "Reloads managed desired state from Vault, refreshes Terraform, reapplies the "
         "complete controller-managed environment, and waits for convergence. Reconcile "
         "refuses to run while a protected ShardedCluster change is active.",
-        "  python3 terraformControllerAdmin.py Reconcile",
+        "  python3 privateWorkerReplacementAdmin.py Reconcile",
     )
 
     return parser
@@ -287,7 +287,7 @@ def main(argv: list[str] | None = None) -> int:
                 command=args.command,
                 deployment="controller-state",
                 worker_arguments=_recover_orphans_worker_arguments(args),
-                entrypoint_name="terraformControllerAdmin.py",
+                entrypoint_name="privateWorkerReplacementAdmin.py",
             )
             print(
                 admin_submission_instructions(

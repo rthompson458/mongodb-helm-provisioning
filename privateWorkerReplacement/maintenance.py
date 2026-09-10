@@ -25,7 +25,7 @@ from .terraform_runner import apply_inventory
 from .vault import VaultClient
 
 
-MANAGED_BY_SELECTOR = "app.kubernetes.io/managed-by=terraformController"
+MANAGED_BY_SELECTOR = "app.kubernetes.io/managed-by=privateWorkerReplacement"
 DEPLOYMENT_LOCK_PREFIX = "tc-deployment-lock-"
 
 
@@ -49,7 +49,7 @@ def managed_resource_inventory(
     desired deployment inventory with the Kubernetes resources used during the
     controller zero-state check: managed MongoDB custom resources, managed
     MongoDBUser custom resources, managed PVCs, managed PVs, and
-    terraformController deployment-lock ConfigMaps.
+    privateWorkerReplacement deployment-lock ConfigMaps.
     """
 
     inventory = vault.load_inventory()
@@ -115,7 +115,7 @@ def list_managed_resources(
     ]
     clean = all(not resources[key] for _, key in labels)
 
-    print("terraformController Managed Resource Inventory")
+    print("privateWorkerReplacement Managed Resource Inventory")
     print()
     for label, key in labels:
         print(f"{label + ':':<21} {len(resources[key])}")
@@ -140,7 +140,7 @@ def reconcile(config: dict[str, Any], vault: VaultClient) -> None:
     """Reapply complete Vault-backed desired state and verify convergence."""
     inventory = vault.load_inventory()
     if not inventory:
-        print("No terraformController-managed MongoDB deployments exist. Nothing to reconcile.")
+        print("No privateWorkerReplacement-managed MongoDB deployments exist. Nothing to reconcile.")
         return
 
     # Reconcile touches the complete inventory.  Refuse to start while any
@@ -242,7 +242,7 @@ def recover_deployment_lock(
     if not confirmed:
         raise ControllerError(
             "RecoverDeploymentLock is a recovery action and requires '--confirm'. "
-            f"Example: terraformControllerAdmin.py RecoverDeploymentLock {name} --confirm"
+            f"Example: privateWorkerReplacementAdmin.py RecoverDeploymentLock {name} --confirm"
         )
 
     inventory = vault.load_inventory()
@@ -350,7 +350,7 @@ def recover_orphaned_resources(
     Safety rules are intentionally strict:
     - explicit --confirm is required,
     - Vault inventory must already be completely empty,
-    - Kubernetes must contain no terraformController-managed MongoDB CRs.
+    - Kubernetes must contain no privateWorkerReplacement-managed MongoDB CRs.
 
     Only after both independent checks prove there is no live managed deployment
     does Terraform receive an empty desired-state inventory so it can finish
@@ -360,7 +360,7 @@ def recover_orphaned_resources(
     if not confirmed:
         raise ControllerError(
             "RecoverOrphanedResources is destructive and requires '--confirm'. "
-            "Example: terraformControllerAdmin.py RecoverOrphanedResources --confirm"
+            "Example: privateWorkerReplacementAdmin.py RecoverOrphanedResources --confirm"
         )
 
     inventory = vault.load_inventory()
@@ -376,7 +376,7 @@ def recover_orphaned_resources(
     live = kube.list_json(
         config,
         "mongodb",
-        label_selector="app.kubernetes.io/managed-by=terraformController",
+        label_selector="app.kubernetes.io/managed-by=privateWorkerReplacement",
     )
     if live:
         names = ", ".join(
@@ -385,13 +385,13 @@ def recover_orphaned_resources(
         )
         raise ControllerError(
             "RecoverOrphanedResources refused because live "
-            "terraformController-managed MongoDB resource(s) still exist: "
+            "privateWorkerReplacement-managed MongoDB resource(s) still exist: "
             f"{names}."
         )
 
     log_event("orphaned_resources.recovery.requested")
     print(
-        "Vault inventory is empty and no live terraformController-managed "
+        "Vault inventory is empty and no live privateWorkerReplacement-managed "
         "MongoDB deployments exist."
     )
     print("Applying empty desired state through Terraform to finish orphan cleanup ...")
@@ -401,7 +401,7 @@ def recover_orphaned_resources(
     remaining = kube.list_json(
         config,
         "mongodb",
-        label_selector="app.kubernetes.io/managed-by=terraformController",
+        label_selector="app.kubernetes.io/managed-by=privateWorkerReplacement",
     )
     if remaining:
         raise ControllerError(
@@ -409,6 +409,6 @@ def recover_orphaned_resources(
         )
 
     log_event("orphaned_resources.recovery.succeeded")
-    print("\nOrphaned terraformController resources were successfully reconciled.")
+    print("\nOrphaned privateWorkerReplacement resources were successfully reconciled.")
     print("Managed deployments: 0")
     print("Status:              Clean")

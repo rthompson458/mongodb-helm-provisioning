@@ -1,6 +1,6 @@
-# terraformController Administrator Guide
+# privateWorkerReplacement Administrator Guide
 
-`terraformControllerAdmin.py` is the platform-administrator interface for the MongoDB DBaaS controller. It is intentionally separate from the customer-facing `terraformController.py` command.
+`privateWorkerReplacementAdmin.py` is the platform-administrator interface for the MongoDB DBaaS controller. It is intentionally separate from the customer-facing `privateWorkerReplacement.py` command.
 
 Use the customer CLI for normal deployment, shard, database, credential, and service-status work. Use the administrator CLI for operation diagnostics, reconciliation, managed-resource inventory, and exceptional recovery.
 
@@ -13,13 +13,13 @@ The executable split is an interface boundary, not an authorization boundary. Pr
 Run the program with no command to show the full administrator help screen:
 
 ```bash
-python3 terraformControllerAdmin.py
+python3 privateWorkerReplacementAdmin.py
 ```
 
 This is intentionally equivalent to:
 
 ```bash
-python3 terraformControllerAdmin.py --help
+python3 privateWorkerReplacementAdmin.py --help
 ```
 
 Both forms print help and exit successfully.
@@ -27,18 +27,18 @@ Both forms print help and exit successfully.
 Show command-specific help:
 
 ```bash
-python3 terraformControllerAdmin.py ListManagedResources --help
-python3 terraformControllerAdmin.py ListOperations --help
-python3 terraformControllerAdmin.py ListOperation --help
-python3 terraformControllerAdmin.py Reconcile --help
-python3 terraformControllerAdmin.py RecoverDeploymentLock --help
-python3 terraformControllerAdmin.py RecoverOrphanedResources --help
+python3 privateWorkerReplacementAdmin.py ListManagedResources --help
+python3 privateWorkerReplacementAdmin.py ListOperations --help
+python3 privateWorkerReplacementAdmin.py ListOperation --help
+python3 privateWorkerReplacementAdmin.py Reconcile --help
+python3 privateWorkerReplacementAdmin.py RecoverDeploymentLock --help
+python3 privateWorkerReplacementAdmin.py RecoverOrphanedResources --help
 ```
 
 The administrator interface uses the same Vault token as the public controller and assumes this configuration file in the current working directory:
 
 ```text
-./terraformController.config
+./privateWorkerReplacement.config
 ```
 
 Use `--config FILE` only when another configuration file is intentionally selected. Do not store the Vault token in the config file.
@@ -56,14 +56,14 @@ Use `--config FILE` only when another configuration file is intentionally select
 | `RecoverDeploymentLock SC --confirm` | Release a completed but stranded ShardedCluster topology lock after safety validation | Yes |
 | `RecoverOrphanedResources --confirm` | Finish Terraform cleanup after desired-state inventory is already empty | Yes |
 
-These commands are deliberately not accepted by `terraformController.py`.
+These commands are deliberately not accepted by `privateWorkerReplacement.py`.
 
 ---
 
 ## 3. ListManagedResources
 
 ```bash
-python3 terraformControllerAdmin.py ListManagedResources
+python3 privateWorkerReplacementAdmin.py ListManagedResources
 ```
 
 This is the read-only managed-resource inventory and zero-state check. It combines Vault-backed deployment inventory with controller-managed Kubernetes resources:
@@ -80,7 +80,7 @@ Deployment locks
 A clean environment reports:
 
 ```text
-terraformController Managed Resource Inventory
+privateWorkerReplacement Managed Resource Inventory
 
 Managed deployments:             0
 MongoDB resources:               0
@@ -128,7 +128,7 @@ The customer CLI intentionally hides internal operation IDs. Administrators can 
 ### ListOperations
 
 ```bash
-python3 terraformControllerAdmin.py ListOperations
+python3 privateWorkerReplacementAdmin.py ListOperations
 ```
 
 Shows up to 50 recent operations with:
@@ -153,7 +153,7 @@ Interrupted
 ### ListOperation
 
 ```bash
-python3 terraformControllerAdmin.py ListOperation 7c1349abc123
+python3 privateWorkerReplacementAdmin.py ListOperation 7c1349abc123
 ```
 
 Shows detailed status for one operation:
@@ -219,7 +219,7 @@ Controller code must not intentionally write Vault tokens or managed plaintext p
 ## 6. Reconcile
 
 ```bash
-python3 terraformControllerAdmin.py Reconcile
+python3 privateWorkerReplacementAdmin.py Reconcile
 ```
 
 `Reconcile` is the normal administrator convergence/repair command. It:
@@ -241,7 +241,7 @@ Routine Git/Terraform output is captured in the daily operations log instead of 
 ## 7. RecoverDeploymentLock
 
 ```bash
-python3 terraformControllerAdmin.py RecoverDeploymentLock SC9 --confirm
+python3 privateWorkerReplacementAdmin.py RecoverDeploymentLock SC9 --confirm
 ```
 
 This is exceptional recovery, not a normal completion command.
@@ -269,7 +269,7 @@ Only after those checks pass does Terraform release the exact existing lock. Do 
 ## 8. RecoverOrphanedResources
 
 ```bash
-python3 terraformControllerAdmin.py RecoverOrphanedResources --confirm
+python3 privateWorkerReplacementAdmin.py RecoverOrphanedResources --confirm
 ```
 
 This is the most restrictive recovery command. It exists for a partial deployment destroy where desired-state inventory is already empty but Terraform still tracks controller-managed resources that need cleanup.
@@ -278,7 +278,7 @@ Before mutation is allowed, the controller independently requires:
 
 ```text
 Vault-backed managed deployment inventory = empty
-Live terraformController-managed MongoDB CRs = none
+Live privateWorkerReplacement-managed MongoDB CRs = none
 ```
 
 If either check fails, recovery stops.
@@ -295,10 +295,10 @@ Scope:          controller-state
 Status:         In Progress
 
 Check administrator operation status with:
-  python3 terraformControllerAdmin.py --config ./terraformController.config ListOperation ab0c98165276
+  python3 privateWorkerReplacementAdmin.py --config ./privateWorkerReplacement.config ListOperation ab0c98165276
 ```
 
-The detached recovery worker resolves the configuration file to an absolute path internally. Routine administrator instructions continue to show the friendlier `./terraformController.config` path.
+The detached recovery worker resolves the configuration file to an absolute path internally. Routine administrator instructions continue to show the friendlier `./privateWorkerReplacement.config` path.
 
 ---
 
@@ -307,33 +307,33 @@ The detached recovery worker resolves the configuration file to an absolute path
 Verify managed state:
 
 ```bash
-python3 terraformController.py ListDeployments
-python3 terraformControllerAdmin.py ListManagedResources
+python3 privateWorkerReplacement.py ListDeployments
+python3 privateWorkerReplacementAdmin.py ListManagedResources
 ```
 
 If normal managed desired state exists and should simply be reapplied:
 
 ```bash
-python3 terraformControllerAdmin.py Reconcile
+python3 privateWorkerReplacementAdmin.py Reconcile
 ```
 
 If an AddShard/DeleteShard topology lock remains but the target topology is already healthy, first inspect:
 
 ```bash
-python3 terraformController.py ListShards SC9
-python3 terraformControllerAdmin.py ListOperations
+python3 privateWorkerReplacement.py ListShards SC9
+python3 privateWorkerReplacementAdmin.py ListOperations
 ```
 
 Then, only after understanding the state:
 
 ```bash
-python3 terraformControllerAdmin.py RecoverDeploymentLock SC9 --confirm
+python3 privateWorkerReplacementAdmin.py RecoverDeploymentLock SC9 --confirm
 ```
 
 If Vault inventory is empty, managed MongoDB CRs are gone, but Terraform-managed leftovers remain:
 
 ```bash
-python3 terraformControllerAdmin.py RecoverOrphanedResources --confirm
+python3 privateWorkerReplacementAdmin.py RecoverOrphanedResources --confirm
 ```
 
 If a live managed MongoDB deployment still exists, do not use orphan recovery. Investigate the desired state and use the normal lifecycle/Reconcile path.
@@ -344,7 +344,7 @@ If a live managed MongoDB deployment still exists, do not use orphan recovery. I
 
 | Concern | Public CLI | Administrator CLI |
 | --- | --- | --- |
-| Executable | `terraformController.py` | `terraformControllerAdmin.py` |
+| Executable | `privateWorkerReplacement.py` | `privateWorkerReplacementAdmin.py` |
 | Audience | DBaaS consumer | Platform operator |
 | No-argument behavior | Full public help | Full administrator help |
 | Deployment lifecycle | Yes | No |
@@ -367,32 +367,32 @@ The public CLI should read like a service product. The administrator CLI should 
 Customer entry point:
 
 ```text
-terraformController.py
-terraform_controller/cli.py
+privateWorkerReplacement.py
+privateWorkerReplacement/cli.py
 ```
 
 Administrator entry point:
 
 ```text
-terraformControllerAdmin.py
-terraform_controller/admin_cli.py
-terraform_controller/admin_status.py
+privateWorkerReplacementAdmin.py
+privateWorkerReplacement/admin_cli.py
+privateWorkerReplacement/admin_status.py
 ```
 
 Shared lifecycle/support modules include:
 
 ```text
-terraform_controller/deployments.py
-terraform_controller/databases.py
-terraform_controller/database_status.py
-terraform_controller/maintenance.py
-terraform_controller/deployment_lock.py
-terraform_controller/terraform_runner.py
-terraform_controller/async_operations.py
-terraform_controller/logging_component.py
-terraform_controller/runtime_paths.py
-terraform_controller/kube.py
-terraform_controller/vault.py
+privateWorkerReplacement/deployments.py
+privateWorkerReplacement/databases.py
+privateWorkerReplacement/database_status.py
+privateWorkerReplacement/maintenance.py
+privateWorkerReplacement/deployment_lock.py
+privateWorkerReplacement/terraform_runner.py
+privateWorkerReplacement/async_operations.py
+privateWorkerReplacement/logging_component.py
+privateWorkerReplacement/runtime_paths.py
+privateWorkerReplacement/kube.py
+privateWorkerReplacement/vault.py
 ```
 
 Managed infrastructure mutations remain Terraform-driven. The Python controller validates, coordinates, waits, reports, and logs; it does not bypass Terraform to directly mutate managed MongoDB/Vault/Kubernetes lifecycle state.
@@ -403,7 +403,7 @@ Managed infrastructure mutations remain Terraform-driven. The Python controller 
 
 This proof of concept establishes a clear interface and recovery model. A production implementation should additionally define:
 
-- who may execute `terraformControllerAdmin.py`;
+- who may execute `privateWorkerReplacementAdmin.py`;
 - durable centralized log retention/forwarding;
 - Terraform backend access controls;
 - Kubernetes RBAC appropriate to customer vs administrator workflows;

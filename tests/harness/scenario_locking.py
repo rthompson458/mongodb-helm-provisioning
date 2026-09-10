@@ -5,10 +5,10 @@ from __future__ import annotations
 import subprocess
 import time
 
-from terraform_controller import kube
-from terraform_controller.async_operations import effective_result, load_operation
-from terraform_controller.config import load_config
-from terraform_controller.deployment_lock import lock_name
+from privateWorkerReplacement import kube
+from privateWorkerReplacement.async_operations import effective_result, load_operation
+from privateWorkerReplacement.config import load_config
+from privateWorkerReplacement.deployment_lock import lock_name
 
 from .models import AsyncOperation
 from .runner import HarnessRunner

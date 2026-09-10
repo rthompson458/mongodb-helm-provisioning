@@ -7,7 +7,7 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from terraform_controller import databases, deployment_lock, deployments
+from privateWorkerReplacement import databases, deployment_lock, deployments
 
 from helpers import FakeVault, deployment_inventory, online_sc_status, topology_lock
 
