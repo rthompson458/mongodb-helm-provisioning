@@ -4,17 +4,21 @@ Terraform-driven MongoDB Database as a Service proof of concept for ReplicaSet a
 
 ## Start here
 
-Normal DBaaS users use:
+Normal DBaaS users can run either form to show the full public help screen:
 
 ```bash
+python3 terraformController.py
 python3 terraformController.py --help
 ```
 
-Platform administrators use:
+Platform administrators can run either form to show the full administrator help screen:
 
 ```bash
+python3 terraformControllerAdmin.py
 python3 terraformControllerAdmin.py --help
 ```
+
+Running either executable with no command is intentional. It prints the full help text and exits successfully instead of returning an argparse `COMMAND` error.
 
 The complete customer/operator manual is:
 
@@ -50,10 +54,18 @@ After the ReplicaSet is Running, request a database:
 python3 terraformController.py AddDatabase RS1 HouseInfo
 ```
 
-Database creation is also asynchronous. Check database/account availability with:
+Database creation is also asynchronous. Check database lifecycle status with:
 
 ```bash
 python3 terraformController.py ListDatabase RS1 HouseInfo
+```
+
+`ListDatabase` reports the database itself, including lifecycle/service status such as `Creating`, `Ready`, `Deleting`, or `Unavailable` as applicable.
+
+After the database is `Ready`, inspect its three managed accounts and Vault credential locations with:
+
+```bash
+python3 terraformController.py ListDatabaseAccounts RS1 HouseInfo
 ```
 
 Every managed database receives exactly three accounts:
@@ -64,7 +76,7 @@ HouseInfo_readWrite  -> readWrite
 HouseInfo_read       -> read
 ```
 
-`ListDatabase` shows each account, its status and password-rotation timing, the Vault secret path, and a complete Vault browser URL for retrieving credentials.
+`ListDatabaseAccounts` shows account status, password-rotation information, Vault secret paths, and complete Vault browser URLs.
 
 ## Two intentionally separate command interfaces
 
@@ -134,6 +146,8 @@ DeleteDatabase DATABASE --confirm
 ListDatabases [DEPLOYMENT]
 ListDatabase DEPLOYMENT DATABASE
 ListDatabase DATABASE
+ListDatabaseAccounts DEPLOYMENT DATABASE
+ListDatabaseAccounts DATABASE
 RotatePasswords DEPLOYMENT DATABASE
 RotatePasswords DATABASE
 DisableOwner DEPLOYMENT DATABASE --confirm
@@ -141,6 +155,27 @@ DisableOwner DATABASE --confirm
 ```
 
 The one-argument database forms are valid only when exactly one managed deployment exists.
+
+`ListDatabases` and `ListDatabase` report database-level lifecycle/service status. Account rows are intentionally excluded from those commands. `ListDatabaseAccounts` owns the three-account, rotation, Enabled/Disabled, and Vault credential view.
+
+## Database status model
+
+Database-level status can include:
+
+```text
+Creating
+Ready
+Deleting
+Unavailable
+```
+
+`Creating` can be visible immediately after an asynchronous AddDatabase request, even before normal database inventory has been fully committed.
+
+`Deleting` indicates an active asynchronous DeleteDatabase operation.
+
+`Ready` requires the parent deployment to be healthy enough to serve the database. For a ShardedCluster, that includes all expected shards, config servers, and mongos being Online.
+
+`Unavailable` means the database is known to the controller but its parent deployment is not sufficiently healthy for normal service.
 
 ## Asynchronous customer requests
 
@@ -230,7 +265,7 @@ mongodb/RS1/HouseInfo/HouseInfo_readWrite
 mongodb/RS1/HouseInfo/HouseInfo_read
 ```
 
-For a Vault address of `http://127.0.0.1:8200` and the `secret` KV mount, the owner credential is also displayed as a complete browser URL:
+For a Vault address of `http://127.0.0.1:8200` and the `secret` KV mount, the owner credential is displayed by `ListDatabaseAccounts` as a complete browser URL:
 
 ```text
 http://127.0.0.1:8200/ui/vault/secrets/secret/show/mongodb/RS1/HouseInfo/HouseInfo_owner
@@ -274,9 +309,9 @@ The JSON state files are not user logs; they are small machine-readable records 
 
 Controller code must not intentionally write Vault tokens or managed plaintext passwords to these logs.
 
-## Administrator zero-state check
+## Administrator managed-resource check
 
-After testing, cleanup, or a recovery operation, an administrator can verify that no controller-managed deployment resources remain:
+After testing, cleanup, or a recovery operation, an administrator can inspect controller-managed deployment resources with:
 
 ```bash
 python3 terraformControllerAdmin.py ListManagedResources
@@ -294,6 +329,14 @@ Deployment locks:     0
 
 Status: CLEAN
 ```
+
+An active environment with legitimate managed resources reports:
+
+```text
+Status: MANAGED RESOURCES PRESENT
+```
+
+That status is informational. It does not, by itself, indicate a health problem.
 
 ## Testing
 
