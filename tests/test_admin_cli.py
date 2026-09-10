@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from terraform_controller import admin_cli
 
@@ -76,7 +77,6 @@ class AdminCliTests(unittest.TestCase):
             ["RecoverOrphanedResources", "--confirm"],
         )
 
-
     def test_admin_help_identifies_operator_interface(self) -> None:
         help_text = admin_cli.build_parser().format_help()
         self.assertIn("platform administration interface", help_text)
@@ -86,6 +86,19 @@ class AdminCliTests(unittest.TestCase):
         self.assertIn("RecoverOrphanedResources", help_text)
         self.assertIn("Reconcile", help_text)
         self.assertIn("NOT the DBaaS end-user interface", help_text)
+        self.assertIn("./terraformController.config", help_text)
+
+    def test_admin_default_config_is_current_directory_file(self) -> None:
+        args = admin_cli.build_parser().parse_args(["ListOperations"])
+        self.assertEqual(args.config, "./terraformController.config")
+        self.assertEqual(
+            admin_cli.DEFAULT_CONFIG_DISPLAY,
+            "./terraformController.config",
+        )
+        self.assertEqual(
+            admin_cli.DEFAULT_CONFIG,
+            Path("terraformController.config"),
+        )
 
 
 if __name__ == "__main__":
