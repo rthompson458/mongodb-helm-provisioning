@@ -28,8 +28,8 @@ jobs:
       - name: Run controller unit tests
         run: python3 -m unittest discover -s tests -p "test_*.py" -v
 
-      - name: Validate live harness CLI
-        run: python3 tests/run_harness.py --help
+      - name: Validate live harness no-argument help
+        run: python3 tests/run_harness.py
 
       - name: Validate lifecycle Bash syntax
         run: bash -n terraform-dbaas/scripts/lifecycle.sh

@@ -17,28 +17,37 @@ Run all unit tests:
 python3 -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-The unit suite covers command parsing, configuration validation, deployment/database lifecycle ordering, database lifecycle/status presentation, database-account presentation, ShardedCluster locking, Kubernetes status interpretation, logging, asynchronous operation state, maintenance/recovery, Vault inventory, and lifecycle-script regressions.
+The unit suite covers command parsing, configuration validation, deployment/database lifecycle ordering, database lifecycle/status presentation, database-account presentation, ShardedCluster locking, Kubernetes status interpretation, logging, asynchronous operation state, maintenance/recovery, Vault inventory, lifecycle-script regressions, and live-harness CLI behavior.
 
-The suite also contains end-to-end CLI-entry-point regression tests for the no-argument behavior:
+The suite also contains end-to-end CLI-entry-point regression tests for no-argument help behavior:
 
 ```bash
 python3 terraformController.py
 python3 terraformControllerAdmin.py
+python3 tests/run_harness.py
 ```
 
-Both commands must print their full help text, exit with code `0`, and avoid the argparse `COMMAND` error.
+All three commands must print their help text and exit successfully instead of returning an argparse error or starting work.
 
-GitHub Actions runs this suite as part of the repository validation workflow.
+GitHub Actions runs the unit suite as part of the repository validation workflow.
 
 ---
 
 ## 2. Live harness
 
-The live harness entry point is:
+Run the harness with no arguments to show its complete help screen:
+
+```bash
+python3 tests/run_harness.py
+```
+
+This is intentionally equivalent to:
 
 ```bash
 python3 tests/run_harness.py --help
 ```
+
+No live tests run when no arguments are supplied. An actual harness run requires an explicit `--profile`.
 
 For mutating profiles, the real execution path is:
 
@@ -54,27 +63,17 @@ Harness
 
 The harness does not treat an asynchronous request acknowledgement as success. It correlates the private operation-state record and polls `terraformControllerAdmin.py ListOperation` until the operation reports a terminal result.
 
-That rule applies to deployment, shard, and database create/delete requests.
-
 Database status and account status are tested separately. `ListDatabase` verifies database-level lifecycle/service state. `ListDatabaseAccounts` verifies the three managed account rows and credential-facing output.
 
 ---
 
 ## 3. Profiles
 
-Supported profiles:
+Every profile starts with the same 5 read-only preflight checks. The selected profile then adds its own live checks.
 
-```text
-preflight
-replicaset
-sharded
-locking
-all
-```
+### Preflight — 5 total checks
 
-### Preflight
-
-Safe, read-only environment check:
+Safe and read-only:
 
 ```bash
 python3 tests/run_harness.py --profile preflight
@@ -88,133 +87,99 @@ It verifies:
 - Terraform is available;
 - kubectl is available.
 
-### ReplicaSet
+It creates, changes, and deletes nothing.
+
+### ReplicaSet — 15 total checks
 
 ```bash
-python3 tests/run_harness.py \
-  --profile replicaset \
-  --allow-mutations \
-  --allow-destructive
+python3 tests/run_harness.py --profile replicaset --allow-mutations --allow-destructive
 ```
 
-The ReplicaSet scenario:
+The ReplicaSet scenario adds 10 lifecycle checks after preflight. It creates a temporary ReplicaSet and database, verifies database/account status, verifies blocked deletion while the database exists, rotates credentials, disables Owner, deletes the database, and deletes the temporary ReplicaSet.
 
-1. asynchronously creates a temporary ReplicaSet;
-2. waits for operation success and verifies ReplicaSet status;
-3. asynchronously creates a database;
-4. waits for operation success and verifies `ListDatabase` reports the database `Ready`;
-5. verifies `ListDatabaseAccounts` reports the three managed accounts;
-6. verifies ReplicaSet deletion is blocked while the database exists;
-7. rotates all three database passwords;
-8. disables the Owner account;
-9. asynchronously deletes the database and waits for success;
-10. asynchronously deletes the ReplicaSet and waits for success.
-
-### ShardedCluster
+### ShardedCluster — 18 total checks
 
 ```bash
-python3 tests/run_harness.py \
-  --profile sharded \
-  --allow-mutations \
-  --allow-destructive
+python3 tests/run_harness.py --profile sharded --allow-mutations --allow-destructive
 ```
 
-The ShardedCluster scenario exercises:
+The ShardedCluster scenario adds 13 lifecycle checks after preflight. It exercises cluster creation, shard status, shard expansion, database creation, shard contraction, password rotation, Owner disable, database deletion, final-shard protection, and cluster deletion.
 
-- three-shard cluster creation;
-- targeted and global shard status;
-- 3 -> 5 shard expansion;
-- asynchronous database creation;
-- 5 -> 4 shard contraction while the database remains present;
-- password rotation;
-- Owner disable;
-- asynchronous database deletion;
-- 4 -> 1 shard contraction;
-- blocking deletion of the final shard;
-- ShardedCluster deletion.
-
-### Locking
+### Locking — 11 total checks
 
 ```bash
-python3 tests/run_harness.py \
-  --profile locking \
-  --allow-mutations \
-  --allow-destructive
+python3 tests/run_harness.py --profile locking --allow-mutations --allow-destructive
 ```
 
-This scenario verifies that the Terraform-created ShardedCluster deployment lock is observable and blocks conflicting database work while a background AddShard operation is active. It then waits for the AddShard operation to finish, verifies readable cluster status, and deletes the temporary cluster.
+The locking scenario adds 6 checks after preflight. It verifies that the Terraform-created ShardedCluster deployment lock appears during an active topology change, blocks conflicting work, disappears after completion, and leaves the cluster readable before cleanup.
 
-### Complete acceptance run
+### Complete acceptance run — 34 total checks
+
+Run the full gauntlet only when broad end-to-end acceptance is needed:
 
 ```bash
-python3 tests/run_harness.py \
-  --profile all \
-  --allow-mutations \
-  --allow-destructive
+python3 tests/run_harness.py --profile all --allow-mutations --allow-destructive
 ```
 
-The current complete acceptance run contains **34 tests** across preflight, ReplicaSet, ShardedCluster, and locking profiles.
+This runs preflight, ReplicaSet, ShardedCluster, and locking scenarios.
 
 ---
 
 ## 4. Safety flags
 
-Mutating profiles require both:
+Every lifecycle profile (`replicaset`, `sharded`, `locking`, `all`) requires both:
 
 ```text
 --allow-mutations
 --allow-destructive
 ```
 
-These flags are deliberately explicit. They prevent accidentally starting a destructive live scenario by typing only a profile name.
+`--allow-mutations` acknowledges that the harness may create or modify temporary MongoDB test resources.
+
+`--allow-destructive` acknowledges that the harness may delete temporary resources during cleanup and deletion tests.
+
+The two flags are a combined safety gate. Supplying only one does **not** run a partial profile. The harness refuses to start the lifecycle profile until both are present.
+
+The read-only `preflight` profile requires neither flag.
 
 ---
 
-## 5. Useful options
+## 5. Remaining options
 
-Show stdout/stderr for passing tests as well as failures:
+### `--config FILE`
 
-```bash
-python3 tests/run_harness.py \
-  --profile all \
-  --allow-mutations \
-  --allow-destructive \
-  --verbose
-```
-
-Use another controller config:
-
-```bash
-python3 tests/run_harness.py \
-  --profile preflight \
-  --config /path/to/terraformController.config
-```
-
-Use another Python interpreter for harness-launched scripts:
-
-```bash
-python3 tests/run_harness.py \
-  --profile preflight \
-  --python /path/to/python3
-```
-
-Use a predictable temporary-name suffix:
-
-```bash
-python3 tests/run_harness.py \
-  --profile replicaset \
-  --suffix RSDEBUG01 \
-  --allow-mutations \
-  --allow-destructive
-```
-
-Without `--suffix`, the harness generates an `MMDDHHMMSS` value and uses temporary names such as:
+Optional. The harness assumes the configuration file is in the current directory:
 
 ```text
-THRS-<suffix>
-THSC-<suffix>
-THDB_<suffix>
+./terraformController.config
 ```
+
+Use `--config FILE` only when the configuration file is somewhere else:
+
+```bash
+python3 tests/run_harness.py --profile preflight --config /other/location/terraformController.config
+```
+
+### `--verbose`
+
+Optional. Passing checks normally show concise PASS/FAIL information. Use `--verbose` when you also want stdout/stderr for successful commands:
+
+```bash
+python3 tests/run_harness.py --profile preflight --verbose
+```
+
+The old public `--python` and `--suffix` options were removed. The harness automatically uses the same Python interpreter that launched it and automatically generates a unique internal run ID.
+
+Temporary live-test resources use readable generated names such as:
+
+```text
+RSTest-0910145230
+SCTest-0910145230
+LockTest-0910145230
+DBTest_0910145230
+```
+
+The numeric portion is generated automatically for each run so interrupted-test leftovers do not collide with later runs.
 
 ---
 
@@ -232,7 +197,7 @@ The operation ID is appropriate in harness output because the harness is interna
 
 At the end, the harness reports pass/fail totals plus elapsed time for each profile and the complete run.
 
-A successful complete run should end with:
+A successful complete run ends with:
 
 ```text
 HARNESS SUMMARY: 34 passed / 0 failed
@@ -276,39 +241,40 @@ Successful lifecycle profiles delete the temporary resources they create.
 
 After a failed run, temporary managed resources may intentionally remain so the failed state can be inspected. Do not manually delete controller-managed MongoDB/Vault/Kubernetes resources merely to make the next test start clean.
 
-Use the normal Terraform-driven lifecycle/recovery path. An administrator can inspect zero-state with:
+Use the normal Terraform-driven lifecycle/recovery path. An administrator can inspect managed resource state with:
 
 ```bash
 python3 terraformControllerAdmin.py ListManagedResources
 ```
 
-Before a fresh complete acceptance run, the desired baseline is:
+A completely empty environment reports:
 
 ```text
-Managed deployments:  0
-MongoDB resources:    0
-MongoDB users:        0
-PVCs:                 0
-PVs:                  0
-Deployment locks:     0
+Managed deployments:             0
+MongoDB resources:               0
+MongoDB users:                   0
+PVCs (Persistent Volume Claims): 0
+PVs (Persistent Volumes):        0
+Deployment locks:                0
 
 Status: CLEAN
 ```
 
-If managed resources intentionally exist, `ListManagedResources` reports `MANAGED RESOURCES PRESENT`; that status alone is not a failure. Destructive acceptance testing should still begin from the documented clean baseline so temporary test resources do not collide with existing managed state.
+An environment with legitimate managed resources reports `MANAGED RESOURCES PRESENT`; that status alone is not a failure.
 
 ---
 
 ## 9. Recommended validation workflow after changes
 
-For ordinary code/documentation changes:
+Do not run the complete 34-check harness after every small change.
 
-```text
-1. Run/observe GitHub Actions unit and static validation.
-2. Confirm the development environment reports CLEAN before destructive testing.
-3. Run the focused live profile if the change is narrow.
-4. Run the complete 34-test `all` profile before calling a broad lifecycle or CLI-contract change accepted.
-5. Verify ListManagedResources reports CLEAN after the run.
-```
+Use this approach:
 
-Changes to asynchronous execution, Terraform orchestration, logging, deployment locking, storage cleanup, database lifecycle, database status/account command semantics, or customer command behavior should receive a fresh complete live acceptance run because they cross multiple profiles.
+1. For documentation, display text, help text, or other presentation-only changes, rely on GitHub Actions/unit tests unless the change affects live behavior.
+2. For a quick environment sanity check, run `--profile preflight`.
+3. For narrow ReplicaSet/database lifecycle changes, run `--profile replicaset` with both safety flags.
+4. For ShardedCluster/shard changes, run `--profile sharded` with both safety flags.
+5. For deployment-lock/concurrency changes, run `--profile locking` with both safety flags.
+6. Reserve `--profile all --allow-mutations --allow-destructive` for broad cross-cutting lifecycle changes, release/demo baselines, or other true acceptance milestones.
+
+This keeps normal feedback fast while preserving the full 34-check run for the occasions when its broad coverage is actually valuable.

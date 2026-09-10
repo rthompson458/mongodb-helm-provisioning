@@ -1,18 +1,11 @@
 #!/usr/bin/env python3
 """Run live end-to-end terraformController scenarios.
 
-This file is intentionally a thin entry point.  Scenario logic lives in the
+This file is intentionally a thin entry point. Scenario logic lives in the
 tests/harness package so the harness remains readable and easy to extend.
 
-SAFE DEFAULT:
-    With no arguments, only read-only preflight checks run.
-
-FULL LIVE TEST:
-    python3 tests/run_harness.py --profile all \
-        --allow-mutations --allow-destructive
-
-The two opt-in flags are deliberately verbose.  They make it difficult to run
-resource-creating or resource-deleting tests by accident.
+Run this program with no arguments, or use -h/--help, to show the full help
+screen. No live tests run when no arguments are supplied.
 """
 
 from __future__ import annotations
@@ -23,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 # When Python executes a file inside tests/, sys.path starts at tests/ rather
-# than the repository root.  Add the root explicitly before importing harness
+# than the repository root. Add the root explicitly before importing harness
 # scenarios because some scenarios reuse production config/Kubernetes helpers.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -44,47 +37,86 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         description=(
-            "Live end-to-end harness for terraformController. "
-            "Preflight is read-only; lifecycle profiles create/delete test resources."
-        )
+            "Live end-to-end test harness for terraformController. "
+            "Choose a profile explicitly before running tests."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Profiles:
+  preflight    5 read-only checks. Creates, changes, and deletes nothing.
+  replicaset  15 checks total. Tests ReplicaSet + database lifecycle.
+  sharded     18 checks total. Tests ShardedCluster + shard + database lifecycle.
+  locking     11 checks total. Tests ShardedCluster mutation locking.
+  all         34 checks total. Runs the complete live acceptance gauntlet.
+
+Safety:
+  Lifecycle profiles (replicaset, sharded, locking, all) require BOTH
+  --allow-mutations and --allow-destructive. Supplying only one flag does not
+  run a partial test; the harness refuses to start the lifecycle profile.
+
+Common commands:
+  Read-only preflight:
+    python3 tests/run_harness.py --profile preflight
+
+  ReplicaSet lifecycle only:
+    python3 tests/run_harness.py --profile replicaset --allow-mutations --allow-destructive
+
+  ShardedCluster lifecycle only:
+    python3 tests/run_harness.py --profile sharded --allow-mutations --allow-destructive
+
+  Locking/concurrency only:
+    python3 tests/run_harness.py --profile locking --allow-mutations --allow-destructive
+
+  FULL GAUNTLET - all 34 live acceptance checks:
+    python3 tests/run_harness.py --profile all --allow-mutations --allow-destructive
+
+Configuration:
+  ./terraformController.config is used by default. Use --config FILE only when
+  the configuration file is somewhere else.
+""",
     )
     parser.add_argument(
         "--profile",
         choices=("preflight", "replicaset", "sharded", "locking", "all"),
-        default="preflight",
-        help="Scenario group to run. Default: preflight.",
+        required=True,
+        help=(
+            "Test group to run. Every profile starts with the 5 read-only preflight "
+            "checks. Use 'all' only for the complete 34-check live acceptance run."
+        ),
     )
     parser.add_argument(
         "--config",
-        default=str(REPO_ROOT / "terraformController.config"),
-        help="terraformController configuration file.",
-    )
-    parser.add_argument(
-        "--python",
-        default=sys.executable,
-        help="Python executable used to launch terraformController.py.",
+        default="./terraformController.config",
+        metavar="FILE",
+        help=(
+            "Optional controller configuration file. "
+            "Default: ./terraformController.config"
+        ),
     )
     parser.add_argument(
         "--allow-mutations",
         action="store_true",
-        help="Required before the harness may create or modify MongoDB resources.",
+        help=(
+            "Safety acknowledgement required for lifecycle profiles. Allows the "
+            "harness to create or modify temporary MongoDB test resources. Must be "
+            "used together with --allow-destructive."
+        ),
     )
     parser.add_argument(
         "--allow-destructive",
         action="store_true",
-        help="Required before lifecycle profiles may delete temporary resources.",
+        help=(
+            "Safety acknowledgement required for lifecycle profiles. Allows the "
+            "harness to delete temporary resources during cleanup and deletion "
+            "tests. Must be used together with --allow-mutations."
+        ),
     )
     parser.add_argument(
         "--verbose",
         action="store_true",
-        help="Print stdout/stderr for passing steps as well as failures.",
-    )
-    parser.add_argument(
-        "--suffix",
-        default=datetime.now().strftime("%m%d%H%M%S"),
         help=(
-            "Unique suffix used in temporary names. "
-            "Default is current MMDDHHMMSS."
+            "Show command stdout/stderr for passing checks. Failures always show "
+            "their diagnostic output."
         ),
     )
     return parser
@@ -103,10 +135,10 @@ def _require_live_opt_in(args: argparse.Namespace) -> None:
         missing.append("--allow-destructive")
     if missing:
         raise SystemExit(
-            "ERROR: Live lifecycle profiles create and delete test resources. "
-            "Re-run with " + " ".join(missing) + "."
+            "ERROR: Live lifecycle profiles create and delete temporary test resources. "
+            "Re-run with BOTH --allow-mutations and --allow-destructive. "
+            "Missing: " + ", ".join(missing) + "."
         )
-
 
 
 def _total_tests(profile: str) -> int:
@@ -129,21 +161,32 @@ def _total_tests(profile: str) -> int:
     return total
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run the requested scenarios and return zero only when all checks pass."""
 
-    args = build_parser().parse_args()
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    parser = build_parser()
+    if not raw_argv:
+        parser.print_help()
+        return 0
+
+    args = parser.parse_args(raw_argv)
     _require_live_opt_in(args)
 
+    config_display = args.config
     config_path = Path(args.config).expanduser().resolve()
     if not config_path.exists():
-        raise SystemExit(f"ERROR: Configuration file does not exist: {config_path}")
+        raise SystemExit(f"ERROR: Configuration file does not exist: {config_display}")
+
+    # Test names need to be unique, but testers should not have to invent or
+    # understand suffixes. Generate a compact run ID internally.
+    run_id = datetime.now().strftime("%m%d%H%M%S")
 
     context = HarnessContext(
         repo_root=REPO_ROOT,
         config_path=config_path,
-        python=args.python,
-        suffix=args.suffix,
+        python=sys.executable,
+        run_id=run_id,
         allow_mutations=args.allow_mutations,
         allow_destructive=args.allow_destructive,
         verbose=args.verbose,
@@ -154,8 +197,8 @@ def main() -> int:
     print("terraformController Live Test Harness")
     print("=" * 68)
     print(f"Profile: {args.profile}")
-    print(f"Config:  {config_path}")
-    print(f"Suffix:  {args.suffix}")
+    print(f"Config:  {config_display}")
+    print(f"Run ID:  {run_id}")
     print(f"Tests:   {context.total_tests}")
     print()
 
