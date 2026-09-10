@@ -1,13 +1,18 @@
 """Prepare and execute the Terraform module used by terraformController.
 
-This file is the bridge between Python orchestration and Terraform.  Python
+This file is the bridge between Python orchestration and Terraform. Python
 builds desired-state JSON and a small one-shot operation description, then this
-module runs Terraform.  The lifecycle resource/script inside Terraform performs
-imperative MongoDB/storage/lock work when needed.
+module runs Terraform. The lifecycle resource/script inside Terraform performs
+imperative MongoDB, storage, and lock work where required.
 
-Important rule for maintainers:
-    Do not add direct MongoDB, Vault, or Kubernetes mutations here.
-    This module should only prepare Terraform inputs and execute Terraform.
+User-interface rule:
+    Git and Terraform stdout/stderr are implementation diagnostics. They are
+    captured here and appended to the daily operations log instead of being
+    dumped onto customer or administrator terminals.
+
+Architecture rule:
+    Do not add direct MongoDB, Vault, or Kubernetes mutations here. This module
+    prepares Terraform inputs and executes Terraform only.
 """
 
 from __future__ import annotations
@@ -23,18 +28,22 @@ from pathlib import Path
 from typing import Any
 
 from .common import ControllerError, run_process
-from .logging_component import log_event
+from .logging_component import append_process_diagnostic, log_event
 
 
 def _require(*names: str) -> None:
-    """Fail early if an external executable needed by Terraform is missing."""
+    """Fail early if an executable needed by Terraform is missing."""
+
     missing = [name for name in names if not shutil.which(name)]
     if missing:
-        raise ControllerError("Required executable(s) not found in PATH: " + ", ".join(missing))
+        raise ControllerError(
+            "Required executable(s) not found in PATH: " + ", ".join(missing)
+        )
 
 
 def _check_version() -> None:
     """Require the Terraform version needed for ephemeral/write-only features."""
+
     result = run_process(["terraform", "version", "-json"], capture=True)
     try:
         version = json.loads(result.stdout)["terraform_version"]
@@ -47,19 +56,56 @@ def _check_version() -> None:
         )
 
 
+def _run_diagnostic(
+    config: dict[str, Any],
+    command: list[str],
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    label: str,
+) -> None:
+    """Run one implementation command quietly and preserve its detailed output.
+
+    We deliberately call run_process with ``check=False`` so the completed
+    stdout/stderr can be written to the operations log before a failure is
+    converted into a concise ControllerError. This gives users a readable
+    terminal while administrators still retain the evidence needed to debug.
+    """
+
+    result = run_process(
+        command,
+        cwd=cwd,
+        env=env,
+        capture=True,
+        check=False,
+    )
+    log_path = append_process_diagnostic(
+        config,
+        command,
+        returncode=result.returncode,
+        stdout=result.stdout or "",
+        stderr=result.stderr or "",
+        label=label,
+    )
+    if result.returncode != 0:
+        raise ControllerError(
+            f"{label} failed with exit code {result.returncode}. "
+            f"Detailed diagnostics were written to {log_path}."
+        )
+
 
 @contextmanager
 def _terraform_execution_lock(config: dict[str, Any]):
-    """Serialize all local Terraform cache/workdir activity across processes.
+    """Serialize shared Terraform cache/workdir activity across processes.
 
     Every controller command shares one disposable Git checkout and one
-    terraform-dbaas/.terraform provider directory. Detached async workers make
-    overlapping commands much more likely, so git refresh, terraform init, and
-    terraform apply must be one cross-process critical section.
+    terraform-dbaas/.terraform provider directory. Detached workers make
+    overlap likely, so Git refresh, terraform init, and terraform apply must be
+    one cross-process critical section.
 
-    flock is process-safe on Linux/WSL and is automatically released if a
-    worker exits or is killed. The lock file lives beside the cache so git
-    reset/clean cannot remove it.
+    ``flock`` is process-safe on Linux/WSL and is automatically released if a
+    worker exits or is killed. The lock file lives beside the cache so a Git
+    reset or clean cannot remove it.
     """
 
     cache: Path = config["terraform_cache"]
@@ -67,7 +113,6 @@ def _terraform_execution_lock(config: dict[str, Any]):
     lock_path = cache.parent / f".{cache.name}.terraformController.lock"
 
     with lock_path.open("a+", encoding="utf-8") as handle:
-        print("Waiting for exclusive Terraform execution access ...")
         log_event("terraform.execution_lock.waiting", lock_file=str(lock_path))
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
@@ -93,25 +138,53 @@ def _terraform_execution_lock(config: dict[str, Any]):
 def _sync(config: dict[str, Any]) -> Path:
     """Clone or hard-refresh the configured Terraform source repository.
 
-    The cache is disposable by design.  A hard reset prevents stale local edits
-    from silently becoming part of a controller operation.
+    The cache is disposable by design. A hard reset prevents stale local edits
+    from silently becoming part of a controller operation. All Git output is
+    captured in the operations log rather than shown to the DBaaS user.
     """
+
     cache: Path = config["terraform_cache"]
     branch = config["terraform_branch"]
     repo = config["terraform_repo"]
     if not (cache / ".git").exists():
         cache.parent.mkdir(parents=True, exist_ok=True)
         if cache.exists() and any(cache.iterdir()):
-            raise ControllerError(f"Terraform cache exists but is not a Git repository: {cache}")
-        print(f"Cloning Terraform from {repo} ...")
-        log_event("terraform.repository.clone", repository=repo, branch=branch, cache=str(cache))
-        run_process(["git", "clone", "--depth", "1", "--branch", branch, repo, str(cache)])
+            raise ControllerError(
+                f"Terraform cache exists but is not a Git repository: {cache}"
+            )
+        log_event(
+            "terraform.repository.clone",
+            repository=repo,
+            branch=branch,
+            cache=str(cache),
+        )
+        _run_diagnostic(
+            config,
+            ["git", "clone", "--depth", "1", "--branch", branch, repo, str(cache)],
+            label="Git clone",
+        )
     else:
-        print(f"Refreshing Terraform from GitHub branch '{branch}' ...")
-        log_event("terraform.repository.refresh", repository=repo, branch=branch, cache=str(cache))
-        run_process(["git", "-C", str(cache), "fetch", "--depth", "1", "origin", branch])
-        run_process(["git", "-C", str(cache), "reset", "--hard", "FETCH_HEAD"])
-        run_process(["git", "-C", str(cache), "clean", "-fd", "-e", ".terraform"])
+        log_event(
+            "terraform.repository.refresh",
+            repository=repo,
+            branch=branch,
+            cache=str(cache),
+        )
+        _run_diagnostic(
+            config,
+            ["git", "-C", str(cache), "fetch", "--depth", "1", "origin", branch],
+            label="Git fetch",
+        )
+        _run_diagnostic(
+            config,
+            ["git", "-C", str(cache), "reset", "--hard", "FETCH_HEAD"],
+            label="Git reset",
+        )
+        _run_diagnostic(
+            config,
+            ["git", "-C", str(cache), "clean", "-fd", "-e", ".terraform"],
+            label="Git clean",
+        )
 
     tfdir = cache / config["terraform_subdir"]
     if not tfdir.is_dir():
@@ -125,6 +198,7 @@ def _operation_payload(operation: dict[str, Any] | None) -> dict[str, Any]:
     A random nonce forces terraform_data.lifecycle_operation to execute again
     even when the action name and target happen to match a previous command.
     """
+
     payload: dict[str, Any] = {
         "action": "none",
         "deployment": "",
@@ -162,7 +236,8 @@ def apply_inventory(
       6. Run terraform init and terraform apply.
       7. Delete the temporary input file and release the execution lock.
 
-    Password values are never written into this temporary JSON by Python.
+    Password values are never written into the temporary JSON by Python, and
+    the Vault token is passed only through the child-process environment.
     """
 
     _require("terraform", "git", "kubectl", "bash", "python3")
@@ -172,10 +247,9 @@ def apply_inventory(
 
     _check_version()
 
-    # The shared Git checkout, .terraform provider directory, and Terraform
-    # backend workflow are treated as one transaction. This prevents one async
-    # worker from resetting the checkout or reinstalling a provider while
-    # another worker is actively executing it ("text file busy").
+    # The shared Git checkout, provider directory, and backend work are treated
+    # as one transaction. This prevents one worker from resetting the checkout
+    # while another worker is executing Terraform from it.
     with _terraform_execution_lock(config):
         _apply_inventory_locked(config, inventory, op, targets)
 
@@ -235,13 +309,18 @@ def _apply_inventory_locked(
     if config["kube_context"]:
         init.append(f"-backend-config=config_context={config['kube_context']}")
 
-    print("Initializing Terraform ...")
     log_event("terraform.init.started", directory=str(tfdir))
-    run_process(init, cwd=tfdir, env=env)
+    _run_diagnostic(
+        config,
+        init,
+        cwd=tfdir,
+        env=env,
+        label="Terraform initialization",
+    )
     log_event("terraform.init.succeeded", directory=str(tfdir))
 
-    # The inventory file is temporary because desired state is reconstructed
-    # from Vault for each command. Keeping it around would invite stale state.
+    # Desired state is reconstructed from Vault for each command. The temporary
+    # file is removed after the apply so stale controller intent cannot linger.
     temp: Path | None = None
     try:
         payload = {
@@ -260,7 +339,6 @@ def _apply_inventory_locked(
             handle.write("\n")
             temp = Path(handle.name)
 
-        print("Applying Terraform ...")
         log_event(
             "terraform.apply.started",
             action=op["action"],
@@ -283,7 +361,13 @@ def _apply_inventory_locked(
             ]
             for target in targets or []:
                 command.append(f"-target={target}")
-            run_process(command, cwd=tfdir, env=env)
+            _run_diagnostic(
+                config,
+                command,
+                cwd=tfdir,
+                env=env,
+                label="Terraform apply",
+            )
         except ControllerError:
             log_event(
                 "terraform.apply.failed",
@@ -294,6 +378,7 @@ def _apply_inventory_locked(
                 database=op["database"],
             )
             raise
+
         log_event(
             "terraform.apply.succeeded",
             action=op["action"],
