@@ -105,7 +105,9 @@ class AsyncOperationTests(unittest.TestCase):
                 status_arguments=["ListShards", "SC9"],
             )
         self.assertIn("AddShard request accepted.", text)
+        self.assertIn("python3 terraformController.py", text)
         self.assertIn("ListShards SC9", text)
+        self.assertNotIn("/usr/bin/python3", text)
         self.assertNotIn("ListOperation", text)
         self.assertNotIn(state["operation_id"], text)
         self.assertNotIn("Worker PID", text)
