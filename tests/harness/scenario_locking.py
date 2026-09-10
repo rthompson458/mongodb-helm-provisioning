@@ -1,14 +1,14 @@
-"""Live concurrency test for the ShardedCluster deployment lock."""
+"""Live concurrency test for ShardedCluster mutation protection."""
 
 from __future__ import annotations
 
 import subprocess
 import time
 
+from terraform_controller import kube
 from terraform_controller.async_operations import effective_result, load_operation
 from terraform_controller.config import load_config
 from terraform_controller.deployment_lock import lock_name
-from terraform_controller import kube
 
 from .models import AsyncOperation
 from .runner import HarnessRunner
@@ -61,7 +61,18 @@ def _wait_for_lock(
 
 
 def run(runner: HarnessRunner) -> None:
-    """Prove a concurrent database mutation is blocked during async AddShard."""
+    """Prove concurrent customer mutation is blocked while AddShard is active.
+
+    There are two layers of protection:
+    1. launch_operation blocks an obvious second async request on the same
+       deployment before another detached worker is created;
+    2. the Terraform-created ShardedCluster deployment lock is the underlying
+       cross-process lifecycle guard and is tested directly by unit tests.
+
+    This live scenario proves both that the real Kubernetes lock becomes visible
+    and that a second customer AddDatabase request is refused while the first
+    operation is still active.
+    """
 
     ctx = runner.context
     sc = ctx.lock_cluster
@@ -78,9 +89,8 @@ def run(runner: HarnessRunner) -> None:
     if not created.passed:
         return
 
-    # Public AddShard now returns immediately with an Operation ID. Its detached
-    # worker owns the Terraform-created deployment lock while the harness starts
-    # a second command to prove conflicting mutations are blocked.
+    # start_async_controller correlates the private Operation ID for the harness;
+    # the public customer output itself still hides that identifier.
     operation = runner.start_async_controller("AddShard", sc, "1")
     lock_started = time.monotonic()
     lock_seen = _wait_for_lock(runner, sc.lower(), operation)
@@ -97,12 +107,12 @@ def run(runner: HarnessRunner) -> None:
 
     if lock_seen:
         runner.controller(
-            "Concurrent AddDatabase is blocked by SC deployment lock",
+            "Concurrent AddDatabase request is blocked during AddShard",
             "AddDatabase",
             sc,
             db,
             expect_success=False,
-            expected_text="busy with another managed change",
+            expected_text="already has a controller operation in progress",
         )
 
     runner.wait_async(
