@@ -103,6 +103,34 @@ class DatabaseStatusTests(unittest.TestCase):
         self.assertIn("HouseInfo", text)
         self.assertIn("Deleting", text)
 
+    def test_active_delete_remains_visible_after_inventory_entry_is_removed(self) -> None:
+        vault = FakeVault(deployment_inventory())
+        record = {
+            "command": "DeleteDatabase",
+            "deployment": "RS1",
+            "result": "In Progress",
+            "pid": None,
+            "worker_arguments": ["DeleteDatabase", "RS1", "HouseInfo", "--confirm"],
+        }
+        with (
+            patch.object(database_status, "list_operation_records", return_value=[record]),
+            patch.object(database_status, "effective_result", return_value="In Progress"),
+            patch.object(database_status.kube, "phase", return_value="Running"),
+        ):
+            list_text = self._capture(database_status.list_databases, self.config, vault)
+            detail_text = self._capture(
+                database_status.list_database,
+                self.config,
+                vault,
+                "RS1",
+                "HouseInfo",
+            )
+
+        self.assertIn("HouseInfo", list_text)
+        self.assertIn("Deleting", list_text)
+        self.assertIn("Database:        HouseInfo", detail_text)
+        self.assertIn("Status:          Deleting", detail_text)
+
     def test_list_database_accounts_owns_rotation_and_vault_details(self) -> None:
         vault = FakeVault(deployment_inventory(with_db=True))
         text = self._capture(
