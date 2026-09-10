@@ -146,7 +146,8 @@ class CliTests(unittest.TestCase):
 
     def test_public_default_config_is_current_directory_file(self) -> None:
         args = cli.build_parser().parse_args(["ListDeployments"])
-        self.assertEqual(args.config, "terraformController.config")
+        self.assertEqual(args.config, "./terraformController.config")
+        self.assertEqual(cli.DEFAULT_CONFIG_DISPLAY, "./terraformController.config")
         self.assertEqual(cli.DEFAULT_CONFIG, Path("terraformController.config"))
 
     def test_public_help_shows_live_configured_shard_default(self) -> None:
