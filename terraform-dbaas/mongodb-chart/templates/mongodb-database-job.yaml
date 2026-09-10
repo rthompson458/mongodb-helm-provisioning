@@ -1,0 +1,101 @@
+{{- if gt (len (.Values.mongodbDatabases | default (list))) 0 }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-database-provisioner" .Release.Name | trunc 63 | trimSuffix "-" }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: privateWorkerReplacement
+    dbaas.deployment: {{ .Values.mongodb.name | quote }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/managed-by: privateWorkerReplacement
+        dbaas.deployment: {{ .Values.mongodb.name | quote }}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: mongodb-database-provisioner
+          image: {{ .Values.mongoImage | quote }}
+          env:
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mongodb.provisionerConnectionSecret | quote }}
+                  key: connectionString.standard
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+
+              echo "Starting MongoDB database provisioning"
+              mongosh "$MONGODB_URI" --quiet <<'EOF_MONGO'
+              const desiredDatabases = {{ .Values.mongodbDatabases | default (list) | toJson }};
+              const operations = {{ .Values.mongodbDatabaseOperations | default (list) | toJson }};
+
+              let effectiveDatabases = desiredDatabases.map(database => ({
+                name: database.name,
+                collections: [...database.collections]
+              }));
+
+              // Keep additive provisioning aligned with controlled operations
+              // executed earlier in the same Helm release.
+              for (const op of operations) {
+                if (op.action === "deleteDatabase") {
+                  effectiveDatabases = effectiveDatabases.filter(
+                    database => database.name !== op.database
+                  );
+                  continue;
+                }
+
+                const database = effectiveDatabases.find(
+                  item => item.name === op.database
+                );
+                if (!database) {
+                  continue;
+                }
+
+                if (op.action === "deleteCollection") {
+                  database.collections = database.collections.filter(
+                    collection => collection !== op.collection
+                  );
+                  continue;
+                }
+
+                if (op.action === "renameCollection") {
+                  database.collections = database.collections.map(
+                    collection => collection === op.collection ? op.newName : collection
+                  );
+                  database.collections = [...new Set(database.collections)];
+                }
+              }
+
+              for (const databaseDefinition of effectiveDatabases) {
+                if (["admin", "config", "local"].includes(databaseDefinition.name)) {
+                  print(`ERROR: Protected database '${databaseDefinition.name}' cannot be provisioned.`);
+                  quit(42);
+                }
+
+                const database = db.getSiblingDB(databaseDefinition.name);
+                const existingCollections = database.getCollectionNames();
+
+                for (const collection of databaseDefinition.collections) {
+                  if (!existingCollections.includes(collection)) {
+                    database.createCollection(collection);
+                    print(`Created ${databaseDefinition.name}.${collection}`);
+                  } else {
+                    print(`Exists ${databaseDefinition.name}.${collection}`);
+                  }
+                }
+              }
+              EOF_MONGO
+              echo "MongoDB database provisioning completed"
+{{- end }}

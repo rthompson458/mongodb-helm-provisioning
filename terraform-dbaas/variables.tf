@@ -196,6 +196,17 @@ variable "placeholder_collection" {
   default     = "__dbaas_metadata"
 }
 
+variable "mongodb_management_timeout_seconds" {
+  description = "Timeout in seconds for Helm-driven MongoDB database management Jobs"
+  type        = number
+  default     = 600
+
+  validation {
+    condition     = var.mongodb_management_timeout_seconds >= 60
+    error_message = "mongodb_management_timeout_seconds must be at least 60 seconds."
+  }
+}
+
 variable "default_members" {
   description = "Fallback member count used by lifecycle operations"
   type        = number

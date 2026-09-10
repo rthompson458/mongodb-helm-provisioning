@@ -175,6 +175,40 @@ locals {
   ])...)
 }
 
+# Database create/delete and empty-deployment validation are short-lived
+# MongoDB operations. Keep their Terraform-facing names close to the Helm
+# database-management implementation so the operation contract is easy to
+# follow without changing the controller's deployment/database state model.
+locals {
+  mongodb_database_actions = [
+  ]
+
+  mongodb_databases = var.operation.action == "create_database" ? [
+    {
+      name        = var.operation.database
+      collections = [var.placeholder_collection]
+    }
+  ] : []
+
+  mongodb_database_operations = var.operation.action == "delete_database" ? [
+    {
+      id         = var.operation.operation_id != "" ? var.operation.operation_id : var.operation.nonce
+      action     = "deleteDatabase"
+      database   = var.operation.database
+      collection = ""
+      newName    = ""
+    }
+  ] : var.operation.action == "validate_deployment_empty" ? [
+    {
+      id         = var.operation.operation_id != "" ? var.operation.operation_id : var.operation.nonce
+      action     = "validateDeploymentEmpty"
+      database   = ""
+      collection = ""
+      newName    = ""
+    }
+  ] : []
+}
+
 # Source the existing working Ops Manager connection information.
 data "kubernetes_config_map_v1" "ops_manager_source" {
   metadata {
@@ -822,10 +856,54 @@ resource "kubernetes_manifest" "database_account" {
   ]
 }
 
-# Terraform owns imperative lifecycle actions that cannot be represented as a
-# long-lived MongoDB object: creating/dropping a logical DB, verifying that an
-# deployment is empty, and preparing/cleaning K3D static local storage. Python only
-# supplies the operation and reports its result.
+# Logical database materialization, deletion, and empty-deployment validation
+# use the Helm chart under mongodb-chart. The chart keeps the proven one-shot
+# Job pattern while the surrounding desired state remains privateWorkerReplacement's
+# deployment -> database -> three-account model.
+resource "helm_release" "mongodb_management" {
+  count = contains(local.mongodb_database_actions, var.operation.action) ? 1 : 0
+
+  name      = "${substr(var.operation.deployment, 0, 30)}-mongodb-management"
+  chart     = "${path.module}/mongodb-chart"
+  namespace = var.mongodb_namespace
+  wait      = true
+  timeout   = var.mongodb_management_timeout_seconds
+
+  values = [
+    yamlencode({
+      mongodb = {
+        name                         = var.operation.deployment
+        provisionerConnectionSecret = "tc-${var.operation.deployment}-admin-connection"
+        adminConnectionSecret       = "tc-${var.operation.deployment}-admin-connection"
+      }
+      mongoImage                 = var.mongo_image
+      mongodbDatabases           = local.mongodb_databases
+      mongodbDatabaseOperations  = local.mongodb_database_operations
+    })
+  ]
+
+  depends_on = [kubernetes_manifest.controller_admin]
+
+  lifecycle {
+    precondition {
+      condition     = contains(keys(var.deployments), var.operation.deployment)
+      error_message = "MongoDB database management requires an existing managed deployment."
+    }
+
+    precondition {
+      condition = (
+        var.operation.action == "validate_deployment_empty" ||
+        !contains(["admin", "config", "local"], lower(var.operation.database))
+      )
+      error_message = "Database management cannot target admin, config, or local."
+    }
+  }
+}
+
+# Terraform also owns imperative lifecycle actions that remain better suited to
+# the existing shell helper: authentication verification, deployment locking,
+# and K3D static-local storage work. Python only supplies the operation and
+# reports its result.
 resource "terraform_data" "lifecycle_operation" {
   count = contains([
     "create_database",
