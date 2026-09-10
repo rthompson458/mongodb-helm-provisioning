@@ -37,8 +37,6 @@ class HarnessContext:
     config_path: Path
     python: str
     run_id: str
-    allow_mutations: bool
-    allow_destructive: bool
     verbose: bool
     total_tests: int
 

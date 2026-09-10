@@ -40,11 +40,12 @@ class HarnessCliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("preflight    5 read-only checks", result.stdout)
         self.assertIn("all         34 checks total", result.stdout)
-        self.assertIn("--allow-mutations", result.stdout)
-        self.assertIn("--allow-destructive", result.stdout)
+        self.assertIn("--allow-changes", result.stdout)
+        self.assertNotIn("--allow-mutations", result.stdout)
+        self.assertNotIn("--allow-destructive", result.stdout)
         self.assertIn("./terraformController.config", result.stdout)
         self.assertIn(
-            "python3 tests/run_harness.py --profile all --allow-mutations --allow-destructive",
+            "python3 tests/run_harness.py --profile all --allow-changes",
             result.stdout,
         )
 
@@ -61,12 +62,23 @@ class HarnessCliTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--profile", result.stderr)
 
-    def test_lifecycle_profile_requires_both_safety_flags(self) -> None:
-        result = self._run("--profile", "replicaset", "--allow-mutations")
+    def test_lifecycle_profile_requires_allow_changes(self) -> None:
+        result = self._run("--profile", "replicaset")
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("BOTH --allow-mutations and --allow-destructive", result.stderr)
-        self.assertIn("--allow-destructive", result.stderr)
+        self.assertIn("create, modify, and delete temporary test resources", result.stderr)
+        self.assertIn("--allow-changes", result.stderr)
+
+    def test_old_dual_safety_flags_are_rejected(self) -> None:
+        result = self._run(
+            "--profile",
+            "replicaset",
+            "--allow-mutations",
+            "--allow-destructive",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unrecognized arguments", result.stderr)
 
 
 if __name__ == "__main__":
