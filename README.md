@@ -382,7 +382,7 @@ See `tests/README.md` for profile-by-profile details.
 
 **Terraform performs managed changes.**
 
-Python parses/validates requests, reads desired state and live status, coordinates lifecycle steps, waits for convergence, reports customer/admin results, and records logs. Managed MongoDB, Kubernetes, Vault, storage, account, and lock mutations remain Terraform-driven. Database materialization and controlled database operations use Noah's Helm-chart pattern folded into the shared Terraform model, while storage, locking, and bounded runtime verification remain in the lifecycle script:
+Python parses/validates requests, reads desired state and live status, coordinates lifecycle steps, waits for convergence, reports customer/admin results, and records logs. Managed MongoDB, Kubernetes, Vault, storage, account, and lock mutations remain Terraform-driven. Database materialization and controlled database operations use the Helm-chart pattern from the parallel Terraform work folded into the shared Terraform model, while storage, locking, and bounded runtime verification remain in the lifecycle script:
 
 ```text
 terraform-dbaas/mongodb-chart/
