@@ -71,6 +71,17 @@ variable "deployments" {
     ])
     error_message = "ShardedCluster deployments require at least one shard, member per shard, mongos, and config server."
   }
+
+  validation {
+    condition = alltrue(flatten([
+      for deployment in values(var.deployments) : [
+        for database in values(deployment.databases) :
+        length(trimspace(database.display_name)) > 0 &&
+        !contains(["admin", "config", "local"], lower(trimspace(database.display_name)))
+      ]
+    ]))
+    error_message = "Managed database names must be non-empty and cannot be admin, config, or local."
+  }
 }
 
 variable "operation" {
@@ -118,6 +129,14 @@ variable "operation" {
       "release_deployment_lock"
     ], var.operation.action)
     error_message = "operation.action is not supported."
+  }
+
+  validation {
+    condition = !contains(["create_database", "delete_database"], var.operation.action) || (
+      length(trimspace(var.operation.database)) > 0 &&
+      !contains(["admin", "config", "local"], lower(trimspace(var.operation.database)))
+    )
+    error_message = "Database lifecycle operations require a non-empty user database and cannot target admin, config, or local."
   }
 }
 
@@ -194,6 +213,23 @@ variable "placeholder_collection" {
   description = "Internal collection used to materialize an otherwise empty MongoDB database"
   type        = string
   default     = "__dbaas_metadata"
+}
+
+variable "mongodb_management_timeout_seconds" {
+  description = "Timeout in seconds for Helm MongoDB database-management hooks"
+  type        = number
+  default     = 600
+
+  validation {
+    condition     = var.mongodb_management_timeout_seconds >= 30
+    error_message = "mongodb_management_timeout_seconds must be at least 30."
+  }
+}
+
+variable "allow_destructive_mongodb_operations" {
+  description = "Explicit approval gate for destructive MongoDB management operations"
+  type        = bool
+  default     = false
 }
 
 variable "default_members" {
