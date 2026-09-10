@@ -1,8 +1,8 @@
 name: Validate privateWorkerReplacement
 
-# This repository now contains only the current privateWorkerReplacement/DBaaS effort.
+# This repository contains the current privateWorkerReplacement/DBaaS effort.
 # Run the complete validation suite for every pull request and every push to main
-# so structural/documentation/test changes cannot accidentally bypass validation.
+# so structural, documentation, test, and runtime changes receive the same gate.
 on:
   pull_request:
   push:
@@ -10,7 +10,7 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
@@ -19,57 +19,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
 
-      # Temporary migration step for this rename branch. Build the retired names
-      # from pieces so this workflow itself does not contain either retired literal.
-      # The step edits every tracked UTF-8 file, commits any remaining replacements,
-      # and pushes them back to the PR branch. It becomes a no-op once the sweep is clean.
-      - name: Complete repository-wide rename sweep
-        if: github.head_ref == 'chore/rename-private-worker-replacement'
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import subprocess
-
-          old_names = ("terraform" + "_controller", "terraform" + "Controller")
-          new_name = "privateWorkerReplacement"
-
-          tracked = subprocess.check_output(["git", "ls-files", "-z"]).split(b"\0")
-          changed = []
-          for raw in tracked:
-              if not raw:
-                  continue
-              path = Path(raw.decode("utf-8"))
-              try:
-                  text = path.read_text(encoding="utf-8")
-              except (UnicodeDecodeError, OSError):
-                  continue
-              updated = text
-              for old_name in old_names:
-                  updated = updated.replace(old_name, new_name)
-              if updated != text:
-                  path.write_text(updated, encoding="utf-8")
-                  changed.append(str(path))
-
-          if changed:
-              print("Updated files:")
-              for path in changed:
-                  print(f"  {path}")
-          else:
-              print("No remaining retired-name references required replacement.")
-          PY
-
-          if ! git diff --quiet; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -A
-            git commit -m "Complete privateWorkerReplacement repository rename"
-            git push origin HEAD:${GITHUB_HEAD_REF}
-          fi
-
+      # Keep the retired identities from creeping back into paths, imports,
+      # documentation, examples, labels, or runtime strings. The old names are
+      # constructed from pieces so this audit does not itself contain them.
       - name: Verify rename completeness
         shell: bash
         run: |
