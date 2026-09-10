@@ -76,7 +76,7 @@ exit 1
                 {
                     "PATH": f"{temp}{os.pathsep}{env['PATH']}",
                     "FAKE_MANIFEST": str(manifest_path),
-                    "TC_ACTION": "create_database",
+                    "TC_ACTION": "validate_deployment_empty",
                     "TC_NAMESPACE": "mongodb",
                     "TC_KUBECONFIG": "/tmp/fake-kubeconfig",
                     "TC_DEPLOYMENT": "test-rs",
