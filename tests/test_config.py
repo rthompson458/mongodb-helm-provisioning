@@ -60,13 +60,6 @@ placeholder_collection = __dbaas_metadata
 job_timeout_seconds = 300
 replica_set_ready_timeout_seconds = 900
 sharded_cluster_ready_timeout_seconds = 1800
-
-[Logging]
-enabled = true
-level = INFO
-directory = logs
-mode = append
-filename_format =
 """
 
 
@@ -79,52 +72,27 @@ class ConfigTests(unittest.TestCase):
             config_dir.mkdir()
             path = config_dir / "terraformController.config"
             path.write_text(text, encoding="utf-8")
-            return load_config(path), config_dir.resolve()
+            return load_config(path), config_dir.resolve(), path.resolve()
 
     def test_valid_config_loads_typed_values(self) -> None:
-        config, config_dir = self._load(VALID_CONFIG)
+        config, config_dir, config_path = self._load(VALID_CONFIG)
 
         self.assertEqual(config["default_shards"], 3)
         self.assertEqual(config["default_members_per_shard"], 3)
         self.assertTrue(config["persistent"])
-        self.assertEqual(config["logging_mode"], "append")
-        self.assertEqual(config["logging_filename_format"], "")
-        self.assertEqual(
-            Path(config["logging_directory"]),
-            config_dir / "logs",
-        )
+        self.assertEqual(Path(config["config_path"]), config_path)
+        self.assertEqual(config_path.parent, config_dir)
 
-    def test_absolute_logging_directory_remains_absolute(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            absolute_logs = str((Path(temp) / "absolute-logs").resolve())
-            text = VALID_CONFIG.replace(
-                "directory = logs",
-                f"directory = {absolute_logs}",
-            )
-            config, _ = self._load(text)
-            self.assertEqual(
-                Path(config["logging_directory"]),
-                Path(absolute_logs),
-            )
+        # Logging is convention-based now. No logging policy belongs in the
+        # environment config dictionary.
+        self.assertNotIn("logging_directory", config)
+        self.assertNotIn("logging_mode", config)
+        self.assertNotIn("logging_filename_format", config)
+        self.assertNotIn("logging_enabled", config)
 
-    def test_logging_filename_accepts_standard_strftime_tokens(self) -> None:
-        text = VALID_CONFIG.replace(
-            "filename_format =",
-            "filename_format = Controller-%Y%m%d-%H%M.log",
-        )
-        config, _ = self._load(text)
-        self.assertEqual(
-            config["logging_filename_format"],
-            "Controller-%Y%m%d-%H%M.log",
-        )
-
-    def test_logging_filename_must_not_contain_directory(self) -> None:
-        text = VALID_CONFIG.replace(
-            "filename_format =",
-            "filename_format = nested/Controller-%Y%m%d.log",
-        )
-        with self.assertRaises(ControllerError):
-            self._load(text)
+    def test_config_does_not_require_logging_section(self) -> None:
+        config, _, _ = self._load(VALID_CONFIG)
+        self.assertEqual(config["rotation_days"], 30)
 
     def test_shard_count_cannot_be_zero(self) -> None:
         text = VALID_CONFIG.replace(
@@ -139,10 +107,13 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(ControllerError):
             self._load(text)
 
-    def test_invalid_logging_mode_is_rejected(self) -> None:
-        text = VALID_CONFIG.replace("mode = append", "mode = per-run")
-        with self.assertRaises(ControllerError):
-            self._load(text)
+    def test_dynamic_storage_does_not_require_local_path_or_node(self) -> None:
+        text = VALID_CONFIG.replace(
+            "mode = static-local\nbase_path = /tmp/mongodb\nnode_name = node-0",
+            "mode = dynamic\nbase_path =\nnode_name =",
+        )
+        config, _, _ = self._load(text)
+        self.assertEqual(config["storage_mode"], "dynamic")
 
 
 if __name__ == "__main__":
