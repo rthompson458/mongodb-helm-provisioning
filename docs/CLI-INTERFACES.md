@@ -156,7 +156,8 @@ Detached worker
   -> same privateWorkerReplacement.py lifecycle implementation
   -> Python validation/orchestration
   -> Terraform
-  -> lifecycle.sh where required
+  -> mongodb-chart Helm Jobs for logical database operations
+  -> lifecycle.sh for storage, locks, and credential verification where required
   -> Kubernetes / MongoDB Operator / Ops Manager / Vault / MongoDB
   -> verify convergence
   -> mark operation Succeeded or Failed
