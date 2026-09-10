@@ -5,7 +5,7 @@ The terraformController test suite has two jobs:
 1. **Fast unit/regression tests** validate controller logic without touching a live MongoDB environment.
 2. **The live end-to-end harness** drives the real customer CLI against Kubernetes, Ops Manager, Vault, Terraform, and MongoDB.
 
-The live harness is intended for a development environment such as the local k3d environment. Do not point destructive profiles at production.
+The live harness is intended for a development environment such as the local k3d environment. Do not point lifecycle profiles at production.
 
 ---
 
@@ -49,7 +49,7 @@ python3 tests/run_harness.py --help
 
 No live tests run when no arguments are supplied. An actual harness run requires an explicit `--profile`.
 
-For mutating profiles, the real execution path is:
+For lifecycle profiles, the real execution path is:
 
 ```text
 Harness
@@ -92,7 +92,7 @@ It creates, changes, and deletes nothing.
 ### ReplicaSet — 15 total checks
 
 ```bash
-python3 tests/run_harness.py --profile replicaset --allow-mutations --allow-destructive
+python3 tests/run_harness.py --profile replicaset --allow-changes
 ```
 
 The ReplicaSet scenario adds 10 lifecycle checks after preflight. It creates a temporary ReplicaSet and database, verifies database/account status, verifies blocked deletion while the database exists, rotates credentials, disables Owner, deletes the database, and deletes the temporary ReplicaSet.
@@ -100,7 +100,7 @@ The ReplicaSet scenario adds 10 lifecycle checks after preflight. It creates a t
 ### ShardedCluster — 18 total checks
 
 ```bash
-python3 tests/run_harness.py --profile sharded --allow-mutations --allow-destructive
+python3 tests/run_harness.py --profile sharded --allow-changes
 ```
 
 The ShardedCluster scenario adds 13 lifecycle checks after preflight. It exercises cluster creation, shard status, shard expansion, database creation, shard contraction, password rotation, Owner disable, database deletion, final-shard protection, and cluster deletion.
@@ -108,7 +108,7 @@ The ShardedCluster scenario adds 13 lifecycle checks after preflight. It exercis
 ### Locking — 11 total checks
 
 ```bash
-python3 tests/run_harness.py --profile locking --allow-mutations --allow-destructive
+python3 tests/run_harness.py --profile locking --allow-changes
 ```
 
 The locking scenario adds 6 checks after preflight. It verifies that the Terraform-created ShardedCluster deployment lock appears during an active topology change, blocks conflicting work, disappears after completion, and leaves the cluster readable before cleanup.
@@ -118,29 +118,26 @@ The locking scenario adds 6 checks after preflight. It verifies that the Terrafo
 Run the full gauntlet only when broad end-to-end acceptance is needed:
 
 ```bash
-python3 tests/run_harness.py --profile all --allow-mutations --allow-destructive
+python3 tests/run_harness.py --profile all --allow-changes
 ```
 
 This runs preflight, ReplicaSet, ShardedCluster, and locking scenarios.
 
 ---
 
-## 4. Safety flags
+## 4. Safety flag
 
-Every lifecycle profile (`replicaset`, `sharded`, `locking`, `all`) requires both:
+Every lifecycle profile (`replicaset`, `sharded`, `locking`, `all`) requires:
 
 ```text
---allow-mutations
---allow-destructive
+--allow-changes
 ```
 
-`--allow-mutations` acknowledges that the harness may create or modify temporary MongoDB test resources.
+`--allow-changes` explicitly acknowledges that the harness may create, modify, and delete temporary test resources in the configured environment.
 
-`--allow-destructive` acknowledges that the harness may delete temporary resources during cleanup and deletion tests.
+The flag is a deliberate safety gate. Naming a lifecycle profile by itself does **not** start that profile; the harness refuses to proceed until `--allow-changes` is present.
 
-The two flags are a combined safety gate. Supplying only one does **not** run a partial profile. The harness refuses to start the lifecycle profile until both are present.
-
-The read-only `preflight` profile requires neither flag.
+The read-only `preflight` profile does not require `--allow-changes`.
 
 ---
 
@@ -272,9 +269,9 @@ Use this approach:
 
 1. For documentation, display text, help text, or other presentation-only changes, rely on GitHub Actions/unit tests unless the change affects live behavior.
 2. For a quick environment sanity check, run `--profile preflight`.
-3. For narrow ReplicaSet/database lifecycle changes, run `--profile replicaset` with both safety flags.
-4. For ShardedCluster/shard changes, run `--profile sharded` with both safety flags.
-5. For deployment-lock/concurrency changes, run `--profile locking` with both safety flags.
-6. Reserve `--profile all --allow-mutations --allow-destructive` for broad cross-cutting lifecycle changes, release/demo baselines, or other true acceptance milestones.
+3. For narrow ReplicaSet/database lifecycle changes, run `--profile replicaset --allow-changes`.
+4. For ShardedCluster/shard changes, run `--profile sharded --allow-changes`.
+5. For deployment-lock/concurrency changes, run `--profile locking --allow-changes`.
+6. Reserve `--profile all --allow-changes` for broad cross-cutting lifecycle changes, release/demo baselines, or other true acceptance milestones.
 
 This keeps normal feedback fast while preserving the full 34-check run for the occasions when its broad coverage is actually valuable.
