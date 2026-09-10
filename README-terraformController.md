@@ -33,10 +33,16 @@ python3 terraformController.py ListDatabase --help
 python3 terraformController.py ListDatabaseAccounts --help
 ```
 
-The controller uses `terraformController.config` by default. To use another configuration file:
+The controller uses this configuration file in the current working directory by default:
+
+```text
+./terraformController.config
+```
+
+To intentionally use another configuration file:
 
 ```bash
-python3 terraformController.py --config /path/to/terraformController.config ListDeployments
+python3 terraformController.py --config ./alternate-terraformController.config ListDeployments
 ```
 
 Do not store the Vault token in the configuration file. The local development environment expects the token in the configured environment variable, normally `VAULT_TOKEN`.
@@ -343,8 +349,10 @@ Status:         Creation requested
 The request is being processed in the background.
 
 Check service status with:
-  python3 terraformController.py --config /path/to/terraformController.config ListDatabase RS1 HouseInfo
+  python3 terraformController.py --config ./terraformController.config ListDatabase RS1 HouseInfo
 ```
+
+The worker resolves the configuration file to an absolute path internally so the detached process remains reliable. That internal path is not shown in normal customer instructions.
 
 A DeleteDatabase acknowledgement follows the same pattern but directs the user to `ListDatabases` to confirm removal.
 
