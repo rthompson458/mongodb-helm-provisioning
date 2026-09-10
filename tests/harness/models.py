@@ -36,7 +36,7 @@ class HarnessContext:
     repo_root: Path
     config_path: Path
     python: str
-    suffix: str
+    run_id: str
     allow_mutations: bool
     allow_destructive: bool
     verbose: bool
@@ -44,16 +44,16 @@ class HarnessContext:
 
     @property
     def replica_set(self) -> str:
-        return f"THRS-{self.suffix}"
+        return f"RSTest-{self.run_id}"
 
     @property
     def sharded_cluster(self) -> str:
-        return f"THSC-{self.suffix}"
+        return f"SCTest-{self.run_id}"
 
     @property
     def lock_cluster(self) -> str:
-        return f"THLOCK-{self.suffix}"
+        return f"LockTest-{self.run_id}"
 
     @property
     def database(self) -> str:
-        return f"THDB_{self.suffix}"
+        return f"DBTest_{self.run_id}"
