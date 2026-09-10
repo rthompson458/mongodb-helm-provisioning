@@ -50,25 +50,26 @@ Profiles:
   all         34 checks total. Runs the complete live acceptance gauntlet.
 
 Safety:
-  Lifecycle profiles (replicaset, sharded, locking, all) require BOTH
-  --allow-mutations and --allow-destructive. Supplying only one flag does not
-  run a partial test; the harness refuses to start the lifecycle profile.
+  Lifecycle profiles (replicaset, sharded, locking, all) require --allow-changes.
+  This explicitly allows the harness to create, modify, and delete temporary
+  test resources in the configured environment. Preflight is read-only and does
+  not require --allow-changes.
 
 Common commands:
   Read-only preflight:
     python3 tests/run_harness.py --profile preflight
 
   ReplicaSet lifecycle only:
-    python3 tests/run_harness.py --profile replicaset --allow-mutations --allow-destructive
+    python3 tests/run_harness.py --profile replicaset --allow-changes
 
   ShardedCluster lifecycle only:
-    python3 tests/run_harness.py --profile sharded --allow-mutations --allow-destructive
+    python3 tests/run_harness.py --profile sharded --allow-changes
 
   Locking/concurrency only:
-    python3 tests/run_harness.py --profile locking --allow-mutations --allow-destructive
+    python3 tests/run_harness.py --profile locking --allow-changes
 
   FULL GAUNTLET - all 34 live acceptance checks:
-    python3 tests/run_harness.py --profile all --allow-mutations --allow-destructive
+    python3 tests/run_harness.py --profile all --allow-changes
 
 Configuration:
   ./terraformController.config is used by default. Use --config FILE only when
@@ -94,21 +95,11 @@ Configuration:
         ),
     )
     parser.add_argument(
-        "--allow-mutations",
+        "--allow-changes",
         action="store_true",
         help=(
-            "Safety acknowledgement required for lifecycle profiles. Allows the "
-            "harness to create or modify temporary MongoDB test resources. Must be "
-            "used together with --allow-destructive."
-        ),
-    )
-    parser.add_argument(
-        "--allow-destructive",
-        action="store_true",
-        help=(
-            "Safety acknowledgement required for lifecycle profiles. Allows the "
-            "harness to delete temporary resources during cleanup and deletion "
-            "tests. Must be used together with --allow-mutations."
+            "Required for lifecycle profiles. Allows the harness to create, modify, "
+            "and delete temporary test resources in the configured environment."
         ),
     )
     parser.add_argument(
@@ -123,21 +114,15 @@ Configuration:
 
 
 def _require_live_opt_in(args: argparse.Namespace) -> None:
-    """Reject mutating profiles unless both safety flags were supplied."""
+    """Reject lifecycle profiles unless the change acknowledgement is supplied."""
 
     if args.profile == "preflight":
         return
 
-    missing = []
-    if not args.allow_mutations:
-        missing.append("--allow-mutations")
-    if not args.allow_destructive:
-        missing.append("--allow-destructive")
-    if missing:
+    if not args.allow_changes:
         raise SystemExit(
-            "ERROR: Live lifecycle profiles create and delete temporary test resources. "
-            "Re-run with BOTH --allow-mutations and --allow-destructive. "
-            "Missing: " + ", ".join(missing) + "."
+            "ERROR: Live lifecycle profiles create, modify, and delete temporary "
+            "test resources. Re-run with --allow-changes."
         )
 
 
@@ -187,8 +172,6 @@ def main(argv: list[str] | None = None) -> int:
         config_path=config_path,
         python=sys.executable,
         run_id=run_id,
-        allow_mutations=args.allow_mutations,
-        allow_destructive=args.allow_destructive,
         verbose=args.verbose,
         total_tests=_total_tests(args.profile),
     )
