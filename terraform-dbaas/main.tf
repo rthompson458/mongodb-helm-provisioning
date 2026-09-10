@@ -122,6 +122,60 @@ locals {
     if account.enabled
   }
 
+  # Keep Noah's MongoDB management shape, but derive it from the controller's
+  # single desired-state inventory instead of introducing a second source of
+  # truth. Each deployment gets one Helm release and each database remains an
+  # independently managed DBaaS object with its own three accounts.
+  mongodb_databases = {
+    for deployment_key, deployment in var.deployments :
+    deployment_key => concat(
+      [
+        for database_key, database in deployment.databases : {
+          name        = database.display_name
+          collections = [var.placeholder_collection]
+        }
+      ],
+      (
+        var.operation.action == "create_database" &&
+        var.operation.deployment == deployment_key &&
+        !contains(keys(deployment.databases), lower(var.operation.database))
+      ) ? [
+        {
+          name        = var.operation.database
+          collections = [var.placeholder_collection]
+        }
+      ] : []
+    )
+  }
+
+  # The current public CLI exposes whole-database deletion. Keep the chart data
+  # contract extensible for collection operations without advertising commands
+  # that privateWorkerReplacement does not yet expose.
+  mongodb_database_operations = {
+    for deployment_key, deployment in var.deployments :
+    deployment_key => (
+      var.operation.action == "delete_database" &&
+      var.operation.deployment == deployment_key
+    ) ? [
+      {
+        id         = var.operation.operation_id != "" ? var.operation.operation_id : var.operation.nonce
+        action     = "deleteDatabase"
+        database   = var.operation.database
+        collection = ""
+        newName    = ""
+      }
+    ] : []
+  }
+
+  mongodb_management_deployments = {
+    for deployment_key, deployment in var.deployments :
+    deployment_key => deployment
+    if (
+      length(local.mongodb_databases[deployment_key]) > 0 ||
+      length(local.mongodb_database_operations[deployment_key]) > 0
+    )
+  }
+
   replica_sets = {
     for key, deployment in var.deployments : key => deployment
     if deployment.deployment_type == "ReplicaSet"
@@ -822,14 +876,71 @@ resource "kubernetes_manifest" "database_account" {
   ]
 }
 
-# Terraform owns imperative lifecycle actions that cannot be represented as a
-# long-lived MongoDB object: creating/dropping a logical DB, verifying that an
-# deployment is empty, and preparing/cleaning K3D static local storage. Python only
-# supplies the operation and reports its result.
+# Database materialization and controlled database operations are implemented
+# through the Helm chart contributed by the parallel Terraform/Helm prototype.
+# The chart consumes the controller's existing deployment/database inventory; it
+# does not introduce a mission-scoped state model or a second Terraform workspace.
+resource "helm_release" "mongodb_management" {
+  for_each = local.mongodb_management_deployments
+
+  name      = "${substr(each.key, 0, 34)}-mongodb-management"
+  chart     = "${path.module}/mongodb-chart"
+  namespace = var.mongodb_namespace
+  wait      = true
+  timeout   = var.mongodb_management_timeout_seconds
+
+  values = [
+    yamlencode({
+      mongodb = {
+        name                         = each.key
+        image                        = var.mongo_image
+        provisionerConnectionSecret = "tc-${each.key}-admin-connection"
+        adminConnectionSecret       = "tc-${each.key}-admin-connection"
+      }
+
+      mongodbDatabases          = local.mongodb_databases[each.key]
+      mongodbDatabaseOperations = local.mongodb_database_operations[each.key]
+
+      # A create request may need to rerun an otherwise identical Helm release
+      # after interrupted work. The operation nonce makes that retry observable
+      # to Helm while the database Job itself remains idempotent.
+      mongodbManagementNonce = (
+        var.operation.action == "create_database" &&
+        var.operation.deployment == each.key
+      ) ? var.operation.nonce : ""
+    })
+  ]
+
+  depends_on = [kubernetes_manifest.controller_admin]
+
+  lifecycle {
+    precondition {
+      condition = (
+        var.allow_destructive_mongodb_operations ||
+        length(local.mongodb_database_operations[each.key]) == 0
+      )
+      error_message = "Set allow_destructive_mongodb_operations=true to approve destructive MongoDB management operations."
+    }
+
+    precondition {
+      condition = alltrue([
+        for operation in local.mongodb_database_operations[each.key] :
+        contains(
+          [for database in local.mongodb_databases[each.key] : database.name],
+          operation.database
+        )
+      ])
+      error_message = "MongoDB management operations may target only databases managed by the selected deployment."
+    }
+  }
+}
+
+# Terraform owns imperative lifecycle actions that are better represented as
+# bounded runtime checks or infrastructure work: deployment-empty validation,
+# account authentication verification, locking, and static local storage. Python
+# only supplies the operation and reports its result.
 resource "terraform_data" "lifecycle_operation" {
   count = contains([
-    "create_database",
-    "delete_database",
     "validate_deployment_empty",
     "verify_database_accounts",
     "verify_database_accounts_owner_disabled",
@@ -870,12 +981,3 @@ resource "terraform_data" "lifecycle_operation" {
   }
 }
 
-output "managed_deployments" {
-  value = {
-    for deployment_key, deployment in var.deployments : deployment_key => {
-      display_name    = deployment.display_name
-      deployment_type = deployment.deployment_type
-      databases       = keys(deployment.databases)
-    }
-  }
-}
