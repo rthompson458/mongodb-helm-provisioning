@@ -1,0 +1,6 @@
+apiVersion: v2
+name: mongodb-dbaas-management
+description: Database materialization and controlled database operations for privateWorkerReplacement.
+type: application
+version: 0.2.0
+appVersion: "8.0"
