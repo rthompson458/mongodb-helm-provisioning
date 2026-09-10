@@ -1,9 +1,9 @@
 """Predictable runtime paths for controller logs and operation state.
 
 The controller keeps runtime evidence under a single ``logs`` directory beside
-``terraformController.config``.  Centralizing the path rules here prevents the
-customer CLI, administrator CLI, logging code, and async worker code from each
-inventing slightly different locations.
+``privateWorkerReplacement.config``.  Centralizing the path rules here prevents
+the customer CLI, administrator CLI, logging code, and async worker code from
+each inventing slightly different locations.
 
 Human-readable logs are daily append-only files:
 
