@@ -113,11 +113,14 @@ class AsyncOperationTests(unittest.TestCase):
             details=[("ShardedCluster", "SC9")],
             status_text="Topology change requested",
             status_arguments=["ListShards", "SC9"],
+            config_display="./terraformController.config",
         )
         self.assertIn("AddShard request accepted.", text)
         self.assertIn("ShardedCluster: SC9", text)
         self.assertIn("python3 terraformController.py", text)
+        self.assertIn("--config ./terraformController.config", text)
         self.assertIn("ListShards SC9", text)
+        self.assertNotIn(str(self.config_path.resolve()), text)
         self.assertNotIn("/usr/bin/python3", text)
         self.assertNotIn("ListOperation", text)
         self.assertNotIn(state["operation_id"], text)
@@ -136,10 +139,12 @@ class AsyncOperationTests(unittest.TestCase):
             details=[("Deployment", "RS1"), ("Database", "HouseInfo")],
             status_text="Creation requested",
             status_arguments=["ListDatabase", "RS1", "HouseInfo"],
+            config_display="./terraformController.config",
         )
         self.assertIn("Deployment:     RS1", text)
         self.assertIn("Database:       HouseInfo", text)
         self.assertIn("ListDatabase RS1 HouseInfo", text)
+        self.assertIn("--config ./terraformController.config", text)
 
     def test_admin_submission_exposes_exact_operation_diagnostics(self) -> None:
         state = create_operation(
@@ -148,10 +153,16 @@ class AsyncOperationTests(unittest.TestCase):
             deployment="controller-state",
             worker_arguments=["RecoverOrphanedResources", "--confirm"],
         )
-        text = admin_submission_instructions(self.config_path, state)
+        text = admin_submission_instructions(
+            self.config_path,
+            state,
+            config_display="./terraformController.config",
+        )
         self.assertIn("Operation ID:", text)
         self.assertIn(state["operation_id"], text)
         self.assertIn("python3 terraformControllerAdmin.py", text)
+        self.assertIn("--config ./terraformController.config", text)
+        self.assertNotIn(str(self.config_path.resolve()), text)
         self.assertNotIn("/usr/bin/python3", text)
         self.assertIn("ListOperation", text)
 
