@@ -883,7 +883,7 @@ resource "kubernetes_manifest" "database_account" {
 resource "helm_release" "mongodb_management" {
   for_each = local.mongodb_management_deployments
 
-  name      = "${substr(each.key, 0, 34)}-mongodb-management"
+  name      = "${each.key}-mongodb-management"
   chart     = "${path.module}/mongodb-chart"
   namespace = var.mongodb_namespace
   wait      = true
