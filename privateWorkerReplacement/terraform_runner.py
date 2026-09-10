@@ -2,8 +2,9 @@
 
 This file is the bridge between Python orchestration and Terraform. Python
 builds desired-state JSON and a small one-shot operation description, then this
-module runs Terraform. The lifecycle resource/script inside Terraform performs
-imperative MongoDB, storage, and lock work where required.
+module runs Terraform. Terraform uses the mongodb-chart Helm release for logical
+database management and lifecycle.sh for storage, locking, and bounded runtime
+verification where required.
 
 User-interface rule:
     Git and Terraform stdout/stderr are implementation diagnostics. They are
