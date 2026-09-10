@@ -76,12 +76,10 @@ exit 1
                 {
                     "PATH": f"{temp}{os.pathsep}{env['PATH']}",
                     "FAKE_MANIFEST": str(manifest_path),
-                    "TC_ACTION": "create_database",
+                    "TC_ACTION": "verify_controller_admin",
                     "TC_NAMESPACE": "mongodb",
                     "TC_KUBECONFIG": "/tmp/fake-kubeconfig",
                     "TC_DEPLOYMENT": "test-rs",
-                    "TC_DATABASE": "HouseInfo",
-                    "TC_PLACEHOLDER_COLLECTION": "__dbaas_metadata",
                     "TC_MONGO_IMAGE": "mongo:8.0",
                 }
             )
