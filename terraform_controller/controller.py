@@ -4,7 +4,8 @@ The implementation is intentionally split by responsibility:
 - deployments.py: ReplicaSet, ShardedCluster, and shard lifecycle/status
 - databases.py: database mutation, Vault credential, and rotation lifecycle
 - database_status.py: read-only database and account status
-- maintenance.py: administrator inventory, reconciliation, and recovery
+- admin_status.py: administrator resource-inventory presentation
+- maintenance.py: reconciliation and recovery
 """
 
 from .databases import (
@@ -33,8 +34,8 @@ from .deployments import (
     list_sharded_clusters,
     list_shards,
 )
+from .admin_status import list_managed_resources
 from .maintenance import (
-    list_managed_resources,
     reconcile,
     recover_deployment_lock,
     recover_orphaned_resources,
