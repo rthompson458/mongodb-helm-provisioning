@@ -452,7 +452,7 @@ DeleteShard SC9 4 --confirm  -> target 0, blocked
 
 Shard deletion is supported while managed application databases remain on the ShardedCluster. Terraform lowers the desired shard count, MongoDB Operator/Ops Manager reconciles the scale-down, the controller waits for the remaining topology to become healthy and for removed shard workloads to release storage, and Terraform then removes the old shard storage.
 
-The operation is Terraform-driven. Python does not directly issue MongoDB `removeShard`, `movePrimary`, direct `kubectl delete`, or similar topology mutations.
+The operation is Terraform-driven. Python does not directly issue MongoDB `removeShard`, `movePrimary`, direct `kubectl delete`, or similar topology mutations. Logical database materialization/deletion is handled by the Terraform-managed `terraform-dbaas/mongodb-chart/` Helm chart; topology/storage work remains in the lifecycle script.
 
 ### Deployment locking
 
@@ -504,7 +504,7 @@ The public request is asynchronous. Inside the worker, the controller:
 
 1. resolves and validates the deployment;
 2. verifies readiness and any ShardedCluster lock state;
-3. materializes the MongoDB database through Terraform;
+3. materializes the MongoDB database through Terraform's `mongodb_management` Helm release;
 4. records the database in managed desired state;
 5. creates the three fixed accounts and Vault credentials through Terraform;
 6. waits for MongoDBUser reconciliation;
