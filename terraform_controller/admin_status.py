@@ -21,16 +21,17 @@ def list_managed_resources(config: dict[str, Any], vault: VaultClient) -> None:
         ("Managed deployments", "managed_deployments"),
         ("MongoDB resources", "mongodb_resources"),
         ("MongoDB users", "mongodb_users"),
-        ("PVCs", "pvcs"),
-        ("PVs", "pvs"),
+        ("PVCs (PersistentVolumeClaims)", "pvcs"),
+        ("PVs (PersistentVolumes)", "pvs"),
         ("Deployment locks", "deployment_locks"),
     ]
     clean = all(not resources[key] for _, key in labels)
 
     print("terraformController Managed Resource Inventory")
     print()
+    label_width = max(len(label) + 1 for label, _ in labels)
     for label, key in labels:
-        print(f"{label + ':':<21} {len(resources[key])}")
+        print(f"{label + ':':<{label_width}} {len(resources[key])}")
 
     print()
     print(f"Status: {'CLEAN' if clean else 'MANAGED RESOURCES PRESENT'}")
