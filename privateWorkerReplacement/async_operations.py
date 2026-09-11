@@ -199,9 +199,10 @@ def launch_operation(
 ) -> dict[str, Any]:
     """Launch a detached worker that executes the normal lifecycle function."""
 
-    # This is a local UX guard against obvious double-submits. ShardedCluster
-    # cross-process safety still comes from the Terraform-created deployment
-    # lock, which remains the authoritative mutation lock.
+    # This is a local UX guard against obvious same-deployment double-submits.
+    # Controller-wide stale-inventory safety is enforced by mutation_lock.py,
+    # while ShardedCluster-specific business conflicts still use the
+    # Terraform-created deployment lock.
     for existing in list_operation_records(config_path):
         if (
             deployment
