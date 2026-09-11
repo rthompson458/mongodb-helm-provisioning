@@ -37,7 +37,7 @@ class LoggingTests(unittest.TestCase):
             handler.flush()
 
     def _config(self, root: Path) -> dict[str, str]:
-        config_path = root / "privateWorkerReplacement.config"
+        config_path = root / "dev.config"
         config_path.write_text("[dummy]\n", encoding="utf-8")
         return {"config_path": str(config_path)}
 

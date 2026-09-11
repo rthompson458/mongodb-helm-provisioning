@@ -23,7 +23,7 @@ Running either executable with no command is intentional. It prints the full hel
 Both controller CLIs assume the configuration file is in the current working directory:
 
 ```text
-./privateWorkerReplacement.config
+./dev.config
 ```
 
 Use `--config FILE` only when a different configuration file is intentionally selected.
@@ -160,6 +160,8 @@ RotatePasswords DEPLOYMENT DATABASE
 RotatePasswords DATABASE
 DisableOwner DEPLOYMENT DATABASE --confirm
 DisableOwner DATABASE --confirm
+EnableOwner DEPLOYMENT DATABASE
+EnableOwner DATABASE
 ```
 
 The one-argument database forms are valid only when exactly one managed deployment exists.
@@ -200,7 +202,7 @@ AddDatabase
 DeleteDatabase
 ```
 
-The acknowledgement tells the user what was requested and which normal service-status command to run. It does **not** expose an internal operation ID. Normal follow-up instructions use the friendly `./privateWorkerReplacement.config` path; detached workers resolve that path internally before running.
+The acknowledgement tells the user what was requested and which normal service-status command to run. It does **not** expose an internal operation ID. Normal follow-up instructions use the friendly `./dev.config` path; detached workers resolve that path internally before running.
 
 Examples:
 
@@ -212,7 +214,7 @@ python3 privateWorkerReplacement.py DeleteDatabase RS1 HouseInfo --confirm
 python3 privateWorkerReplacement.py ListDatabases RS1
 ```
 
-`RotatePasswords` and `DisableOwner` currently remain synchronous because the user normally needs the resulting credential/account state immediately. Their Terraform/Git implementation output is captured in the operations log rather than displayed on the terminal.
+`RotatePasswords`, `DisableOwner`, and `EnableOwner` currently remain synchronous because the user normally needs the resulting credential/account state immediately. Their Terraform/Git implementation output is captured in the operations log rather than displayed on the terminal.
 
 ## ShardedCluster defaults and safety
 
@@ -281,7 +283,7 @@ http://127.0.0.1:8200/ui/vault/secrets/secret/show/mongodb/RS1/HouseInfo/HouseIn
 
 The URL is generated from the configured Vault address and mount; users do not need to manually construct it.
 
-Passwords rotate every configured rotation interval, currently 30 days. The Owner account is disabled in MongoDB at the first rotation at or after day 30, while its rotated credential remains managed in Vault.
+Passwords rotate every configured rotation interval, currently 30 days. The Owner account is disabled in MongoDB at the first rotation at or after day 30, while its rotated credential remains managed in Vault. `EnableOwner` restores the Owner account using that existing managed credential; enabling the account does not rotate its password.
 
 ## Runtime logs
 
@@ -311,7 +313,7 @@ Temporary worker transcripts may briefly appear under:
 logs/operations/work/
 ```
 
-The controller and operations logs are append-only for the UTC date. There is no `[Logging]` section, overwrite mode, configurable log directory, or configurable filename format in `privateWorkerReplacement.config`.
+The controller and operations logs are append-only for the UTC date. There is no `[Logging]` section, overwrite mode, configurable log directory, or configurable filename format in `dev.config`.
 
 The JSON state files are not user logs; they are small machine-readable records used by `ListOperation`, interrupted-worker detection, the acceptance harness, and guarded recovery. The `logs/` tree is ignored by Git. Ordinary `git clean -fd` does not remove ignored files, but deleting/recloning the repository or explicitly cleaning ignored files such as with `git clean -fdx` removes local runtime history/state.
 
@@ -396,6 +398,6 @@ terraform-dbaas/scripts/lifecycle.sh
 | `README-privateWorkerReplacementAdmin.md` | Platform administrator and recovery manual |
 | `docs/CLI-INTERFACES.md` | Public/admin interface architecture boundary |
 | `tests/README.md` | Unit and live acceptance testing guide |
-| `privateWorkerReplacement.config` | Environment-specific runtime configuration |
+| `dev.config` | Environment-specific runtime configuration |
 
 Use the customer manual as the authoritative guide for normal DBaaS operation and the administrator manual for diagnostics/recovery.

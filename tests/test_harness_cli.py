@@ -43,7 +43,7 @@ class HarnessCliTests(unittest.TestCase):
         self.assertIn("--allow-changes", result.stdout)
         self.assertNotIn("--allow-mutations", result.stdout)
         self.assertNotIn("--allow-destructive", result.stdout)
-        self.assertIn("./privateWorkerReplacement.config", result.stdout)
+        self.assertIn("./dev.config", result.stdout)
         self.assertIn(
             "python3 tests/run_harness.py --profile all --allow-changes",
             result.stdout,

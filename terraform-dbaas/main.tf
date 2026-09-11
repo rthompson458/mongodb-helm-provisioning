@@ -52,7 +52,12 @@ locals {
         lower(var.operation.database) == database.database_key
       ) ? plantimestamp() : database.rotated_at
 
+      # EnableOwner restores the Owner account without rotating its password.
       owner_disabled = (
+        var.operation.action == "enable_owner" &&
+        var.operation.deployment == database.deployment_key &&
+        lower(var.operation.database) == database.database_key
+        ) ? false : (
         database.owner_disabled ||
         (
           var.operation.action == "disable_owner" &&
@@ -71,6 +76,10 @@ locals {
       )
 
       owner_disabled_at = (
+        var.operation.action == "enable_owner" &&
+        var.operation.deployment == database.deployment_key &&
+        lower(var.operation.database) == database.database_key
+        ) ? "" : (
         !database.owner_disabled &&
         (
           (
@@ -108,6 +117,7 @@ locals {
           enabled          = account_key != "owner" || !database.owner_disabled
           rotation_version = database.rotation_version
           rotated_at       = database.rotated_at
+
           # MongoDB database names may contain underscores, but Kubernetes
           # object names may not. Keep the MongoDB/Vault display name unchanged
           # while converting only the Kubernetes resource-name segment.
@@ -130,6 +140,61 @@ locals {
   sharded_clusters = {
     for key, deployment in var.deployments : key => deployment
     if deployment.deployment_type == "ShardedCluster"
+  }
+
+  # Database management through the integrated Helm chart. The controller's
+  # existing var.deployments inventory remains the single source of truth.
+  #
+  # During AddDatabase, the requested database is temporarily added here before
+  # Python commits it to Vault-backed inventory. That lets the Helm provisioner
+  # materialize the database first. The later inventory apply then makes it
+  # normal long-lived desired state.
+  mongodb_databases = {
+    for deployment_key, deployment in var.deployments : deployment_key => values(merge(
+      {
+        for database_key, database in deployment.databases :
+        database_key => {
+          name = database.display_name
+        }
+      },
+      (
+        var.operation.action == "create_database" &&
+        var.operation.deployment == deployment_key
+        ) ? {
+        lower(var.operation.database) = {
+          name = var.operation.database
+        }
+      } : {}
+    ))
+  }
+
+  # Retain the mongodbDatabaseOperations interface from the parallel Helm work,
+  # but this DBaaS effort supports only database deletion. Collection management
+  # and runtime-audit operations are outside the current scope.
+  mongodb_database_operations = {
+    for deployment_key, deployment in var.deployments : deployment_key => (
+      var.operation.action == "delete_database" &&
+      var.operation.deployment == deployment_key
+      ) ? [
+      {
+        id       = var.operation.operation_id != "" ? var.operation.operation_id : var.operation.nonce
+        action   = "deleteDatabase"
+        database = var.operation.database
+      }
+    ] : []
+  }
+
+  # A management release exists only while a deployment has managed databases
+  # or while a create/delete database operation is actively being processed.
+  mongodb_management_deployments = {
+    for deployment_key, deployment in var.deployments : deployment_key => deployment
+    if(
+      length(local.mongodb_databases[deployment_key]) > 0 ||
+      (
+        contains(["create_database", "delete_database"], var.operation.action) &&
+        var.operation.deployment == deployment_key
+      )
+    )
   }
 
   static_replica_sets = {
@@ -695,6 +760,72 @@ resource "kubernetes_manifest" "controller_admin" {
   ]
 }
 
+# Logical database materialization and deletion use the integrated Helm chart.
+# This preserves the useful mongodb_management / mongodbDatabases /
+# mongodbDatabaseOperations structure from the parallel Terraform work while
+# keeping privateWorkerReplacement's Deployment -> Database -> Account model.
+#
+# The chart does not expose collection management. It creates only the internal
+# placeholder collection needed for MongoDB to persist an otherwise empty DB.
+resource "helm_release" "mongodb_management" {
+  for_each = local.mongodb_management_deployments
+
+  name      = "${each.key}-mongodb-management"
+  chart     = "${path.module}/mongodb-chart"
+  namespace = var.mongodb_namespace
+  wait      = true
+  timeout   = var.mongodb_management_timeout_seconds
+
+  values = [
+    yamlencode({
+      mongodb = {
+        name                        = each.key
+        image                       = var.mongo_image
+        provisionerConnectionSecret = "tc-${each.key}-admin-connection"
+        adminConnectionSecret       = "tc-${each.key}-admin-connection"
+        placeholderCollection       = var.placeholder_collection
+      }
+
+      mongodbDatabases          = local.mongodb_databases[each.key]
+      mongodbDatabaseOperations = local.mongodb_database_operations[each.key]
+
+      # The nonce makes a retried one-shot database operation produce a new
+      # Helm release revision even when the desired database list is unchanged.
+      mongodbManagementNonce = (
+        contains(["create_database", "delete_database"], var.operation.action) &&
+        var.operation.deployment == each.key
+      ) ? var.operation.nonce : ""
+    })
+  ]
+
+  depends_on = [
+    kubernetes_manifest.controller_admin
+  ]
+
+  lifecycle {
+    precondition {
+      condition = (
+        var.operation.action != "delete_database" ||
+        var.operation.deployment != each.key ||
+        var.allow_destructive_mongodb_operations
+      )
+      error_message = "Set allow_destructive_mongodb_operations=true to approve deleteDatabase."
+    }
+
+    precondition {
+      condition = (
+        !contains(["create_database", "delete_database"], var.operation.action) ||
+        var.operation.deployment != each.key ||
+        contains(
+          [for database in local.mongodb_databases[each.key] : lower(database.name)],
+          lower(var.operation.database)
+        )
+      )
+      error_message = "MongoDB database operations may target only the selected deployment."
+    }
+  }
+}
+
 # Passwords are ephemeral Terraform values. They are written to Vault and
 # Kubernetes through write-only fields, so plaintext passwords are not stored
 # in Terraform state.
@@ -822,14 +953,12 @@ resource "kubernetes_manifest" "database_account" {
   ]
 }
 
-# Terraform owns imperative lifecycle actions that cannot be represented as a
-# long-lived MongoDB object: creating/dropping a logical DB, verifying that an
-# deployment is empty, and preparing/cleaning K3D static local storage. Python only
+# Terraform still owns imperative lifecycle actions that remain outside the
+# Helm database-management path: deployment-empty validation, authentication
+# verification, deployment locking, and K3D static local storage. Python only
 # supplies the operation and reports its result.
 resource "terraform_data" "lifecycle_operation" {
   count = contains([
-    "create_database",
-    "delete_database",
     "validate_deployment_empty",
     "verify_database_accounts",
     "verify_database_accounts_owner_disabled",

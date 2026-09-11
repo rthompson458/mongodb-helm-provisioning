@@ -38,6 +38,7 @@ from .controller import (
     delete_shard,
     delete_sharded_cluster,
     disable_owner,
+    enable_owner,
     list_database,
     list_database_accounts,
     list_databases,
@@ -57,7 +58,7 @@ from .vault import VaultClient
 # for detached workers. DEFAULT_CONFIG_DISPLAY is the friendly path a person
 # sees and types, while DEFAULT_CONFIG is the Path object used by Python.
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CONFIG_DISPLAY = "./privateWorkerReplacement.config"
+DEFAULT_CONFIG_DISPLAY = "./dev.config"
 DEFAULT_CONFIG = Path(DEFAULT_CONFIG_DISPLAY)
 
 
@@ -179,7 +180,7 @@ run in the background. The submitting shell returns promptly with a status
 command to use while the request finishes.
 
 Configured defaults:
-  Configuration file                 = ./privateWorkerReplacement.config
+  Configuration file                 = ./dev.config
   AddShardedCluster initial shards   = {configured_shards_text}
     (read from controller configuration)
   AddShard count                     = 1
@@ -211,7 +212,7 @@ Inventory:
         "--config",
         default=DEFAULT_CONFIG_DISPLAY,
         metavar="FILE",
-        help="Optional configuration file. Default: ./privateWorkerReplacement.config",
+        help="Optional configuration file. Default: ./dev.config",
     )
     parser.add_argument(
         "--_operation-worker",
@@ -438,6 +439,15 @@ Inventory:
     _database_target(x)
     _confirm(x)
 
+    x = _sub(
+        sp,
+        "EnableOwner",
+        "Re-enable the database Owner account.",
+        "Requires a ready deployment. Recreates the Owner MongoDB account using the existing managed credential without rotating its password.",
+        "  python3 privateWorkerReplacement.py EnableOwner SC9 HouseInfo",
+    )
+    _database_target(x)
+
     return parser
 
 
@@ -630,6 +640,7 @@ def main(argv: list[str] | None = None) -> int:
             "ListDatabaseAccounts": lambda: list_database_accounts(config, vault, args.deployment_or_database, args.database),
             "RotatePasswords": lambda: rotate_passwords(config, vault, args.deployment_or_database, args.database),
             "DisableOwner": lambda: disable_owner(config, vault, args.deployment_or_database, args.database, args.confirm),
+            "EnableOwner": lambda: enable_owner(config, vault, args.deployment_or_database, args.database),
         }
         actions[args.command]()
 

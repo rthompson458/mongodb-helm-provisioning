@@ -154,13 +154,13 @@ The read-only `preflight` profile does not require `--allow-changes`.
 Optional. The harness assumes the configuration file is in the current working directory:
 
 ```text
-./privateWorkerReplacement.config
+./dev.config
 ```
 
 Use `--config FILE` only when another configuration file is intentionally selected:
 
 ```bash
-python3 tests/run_harness.py --profile preflight --config ./alternate-privateWorkerReplacement.config
+python3 tests/run_harness.py --profile preflight --config ./alternate-dev.config
 ```
 
 ### `--verbose`

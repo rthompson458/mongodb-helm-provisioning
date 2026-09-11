@@ -38,7 +38,7 @@ python3 privateWorkerReplacementAdmin.py RecoverOrphanedResources --help
 The administrator interface uses the same Vault token as the public controller and assumes this configuration file in the current working directory:
 
 ```text
-./privateWorkerReplacement.config
+./dev.config
 ```
 
 Use `--config FILE` only when another configuration file is intentionally selected. Do not store the Vault token in the config file.
@@ -295,10 +295,10 @@ Scope:          controller-state
 Status:         In Progress
 
 Check administrator operation status with:
-  python3 privateWorkerReplacementAdmin.py --config ./privateWorkerReplacement.config ListOperation ab0c98165276
+  python3 privateWorkerReplacementAdmin.py --config ./dev.config ListOperation ab0c98165276
 ```
 
-The detached recovery worker resolves the configuration file to an absolute path internally. Routine administrator instructions continue to show the friendlier `./privateWorkerReplacement.config` path.
+The detached recovery worker resolves the configuration file to an absolute path internally. Routine administrator instructions continue to show the friendlier `./dev.config` path.
 
 ---
 

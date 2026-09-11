@@ -7,7 +7,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
-from privateWorkerReplacement import maintenance
+from privateWorkerReplacement import maintenance, ops_manager
 
 from helpers import FakeVault, deployment_inventory, online_sc_status, topology_lock
 
@@ -19,7 +19,211 @@ class MaintenanceTests(unittest.TestCase):
         self.config = {
             "rs_ready_timeout": 30,
             "sc_ready_timeout": 30,
+            "backend_secret_suffix": "test-state",
         }
+
+    def test_ops_manager_projects_are_read_only_and_parsed(self) -> None:
+        config = {
+            "kubeconfig": "/tmp/fake-kubeconfig",
+            "kube_context": "k3d-test",
+            "mongodb_namespace": "mongodb",
+            "ops_manager_config_map": "my-project",
+            "ops_manager_credentials_secret": "organization-secret",
+        }
+
+        def fake_get(_config, resource, name):
+            if resource == "configmap":
+                self.assertEqual(name, "my-project")
+                return {
+                    "data": {
+                        "baseUrl": "http://ops-manager-svc:8080",
+                        "orgId": "org123",
+                        "projectName": "mongodb-development",
+                    }
+                }
+
+            if resource == "secret":
+                self.assertEqual(name, "organization-secret")
+                return {
+                    "data": {
+                        "publicKey": "cHVibGlj",
+                        "privateKey": "cHJpdmF0ZQ==",
+                    }
+                }
+
+            raise AssertionError((resource, name))
+
+        def fake_list(_config, resource, **_kwargs):
+            self.assertEqual(resource, "pod")
+            return [
+                {"metadata": {"name": "ops-manager-0"}},
+                {"metadata": {"name": "unrelated-pod"}},
+            ]
+
+        result = unittest.mock.Mock(
+            returncode=0,
+            stdout=(
+                '{"results":['
+                '{"id":"2","name":"RSTest"},'
+                '{"id":"1","name":"mongodb-development"}'
+                ']}'
+            ),
+            stderr="",
+        )
+
+        with (
+            patch.object(ops_manager.kube, "get_json", side_effect=fake_get),
+            patch.object(ops_manager.kube, "list_json", side_effect=fake_list),
+            patch.object(ops_manager, "run_process", return_value=result) as run_mock,
+        ):
+            permanent, projects = ops_manager.list_projects(config)
+
+        self.assertEqual(permanent, "mongodb-development")
+        self.assertEqual(
+            projects,
+            [
+                {"id": "1", "name": "mongodb-development"},
+                {"id": "2", "name": "RSTest"},
+            ],
+        )
+
+        command = run_mock.call_args.args[0]
+        self.assertIn("ops-manager-0", command)
+        self.assertIn("curl", command)
+        self.assertIn(
+            'user = "public:private"',
+            run_mock.call_args.kwargs["input_text"],
+        )
+
+    def test_ops_manager_delete_project_accepts_202_and_waits_for_absence(self) -> None:
+        config = {
+            "kubeconfig": "/tmp/fake-kubeconfig",
+            "kube_context": "k3d-test",
+            "mongodb_namespace": "mongodb",
+            "ops_manager_config_map": "my-project",
+            "ops_manager_credentials_secret": "organization-secret",
+        }
+
+        projects_before = (
+            "mongodb-development",
+            [
+                {"id": "base-id", "name": "mongodb-development"},
+                {"id": "rs1-id", "name": "RS1"},
+            ],
+        )
+        projects_after = (
+            "mongodb-development",
+            [{"id": "base-id", "name": "mongodb-development"}],
+        )
+
+        def fake_get(_config, resource, name):
+            if resource == "configmap":
+                return {
+                    "data": {
+                        "baseUrl": "http://ops-manager-svc:8080",
+                        "orgId": "org123",
+                        "projectName": "mongodb-development",
+                    }
+                }
+
+            if resource == "secret" and name == "organization-secret":
+                return {
+                    "data": {
+                        "publicKey": "cHVibGlj",
+                        "privateKey": "cHJpdmF0ZQ==",
+                    }
+                }
+
+            if resource == "secret" and name == "rs1-id-group-secret":
+                return None
+
+            raise AssertionError((resource, name))
+
+        delete_project_result = unittest.mock.Mock(
+            returncode=0,
+            stdout="202",
+            stderr="",
+        )
+        delete_secret_result = unittest.mock.Mock(
+            returncode=0,
+            stdout='secret "rs1-id-group-secret" deleted',
+            stderr="",
+        )
+
+        with (
+            patch.object(
+                ops_manager,
+                "list_projects",
+                side_effect=[projects_before, projects_after],
+            ) as list_mock,
+            patch.object(ops_manager.kube, "get_json", side_effect=fake_get),
+            patch.object(
+                ops_manager.kube,
+                "list_json",
+                return_value=[{"metadata": {"name": "ops-manager-0"}}],
+            ),
+            patch.object(
+                ops_manager,
+                "run_process",
+                side_effect=[delete_project_result, delete_secret_result],
+            ) as run_mock,
+            patch.object(ops_manager.time, "sleep"),
+        ):
+            ops_manager.delete_project(config, "RS1", timeout=10)
+
+        self.assertEqual(list_mock.call_count, 2)
+        self.assertEqual(run_mock.call_count, 2)
+
+        ops_manager_call = run_mock.call_args_list[0]
+        curl_config = ops_manager_call.kwargs["input_text"]
+        self.assertIn("/api/public/v1.0/groups/rs1-id", curl_config)
+        self.assertIn('request = "DELETE"', curl_config)
+
+        secret_call = run_mock.call_args_list[1]
+        secret_command = secret_call.args[0]
+
+        self.assertIn("delete", secret_command)
+        self.assertIn("secret", secret_command)
+        self.assertIn("rs1-id-group-secret", secret_command)
+        self.assertIn("--ignore-not-found=true", secret_command)
+
+    def test_ops_manager_delete_project_is_idempotent_when_absent(self) -> None:
+        config = {}
+
+        with (
+            patch.object(
+                ops_manager,
+                "list_projects",
+                return_value=(
+                    "mongodb-development",
+                    [{"id": "base-id", "name": "mongodb-development"}],
+                ),
+            ),
+            patch.object(ops_manager, "run_process") as run_mock,
+        ):
+            ops_manager.delete_project(config, "RS1")
+
+        run_mock.assert_not_called()
+
+    def test_ops_manager_delete_project_refuses_platform_project(self) -> None:
+        config = {}
+
+        with (
+            patch.object(
+                ops_manager,
+                "list_projects",
+                return_value=(
+                    "mongodb-development",
+                    [{"id": "base-id", "name": "mongodb-development"}],
+                ),
+            ),
+            patch.object(ops_manager, "run_process") as run_mock,
+        ):
+            with self.assertRaises(ops_manager.ControllerError) as ctx:
+                ops_manager.delete_project(config, "mongodb-development")
+
+        self.assertIn("Refusing to delete permanent", str(ctx.exception))
+        run_mock.assert_not_called()
 
     def test_list_managed_resources_reports_clean_zero_state(self) -> None:
         vault = FakeVault({})
@@ -27,7 +231,7 @@ class MaintenanceTests(unittest.TestCase):
         def fake_list(_config, resource, **kwargs):
             self.assertIn(
                 resource,
-                {"mongodb", "mongodbuser", "pvc", "pv", "configmap"},
+                {"mongodb", "mongodbuser", "pvc", "pv", "configmap", "secret"},
             )
             if resource == "pv":
                 self.assertFalse(kwargs.get("namespaced", True))
@@ -36,6 +240,11 @@ class MaintenanceTests(unittest.TestCase):
         output = io.StringIO()
         with (
             patch.object(maintenance.kube, "list_json", side_effect=fake_list),
+            patch.object(
+                maintenance,
+                "list_ops_manager_projects",
+                return_value=("mongodb-development", []),
+            ),
             redirect_stdout(output),
         ):
             maintenance.list_managed_resources(self.config, vault)
@@ -71,11 +280,21 @@ class MaintenanceTests(unittest.TestCase):
                     {"metadata": {"name": "unrelated-config"}},
                     {"metadata": {"name": "tc-deployment-lock-sc9"}},
                 ]
+            if resource == "secret":
+                return []
             raise AssertionError(resource)
 
         output = io.StringIO()
         with (
             patch.object(maintenance.kube, "list_json", side_effect=fake_list),
+            patch.object(
+                maintenance,
+                "list_ops_manager_projects",
+                return_value=(
+                    "mongodb-development",
+                    [{"id": "sc9-id", "name": "SC9"}],
+                ),
+            ),
             redirect_stdout(output),
         ):
             maintenance.list_managed_resources(self.config, vault)

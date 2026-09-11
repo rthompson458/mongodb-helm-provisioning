@@ -71,10 +71,25 @@ variable "deployments" {
     ])
     error_message = "ShardedCluster deployments require at least one shard, member per shard, mongos, and config server."
   }
+
+  validation {
+    condition = alltrue(flatten([
+      for deployment in values(var.deployments) : [
+        for database in values(deployment.databases) :
+        trimspace(database.display_name) != "" &&
+        !contains(
+          ["admin", "config", "local"],
+          lower(trimspace(database.display_name))
+        )
+      ]
+    ]))
+    error_message = "Managed database names must be non-empty and cannot be admin, config, or local."
+  }
 }
 
 variable "operation" {
   description = "One-shot lifecycle operation requested by privateWorkerReplacement"
+
   type = object({
     action          = string
     deployment      = string
@@ -88,6 +103,7 @@ variable "operation" {
     target_shards   = number
     nonce           = string
   })
+
   default = {
     action          = "none"
     deployment      = ""
@@ -110,6 +126,7 @@ variable "operation" {
       "validate_deployment_empty",
       "rotate_passwords",
       "disable_owner",
+      "enable_owner",
       "verify_database_accounts",
       "verify_database_accounts_owner_disabled",
       "verify_database_users_absent",
@@ -117,7 +134,23 @@ variable "operation" {
       "acquire_deployment_lock",
       "release_deployment_lock"
     ], var.operation.action)
+
     error_message = "operation.action is not supported."
+  }
+
+  validation {
+    condition = (
+      !contains(["create_database", "delete_database"], var.operation.action) ||
+      (
+        trimspace(var.operation.database) != "" &&
+        !contains(
+          ["admin", "config", "local"],
+          lower(trimspace(var.operation.database))
+        )
+      )
+    )
+
+    error_message = "Database create/delete operations require a non-empty database name and cannot target admin, config, or local."
   }
 }
 
@@ -191,9 +224,26 @@ variable "mongo_image" {
 }
 
 variable "placeholder_collection" {
-  description = "Internal collection used to materialize an otherwise empty MongoDB database"
+  description = "Internal collection used only to materialize an otherwise empty MongoDB database"
   type        = string
   default     = "__dbaas_metadata"
+}
+
+variable "mongodb_management_timeout_seconds" {
+  description = "Maximum time Terraform waits for the MongoDB management Helm release"
+  type        = number
+  default     = 600
+
+  validation {
+    condition     = var.mongodb_management_timeout_seconds >= 30
+    error_message = "mongodb_management_timeout_seconds must be at least 30 seconds."
+  }
+}
+
+variable "allow_destructive_mongodb_operations" {
+  description = "Allows explicitly approved destructive MongoDB management operations"
+  type        = bool
+  default     = false
 }
 
 variable "default_members" {

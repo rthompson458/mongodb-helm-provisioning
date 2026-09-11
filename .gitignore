@@ -37,3 +37,6 @@ terraform.tfstate.*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Disposable Terraform runtime cache
+.runtime/

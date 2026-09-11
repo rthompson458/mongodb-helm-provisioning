@@ -86,18 +86,18 @@ class AdminCliTests(unittest.TestCase):
         self.assertIn("RecoverOrphanedResources", help_text)
         self.assertIn("Reconcile", help_text)
         self.assertIn("NOT the DBaaS end-user interface", help_text)
-        self.assertIn("./privateWorkerReplacement.config", help_text)
+        self.assertIn("./dev.config", help_text)
 
     def test_admin_default_config_is_current_directory_file(self) -> None:
         args = admin_cli.build_parser().parse_args(["ListOperations"])
-        self.assertEqual(args.config, "./privateWorkerReplacement.config")
+        self.assertEqual(args.config, "./dev.config")
         self.assertEqual(
             admin_cli.DEFAULT_CONFIG_DISPLAY,
-            "./privateWorkerReplacement.config",
+            "./dev.config",
         )
         self.assertEqual(
             admin_cli.DEFAULT_CONFIG,
-            Path("privateWorkerReplacement.config"),
+            Path("dev.config"),
         )
 
 

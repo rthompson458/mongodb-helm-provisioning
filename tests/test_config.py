@@ -18,10 +18,8 @@ mount = secret
 base_path = mongodb
 
 [Terraform]
-repository_url = https://example.invalid/repo.git
-branch = main
-subdirectory = terraform-dbaas
-cache_directory = ~/.cache/privateWorkerReplacement
+source_directory = terraform-dbaas
+cache_directory = .runtime/terraform-cache
 backend_namespace = mongodb
 backend_secret_suffix = test
 
@@ -70,7 +68,7 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             config_dir = Path(temp) / "config-home"
             config_dir.mkdir()
-            path = config_dir / "privateWorkerReplacement.config"
+            path = config_dir / "dev.config"
             path.write_text(text, encoding="utf-8")
             return load_config(path), config_dir.resolve(), path.resolve()
 
@@ -82,6 +80,8 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(config["persistent"])
         self.assertEqual(Path(config["config_path"]), config_path)
         self.assertEqual(config_path.parent, config_dir)
+        self.assertEqual(config["terraform_source"], config_dir / "terraform-dbaas")
+        self.assertEqual(config["terraform_cache"], config_dir / ".runtime" / "terraform-cache")
 
         # Logging is convention-based now. No logging policy belongs in the
         # environment config dictionary.

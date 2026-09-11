@@ -97,6 +97,84 @@ class DeploymentLifecycleTests(unittest.TestCase):
         self.assertEqual(sc["shard_count"], 4)
         self.assertEqual(sc["storage_shard_count"], 4)
 
+    def test_delete_replica_set_removes_ops_manager_project(self) -> None:
+        vault = FakeVault(
+            deployment_inventory(
+                deployment_type="ReplicaSet",
+                name="RS1",
+            )
+        )
+
+        with (
+            patch.object(deployments, "require_no_active_change"),
+            patch.object(deployments, "require_running"),
+            patch.object(deployments, "apply_inventory") as apply_mock,
+            patch.object(deployments.kube, "wait_absent") as wait_mock,
+            patch.object(
+                deployments,
+                "delete_ops_manager_project",
+            ) as project_delete_mock,
+        ):
+            deployments.delete_replica_set(
+                self.config,
+                vault,
+                "RS1",
+                True,
+            )
+
+        self.assertEqual(apply_mock.call_count, 2)
+        wait_mock.assert_called_once_with(
+            self.config,
+            "mongodb",
+            "rs1",
+            self.config["rs_ready_timeout"],
+        )
+        project_delete_mock.assert_called_once_with(
+            self.config,
+            "RS1",
+            timeout=self.config["rs_ready_timeout"],
+        )
+        self.assertNotIn("rs1", vault.inventory)
+
+    def test_delete_sharded_cluster_removes_ops_manager_project(self) -> None:
+        vault = FakeVault(
+            deployment_inventory(
+                deployment_type="ShardedCluster",
+                name="SC9",
+            )
+        )
+
+        with (
+            patch.object(deployments, "require_no_active_change"),
+            patch.object(deployments, "require_running"),
+            patch.object(deployments, "apply_inventory") as apply_mock,
+            patch.object(deployments.kube, "wait_absent") as wait_mock,
+            patch.object(
+                deployments,
+                "delete_ops_manager_project",
+            ) as project_delete_mock,
+        ):
+            deployments.delete_sharded_cluster(
+                self.config,
+                vault,
+                "SC9",
+                True,
+            )
+
+        self.assertEqual(apply_mock.call_count, 2)
+        wait_mock.assert_called_once_with(
+            self.config,
+            "mongodb",
+            "sc9",
+            self.config["sc_ready_timeout"],
+        )
+        project_delete_mock.assert_called_once_with(
+            self.config,
+            "SC9",
+            timeout=self.config["sc_ready_timeout"],
+        )
+        self.assertNotIn("sc9", vault.inventory)
+
     def test_add_two_shards_prepares_storage_before_live_count(self) -> None:
         vault = FakeVault(
             deployment_inventory(deployment_type="ShardedCluster", name="SC9")

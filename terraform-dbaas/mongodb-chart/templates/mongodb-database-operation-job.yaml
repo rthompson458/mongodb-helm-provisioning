@@ -1,0 +1,84 @@
+{{- if gt (len (.Values.mongodbDatabaseOperations | default (list))) 0 }}
+{{- $operationName := printf "%s-database-operation" .Release.Name | trunc 63 | trimSuffix "-" }}
+apiVersion: batch/v1
+kind: Job
+
+metadata:
+  name: {{ $operationName }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+
+spec:
+  backoffLimit: 0
+
+  template:
+    metadata:
+      name: {{ $operationName }}
+
+    spec:
+      restartPolicy: Never
+
+      containers:
+        - name: mongodb-database-operation
+          image: {{ .Values.mongodb.image | quote }}
+
+          env:
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mongodb.adminConnectionSecret }}
+                  key: connectionString.standard
+
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+
+              echo "Starting controlled MongoDB database operation"
+
+              mongosh "$MONGODB_URI" --quiet <<'EOF_MONGO'
+              const operations = {{ .Values.mongodbDatabaseOperations | default (list) | toJson }};
+
+              function fail(message) {
+                print("ERROR: " + message);
+                quit(42);
+              }
+
+              for (const op of operations) {
+                print(`Operation ${op.id}: ${op.action}`);
+
+                if (["admin", "config", "local"].includes(op.database)) {
+                  fail(`Protected database '${op.database}' cannot be managed.`);
+                }
+
+                if (op.action === "deleteDatabase") {
+                  const names = db.adminCommand({
+                    listDatabases: 1,
+                    nameOnly: true
+                  }).databases.map(item => item.name);
+
+                  if (!names.includes(op.database)) {
+                    print(`Database ${op.database} is already absent`);
+                    continue;
+                  }
+
+                  const result = db.getSiblingDB(op.database).dropDatabase();
+
+                  if (!result || result.ok !== 1) {
+                    fail(`MongoDB did not confirm deletion of database '${op.database}'.`);
+                  }
+
+                  print(`Deleted database ${op.database}`);
+                  continue;
+                }
+
+                fail(`Unsupported management action '${op.action}'.`);
+              }
+              EOF_MONGO
+
+              echo "Controlled MongoDB database operation completed"
+{{- end }}

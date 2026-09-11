@@ -22,7 +22,8 @@ class LifecycleScriptTests(unittest.TestCase):
         lifecycle.sh runs with `set -u`. The Kubernetes Job receives
         MONGODB_URI and TC_JS as container environment variables, so the outer
         lifecycle shell must leave those references untouched while generating
-        the Job YAML.
+        the Job YAML. Use deployment-empty validation here because database
+        create/delete operations now run through the Helm management chart.
         """
 
         repo_root = Path(__file__).resolve().parent.parent
@@ -76,12 +77,10 @@ exit 1
                 {
                     "PATH": f"{temp}{os.pathsep}{env['PATH']}",
                     "FAKE_MANIFEST": str(manifest_path),
-                    "TC_ACTION": "create_database",
+                    "TC_ACTION": "validate_deployment_empty",
                     "TC_NAMESPACE": "mongodb",
                     "TC_KUBECONFIG": "/tmp/fake-kubeconfig",
                     "TC_DEPLOYMENT": "test-rs",
-                    "TC_DATABASE": "HouseInfo",
-                    "TC_PLACEHOLDER_COLLECTION": "__dbaas_metadata",
                     "TC_MONGO_IMAGE": "mongo:8.0",
                 }
             )
@@ -99,20 +98,24 @@ exit 1
                 result.returncode,
                 0,
                 msg=(
-                    "lifecycle.sh failed while generating/executing the fake runtime Job.\n"
+                    "lifecycle.sh failed while generating/executing "
+                    "the fake runtime Job.\n"
                     f"stdout:\n{result.stdout}\n"
                     f"stderr:\n{result.stderr}"
                 ),
             )
 
             manifest = manifest_path.read_text(encoding="utf-8")
+
             self.assertIn(
                 'mongosh "$MONGODB_URI" --quiet --eval "$TC_JS"',
                 manifest,
             )
             self.assertIn("name: MONGODB_URI", manifest)
-            self.assertIn("name: tc-test-rs-admin-connection", manifest)
-
+            self.assertIn(
+                "name: tc-test-rs-admin-connection",
+                manifest,
+            )
 
     def test_controller_admin_readiness_retries_authentication(self) -> None:
         """Fresh deployments are not ready until controller login really works."""
@@ -202,12 +205,23 @@ exit 1
                 check=False,
             )
 
-            self.assertEqual(result.returncode, 0, msg=result.stderr)
-            self.assertIn("TC_RESULT=CONTROLLER_AUTH_OK", result.stdout)
-            self.assertEqual(attempt_file.read_text(encoding="utf-8"), "2")
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=result.stderr,
+            )
+            self.assertIn(
+                "TC_RESULT=CONTROLLER_AUTH_OK",
+                result.stdout,
+            )
+            self.assertEqual(
+                attempt_file.read_text(encoding="utf-8"),
+                "2",
+            )
 
-
-    def test_account_connection_secret_names_replace_database_underscores(self) -> None:
+    def test_account_connection_secret_names_replace_database_underscores(
+        self,
+    ) -> None:
         """Account verification must use the same DNS-safe names as Terraform."""
 
         repo_root = Path(__file__).resolve().parent.parent
@@ -280,15 +294,33 @@ exit 1
                 check=False,
             )
 
-            self.assertEqual(result.returncode, 0, msg=result.stderr)
-            manifests = manifest_path.read_text(encoding="utf-8")
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=result.stderr,
+            )
+
+            manifests = manifest_path.read_text(
+                encoding="utf-8"
+            )
+
             self.assertNotIn("house_info", manifests)
-            self.assertIn("tc-test-rs-house-info-owner-", manifests)
-            self.assertIn("tc-test-rs-house-info-readwrite-", manifests)
-            self.assertIn("tc-test-rs-house-info-read-", manifests)
+            self.assertIn(
+                "tc-test-rs-house-info-owner-",
+                manifests,
+            )
+            self.assertIn(
+                "tc-test-rs-house-info-readwrite-",
+                manifests,
+            )
+            self.assertIn(
+                "tc-test-rs-house-info-read-",
+                manifests,
+            )
 
-
-    def test_storage_cleanup_refuses_pvc_still_used_by_running_pod(self) -> None:
+    def test_storage_cleanup_refuses_pvc_still_used_by_running_pod(
+        self,
+    ) -> None:
         """Never delete a PV/PVC that Kubernetes says a live pod still uses."""
 
         repo_root = Path(__file__).resolve().parent.parent
@@ -376,14 +408,29 @@ exit 1
                 check=False,
             )
 
-            self.assertEqual(result.returncode, 42, msg=result.stderr)
-            self.assertIn("still used by pod(s) from the removed shard: test-sc-2-0", result.stderr)
-            self.assertIn("Timed out waiting 0s", result.stderr)
-            self.assertIn("No PVC/PV was deleted", result.stderr)
+            self.assertEqual(
+                result.returncode,
+                42,
+                msg=result.stderr,
+            )
+            self.assertIn(
+                "still used by pod(s) from the removed shard: "
+                "test-sc-2-0",
+                result.stderr,
+            )
+            self.assertIn(
+                "Timed out waiting 0s",
+                result.stderr,
+            )
+            self.assertIn(
+                "No PVC/PV was deleted",
+                result.stderr,
+            )
             self.assertFalse(delete_marker.exists())
 
-
-    def test_live_shard_cleanup_waits_for_terminating_pod_to_release_pvc(self) -> None:
+    def test_live_shard_cleanup_waits_for_terminating_pod_to_release_pvc(
+        self,
+    ) -> None:
         """Live shard contraction waits for terminating pods before deleting storage."""
 
         repo_root = Path(__file__).resolve().parent.parent
@@ -435,6 +482,7 @@ if [[ "$args" == *" get pods -o json"* ]]; then
   [[ -f "$FAKE_POD_CHECKS" ]] && n=$(cat "$FAKE_POD_CHECKS")
   n=$((n + 1))
   printf '%s' "$n" > "$FAKE_POD_CHECKS"
+
   if [[ "$n" -eq 1 ]]; then
     printf '{"items":[{"metadata":{"name":"test-sc-2-0"},"spec":{"volumes":[{"persistentVolumeClaim":{"claimName":"data-test-sc-2-0"}}]}}]}'
   else
@@ -464,7 +512,11 @@ exit 1
                 encoding="utf-8",
             )
             fake_kubectl.chmod(0o755)
-            fake_docker.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+
+            fake_docker.write_text(
+                "#!/usr/bin/env bash\nexit 0\n",
+                encoding="utf-8",
+            )
             fake_docker.chmod(0o755)
 
             env = os.environ.copy()
@@ -495,15 +547,33 @@ exit 1
                 check=False,
             )
 
-            self.assertEqual(result.returncode, 0, msg=result.stderr)
-            self.assertIn("still used by pod(s) from the removed shard", result.stderr)
-            self.assertIn("Waiting up to 5s", result.stderr)
-            self.assertGreaterEqual(int(pod_checks.read_text(encoding="utf-8")), 2)
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=result.stderr,
+            )
+            self.assertIn(
+                "still used by pod(s) from the removed shard",
+                result.stderr,
+            )
+            self.assertIn(
+                "Waiting up to 5s",
+                result.stderr,
+            )
+            self.assertGreaterEqual(
+                int(
+                    pod_checks.read_text(
+                        encoding="utf-8"
+                    )
+                ),
+                2,
+            )
             self.assertTrue(pvc_deleted.exists())
             self.assertTrue(pv_deleted.exists())
 
-
-    def test_legacy_storage_mismatch_is_cleaned_only_after_cluster_is_absent(self) -> None:
+    def test_legacy_storage_mismatch_is_cleaned_only_after_cluster_is_absent(
+        self,
+    ) -> None:
         """Full teardown may use the PV's actual claim after MongoDB is gone."""
 
         repo_root = Path(__file__).resolve().parent.parent
@@ -574,7 +644,11 @@ exit 1
                 encoding="utf-8",
             )
             fake_kubectl.chmod(0o755)
-            fake_docker.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+
+            fake_docker.write_text(
+                "#!/usr/bin/env bash\nexit 0\n",
+                encoding="utf-8",
+            )
             fake_docker.chmod(0o755)
 
             env = os.environ.copy()
@@ -603,12 +677,21 @@ exit 1
                 check=False,
             )
 
-            self.assertEqual(result.returncode, 0, msg=result.stderr)
-            self.assertIn("Legacy storage binding detected during full teardown", result.stderr)
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=result.stderr,
+            )
+            self.assertIn(
+                "Legacy storage binding detected during full teardown",
+                result.stderr,
+            )
             self.assertTrue(pvc_deleted.exists())
             self.assertTrue(pv_deleted.exists())
 
-    def test_legacy_storage_mismatch_still_refuses_while_cluster_exists(self) -> None:
+    def test_legacy_storage_mismatch_still_refuses_while_cluster_exists(
+        self,
+    ) -> None:
         """A live cluster must never reinterpret a mismatched PV as safe."""
 
         repo_root = Path(__file__).resolve().parent.parent
@@ -677,12 +760,20 @@ exit 1
                 check=False,
             )
 
-            self.assertEqual(result.returncode, 42, msg=result.stderr)
-            self.assertIn("Refusing storage cleanup", result.stderr)
+            self.assertEqual(
+                result.returncode,
+                42,
+                msg=result.stderr,
+            )
+            self.assertIn(
+                "Refusing storage cleanup",
+                result.stderr,
+            )
             self.assertFalse(delete_marker.exists())
 
-
-    def test_full_teardown_waits_for_terminating_pod_to_release_pvc(self) -> None:
+    def test_full_teardown_waits_for_terminating_pod_to_release_pvc(
+        self,
+    ) -> None:
         """After the MongoDB CR is gone, terminating pods get a bounded grace wait."""
 
         repo_root = Path(__file__).resolve().parent.parent
@@ -734,6 +825,7 @@ if [[ "$args" == *" get pods -o json"* ]]; then
   [[ -f "$FAKE_POD_CHECKS" ]] && n=$(cat "$FAKE_POD_CHECKS")
   n=$((n + 1))
   printf '%s' "$n" > "$FAKE_POD_CHECKS"
+
   if [[ "$n" -eq 1 ]]; then
     printf '{"items":[{"metadata":{"name":"test-sc-0-0"},"spec":{"volumes":[{"persistentVolumeClaim":{"claimName":"data-test-sc-0-0"}}]}}]}'
   else
@@ -763,7 +855,11 @@ exit 1
                 encoding="utf-8",
             )
             fake_kubectl.chmod(0o755)
-            fake_docker.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+
+            fake_docker.write_text(
+                "#!/usr/bin/env bash\nexit 0\n",
+                encoding="utf-8",
+            )
             fake_docker.chmod(0o755)
 
             env = os.environ.copy()
@@ -794,13 +890,29 @@ exit 1
                 check=False,
             )
 
-            self.assertEqual(result.returncode, 0, msg=result.stderr)
-            self.assertIn("Waiting up to 5s", result.stderr)
-            self.assertGreaterEqual(int(pod_checks.read_text(encoding="utf-8")), 2)
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=result.stderr,
+            )
+            self.assertIn(
+                "Waiting up to 5s",
+                result.stderr,
+            )
+            self.assertGreaterEqual(
+                int(
+                    pod_checks.read_text(
+                        encoding="utf-8"
+                    )
+                ),
+                2,
+            )
             self.assertTrue(pvc_deleted.exists())
             self.assertTrue(pv_deleted.exists())
 
-    def test_full_teardown_unbound_pv_does_not_adopt_expected_pvc(self) -> None:
+    def test_full_teardown_unbound_pv_does_not_adopt_expected_pvc(
+        self,
+    ) -> None:
         """An unbound PV may be removed, but it must not delete another PV's PVC."""
 
         repo_root = Path(__file__).resolve().parent.parent
@@ -854,7 +966,11 @@ exit 1
                 encoding="utf-8",
             )
             fake_kubectl.chmod(0o755)
-            fake_docker.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+
+            fake_docker.write_text(
+                "#!/usr/bin/env bash\nexit 0\n",
+                encoding="utf-8",
+            )
             fake_docker.chmod(0o755)
 
             env = os.environ.copy()
@@ -884,7 +1000,11 @@ exit 1
                 check=False,
             )
 
-            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=result.stderr,
+            )
             self.assertFalse(pvc_touched.exists())
             self.assertTrue(pv_deleted.exists())
 

@@ -40,7 +40,7 @@ from .vault import VaultClient
 # entry point for detached recovery workers. DEFAULT_CONFIG_DISPLAY is the
 # friendly path an operator sees and types; DEFAULT_CONFIG is the Path object.
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CONFIG_DISPLAY = "./privateWorkerReplacement.config"
+DEFAULT_CONFIG_DISPLAY = "./dev.config"
 DEFAULT_CONFIG = Path(DEFAULT_CONFIG_DISPLAY)
 
 
@@ -97,7 +97,7 @@ Use this administrator program for:
   - controller-wide Terraform reconciliation
 
 Default configuration file:
-  ./privateWorkerReplacement.config
+  ./dev.config
 
 Detailed Git/Terraform output is written to the daily operations log instead of
 being dumped onto the administrator terminal.
@@ -131,7 +131,7 @@ Normal DBaaS users should use:
         "--config",
         default=DEFAULT_CONFIG_DISPLAY,
         metavar="FILE",
-        help="Optional configuration file. Default: ./privateWorkerReplacement.config",
+        help="Optional configuration file. Default: ./dev.config",
     )
     parser.add_argument(
         "--_operation-worker",

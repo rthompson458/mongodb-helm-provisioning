@@ -1,0 +1,81 @@
+apiVersion: batch/v1
+kind: Job
+
+metadata:
+  name: {{ printf "%s-database-provisioner" .Release.Name | trunc 63 | trimSuffix "-" }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+
+spec:
+  backoffLimit: 3
+
+  template:
+    metadata:
+      name: {{ printf "%s-database-provisioner" .Release.Name | trunc 63 | trimSuffix "-" }}
+
+    spec:
+      restartPolicy: Never
+
+      containers:
+        - name: mongodb-database-provisioner
+          image: {{ .Values.mongodb.image | quote }}
+
+          env:
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mongodb.provisionerConnectionSecret }}
+                  key: connectionString.standard
+
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+
+              echo "Starting MongoDB database provisioning"
+
+              mongosh "$MONGODB_URI" --quiet <<'EOF_MONGO'
+              const desiredDatabases = {{ .Values.mongodbDatabases | default (list) | toJson }};
+              const operations = {{ .Values.mongodbDatabaseOperations | default (list) | toJson }};
+              const placeholderCollection = {{ .Values.mongodb.placeholderCollection | toJson }};
+
+              // A delete operation executes first (hook weight -10).
+              // Remove that database from this provisioning pass so the later
+              // provisioner (hook weight +10) does not immediately recreate it.
+              const deletedDatabases = new Set(
+                operations
+                  .filter(op => op.action === "deleteDatabase")
+                  .map(op => op.database)
+              );
+
+              for (const databaseDefinition of desiredDatabases) {
+                const databaseName = databaseDefinition.name;
+
+                if (deletedDatabases.has(databaseName)) {
+                  continue;
+                }
+
+                if (["admin", "config", "local"].includes(databaseName)) {
+                  throw new Error(`Protected database '${databaseName}' cannot be managed.`);
+                }
+
+                const database = db.getSiblingDB(databaseName);
+                const existingCollections = database.getCollectionNames();
+
+                // MongoDB does not persist an otherwise empty database.
+                // This internal collection exists only to materialize the
+                // database. Collection lifecycle is not a supported DBaaS feature.
+                if (!existingCollections.includes(placeholderCollection)) {
+                  database.createCollection(placeholderCollection);
+                  print(`Created database ${databaseName}`);
+                } else {
+                  print(`Database ${databaseName} already exists`);
+                }
+              }
+              EOF_MONGO
+
+              echo "MongoDB database provisioning completed"

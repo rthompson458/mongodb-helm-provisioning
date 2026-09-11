@@ -72,7 +72,7 @@ Common commands:
     python3 tests/run_harness.py --profile all --allow-changes
 
 Configuration:
-  ./privateWorkerReplacement.config is used by default. Use --config FILE only when
+  ./dev.config is used by default. Use --config FILE only when
   the configuration file is somewhere else.
 """,
     )
@@ -87,11 +87,11 @@ Configuration:
     )
     parser.add_argument(
         "--config",
-        default="./privateWorkerReplacement.config",
+        default="./dev.config",
         metavar="FILE",
         help=(
             "Optional controller configuration file. "
-            "Default: ./privateWorkerReplacement.config"
+            "Default: ./dev.config"
         ),
     )
     parser.add_argument(

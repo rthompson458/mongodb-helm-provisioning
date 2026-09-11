@@ -20,6 +20,7 @@ from typing import Any
 from . import kube
 from .common import ControllerError, iso_utc, normalize_deployment, print_table, utc_now
 from .logging_component import log_event
+from .ops_manager import delete_project as delete_ops_manager_project
 from .terraform_runner import apply_inventory
 from .deployment_lock import (
     acquire_deployment_lock,
@@ -384,6 +385,11 @@ def _delete_deployment(
         else config["rs_ready_timeout"]
     )
     kube.wait_absent(config, "mongodb", key, timeout)
+    delete_ops_manager_project(
+        config,
+        item["display_name"],
+        timeout=timeout,
+    )
     log_event(
         "deployment.delete.succeeded",
         deployment=item["display_name"],

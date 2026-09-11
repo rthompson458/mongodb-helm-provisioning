@@ -12,6 +12,7 @@ from .databases import (
     add_database,
     delete_database,
     disable_owner,
+    enable_owner,
     rotate_passwords,
 )
 from .database_status import (
@@ -51,6 +52,7 @@ __all__ = [
     "delete_shard",
     "delete_sharded_cluster",
     "disable_owner",
+    "enable_owner",
     "list_database",
     "list_database_accounts",
     "list_databases",

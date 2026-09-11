@@ -1,4 +1,4 @@
-"""Read and validate privateWorkerReplacement.config.
+"""Read and validate dev.config.
 
 The configuration file contains environment-specific values needed to operate
 the MongoDB DBaaS service: Vault, Terraform, Kubernetes, MongoDB defaults,
@@ -70,9 +70,7 @@ def load_config(path: Path) -> dict[str, Any]:
     required = {
         "Vault": ["address", "token_environment_variable", "mount", "base_path"],
         "Terraform": [
-            "repository_url",
-            "branch",
-            "subdirectory",
+            "source_directory",
             "cache_directory",
             "backend_namespace",
             "backend_secret_suffix",
@@ -137,16 +135,20 @@ def load_config(path: Path) -> dict[str, Any]:
 
     expand = lambda v: os.path.expandvars(os.path.expanduser(v.strip()))
 
+    def project_path(value: str) -> Path:
+        resolved = Path(expand(value))
+        if not resolved.is_absolute():
+            resolved = path.parent / resolved
+        return resolved.resolve()
+
     return {
         "config_path": str(path),
         "vault_address": p.get("Vault", "address").strip().rstrip("/"),
         "vault_token_env": p.get("Vault", "token_environment_variable").strip(),
         "vault_mount": p.get("Vault", "mount").strip().strip("/"),
         "vault_base_path": p.get("Vault", "base_path").strip().strip("/"),
-        "terraform_repo": p.get("Terraform", "repository_url").strip(),
-        "terraform_branch": p.get("Terraform", "branch").strip(),
-        "terraform_subdir": p.get("Terraform", "subdirectory").strip().strip("/"),
-        "terraform_cache": Path(expand(p.get("Terraform", "cache_directory"))),
+        "terraform_source": project_path(p.get("Terraform", "source_directory")),
+        "terraform_cache": project_path(p.get("Terraform", "cache_directory")),
         "backend_namespace": p.get("Terraform", "backend_namespace").strip(),
         "backend_secret_suffix": p.get("Terraform", "backend_secret_suffix").strip(),
         "kubeconfig": expand(p.get("Kubernetes", "kubeconfig")),

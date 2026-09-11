@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .runner import HarnessRunner
 
-TEST_COUNT = 13
+TEST_COUNT = 14
 
 
 def run(runner: HarnessRunner) -> None:
@@ -106,6 +106,17 @@ def run(runner: HarnessRunner) -> None:
         timeout=900,
     )
     if not disabled.passed:
+        return
+
+    enabled = runner.controller(
+        "Re-enable ShardedCluster Owner",
+        "EnableOwner",
+        sc,
+        db,
+        expected_text="is now Enabled",
+        timeout=900,
+    )
+    if not enabled.passed:
         return
 
     deleted_db = runner.controller_async(

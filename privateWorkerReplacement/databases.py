@@ -598,6 +598,102 @@ def disable_owner(
     print(f"Vault URL: {_vault_browser_url(config, owner_path)}")
 
 
+def enable_owner(
+    config: dict[str, Any],
+    vault: VaultClient,
+    deployment_or_database: str,
+    database: str | None = None,
+) -> None:
+    """Re-enable the Owner MongoDBUser without rotating its password."""
+
+    inventory = vault.load_inventory()
+    deployment_key, deployment, db_name = _resolve_database_args(
+        config, inventory, deployment_or_database, database
+    )
+
+    db_key, _ = normalize_database(db_name)
+    if db_key not in deployment["databases"]:
+        raise ControllerError(
+            f"Database '{db_name}' does not exist on "
+            f"{deployment_type_label(deployment)} '{deployment['display_name']}'."
+        )
+
+    db = deployment["databases"][db_key]
+
+    require_no_active_change(config, deployment_key, deployment)
+    require_running(config, deployment_key, deployment)
+
+    if not db["owner_disabled"]:
+        print(f"Owner account '{db['display_name']}_owner' is already Enabled.")
+        return
+
+    log_event(
+        "owner.enable.requested",
+        deployment=deployment["display_name"],
+        database=db["display_name"],
+    )
+
+    with protected_database_change(
+        config,
+        vault,
+        inventory,
+        deployment_key,
+        deployment,
+        "EnableOwner",
+        db["display_name"],
+    ):
+        apply_inventory(
+            config,
+            inventory,
+            _operation(
+                "enable_owner",
+                deployment_key,
+                deployment,
+                db["display_name"],
+            ),
+        )
+
+        updated_inventory = vault.load_inventory()
+        updated_key, updated_deployment, updated_db_key, updated_db = require_db(
+            updated_inventory,
+            deployment["display_name"],
+            db_name,
+        )
+
+        require_running(config, updated_key, updated_deployment)
+
+        _verify_database_accounts(
+            config,
+            updated_inventory,
+            updated_key,
+            updated_deployment,
+            updated_db_key,
+            updated_db,
+        )
+
+    log_event(
+        "owner.enable.succeeded",
+        deployment=updated_deployment["display_name"],
+        database=updated_db["display_name"],
+    )
+
+    print(
+        f"Owner account '{updated_db['display_name']}_owner' "
+        "is now Enabled in MongoDB."
+    )
+    print(
+        "The existing Owner credential was reused; "
+        "no password rotation occurred."
+    )
+
+    owner_path = _vault_paths(
+        config,
+        updated_deployment,
+        updated_db,
+    )[0]
+    print(f"Vault URL: {_vault_browser_url(config, owner_path)}")
+
+
 def list_databases(
     config: dict[str, Any], vault: VaultClient, deployment_name: str | None = None
 ) -> None:

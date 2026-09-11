@@ -18,7 +18,7 @@ class DatabaseStatusTests(unittest.TestCase):
         self.temp = TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.config = {
-            "config_path": str(Path(self.temp.name) / "privateWorkerReplacement.config"),
+            "config_path": str(Path(self.temp.name) / "dev.config"),
             "rotation_days": 30,
             "vault_address": "http://127.0.0.1:8200",
             "vault_mount": "secret",

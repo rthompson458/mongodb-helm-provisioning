@@ -182,6 +182,49 @@ class DatabaseLifecycleTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[1][1]["action"], "rotate_passwords")
 
+    def test_enable_owner_reuses_existing_password_state(self) -> None:
+        vault = FakeVault(
+            deployment_inventory(with_db=True, owner_disabled=True)
+        )
+
+        db = vault.inventory["rs1"]["databases"]["houseinfo"]
+        original_rotation_version = db["rotation_version"]
+        original_rotated_at = db["rotated_at"]
+
+        calls = []
+
+        def apply_side_effect(config, inventory, operation=None):
+            calls.append(copy.deepcopy(operation))
+
+            if operation and operation.get("action") == "enable_owner":
+                live_db = vault.inventory["rs1"]["databases"]["houseinfo"]
+                live_db["owner_disabled"] = False
+                live_db["owner_disabled_at"] = ""
+
+        with (
+            patch.object(databases, "require_running"),
+            patch.object(
+                databases,
+                "apply_inventory",
+                side_effect=apply_side_effect,
+            ),
+            patch.object(databases, "_verify_database_accounts"),
+        ):
+            databases.enable_owner(
+                self.config,
+                vault,
+                "RS1",
+                "HouseInfo",
+            )
+
+        self.assertEqual(calls[0]["action"], "enable_owner")
+
+        db = vault.inventory["rs1"]["databases"]["houseinfo"]
+        self.assertFalse(db["owner_disabled"])
+        self.assertEqual(db["owner_disabled_at"], "")
+        self.assertEqual(db["rotation_version"], original_rotation_version)
+        self.assertEqual(db["rotated_at"], original_rotated_at)
+
     def test_delete_database_drops_before_removing_desired_state(self) -> None:
         vault = FakeVault(deployment_inventory(with_db=True))
         calls = []

@@ -40,6 +40,7 @@ ListDatabaseAccounts
 
 RotatePasswords
 DisableOwner
+EnableOwner
 
 ListDeployments
 ListDeployment
@@ -94,7 +95,7 @@ The customer receives a concise acknowledgement and a normal resource-status com
 - orphaned-state recovery;
 - controller-wide Reconcile.
 
-`RotatePasswords` and `DisableOwner` remain synchronous, but their Git/Terraform implementation output is captured in the operations log rather than displayed on the customer terminal.
+`RotatePasswords`, `DisableOwner`, and `EnableOwner` remain synchronous, but their Git/Terraform implementation output is captured in the operations log rather than displayed on the customer terminal. `EnableOwner` restores the Owner account using the existing managed credential and does not rotate its password.
 
 `ListDatabaseAccounts` provides the complete Vault browser URLs for each managed credential, along with the logical Vault paths.
 
@@ -170,7 +171,7 @@ Read-only database status also consults the operation journal so the public CLI 
 
 ## Logging and operation state
 
-Runtime evidence uses one predictable tree beside `privateWorkerReplacement.config`:
+Runtime evidence uses one predictable tree beside `dev.config`:
 
 ```text
 logs/

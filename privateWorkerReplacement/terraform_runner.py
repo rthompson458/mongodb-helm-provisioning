@@ -2,8 +2,9 @@
 
 This file is the bridge between Python orchestration and Terraform. Python
 builds desired-state JSON and a small one-shot operation description, then this
-module runs Terraform. The lifecycle resource/script inside Terraform performs
-imperative MongoDB, storage, and lock work where required.
+module runs Terraform. Terraform delegates logical database create/delete work
+to the integrated Helm chart, while the lifecycle resource/script continues to
+perform verification, storage, and lock work where required.
 
 User-interface rule:
     Git and Terraform stdout/stderr are implementation diagnostics. They are
@@ -50,9 +51,11 @@ def _check_version() -> None:
         major, minor = [int(x) for x in version.split(".")[:2]]
     except Exception as exc:
         raise ControllerError("Could not determine Terraform version.") from exc
+
     if (major, minor) < (1, 11):
         raise ControllerError(
-            f"Terraform {version} is installed; privateWorkerReplacement requires 1.11 or newer."
+            f"Terraform {version} is installed; "
+            "privateWorkerReplacement requires 1.11 or newer."
         )
 
 
@@ -79,6 +82,7 @@ def _run_diagnostic(
         capture=True,
         check=False,
     )
+
     log_path = append_process_diagnostic(
         config,
         command,
@@ -87,6 +91,7 @@ def _run_diagnostic(
         stderr=result.stderr or "",
         label=label,
     )
+
     if result.returncode != 0:
         raise ControllerError(
             f"{label} failed with exit code {result.returncode}. "
@@ -110,93 +115,107 @@ def _terraform_execution_lock(config: dict[str, Any]):
 
     cache: Path = config["terraform_cache"]
     cache.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = cache.parent / f".{cache.name}.privateWorkerReplacement.lock"
+
+    lock_path = cache.parent / (
+        f".{cache.name}.privateWorkerReplacement.lock"
+    )
 
     with lock_path.open("a+", encoding="utf-8") as handle:
-        log_event("terraform.execution_lock.waiting", lock_file=str(lock_path))
+        log_event(
+            "terraform.execution_lock.waiting",
+            lock_file=str(lock_path),
+        )
+
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
         try:
             handle.seek(0)
             handle.truncate()
             handle.write(f"pid={os.getpid()}\n")
             handle.flush()
+
             log_event(
                 "terraform.execution_lock.acquired",
                 lock_file=str(lock_path),
                 pid=os.getpid(),
             )
+
             yield
+
         finally:
             log_event(
                 "terraform.execution_lock.released",
                 lock_file=str(lock_path),
                 pid=os.getpid(),
             )
+
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _sync(config: dict[str, Any]) -> Path:
-    """Clone or hard-refresh the configured Terraform source repository.
+    """Refresh the disposable Terraform runtime cache from local source files.
 
-    The cache is disposable by design. A hard reset prevents stale local edits
-    from silently becoming part of a controller operation. All Git output is
-    captured in the operations log rather than shown to the DBaaS user.
+    The configured source directory is authoritative and is never modified by
+    controller runtime work. Before each Terraform operation, source files are
+    copied into the disposable cache so local edits are picked up immediately.
+
+    The cache's .terraform directory is preserved between operations so already
+    downloaded providers can be reused. All other cached source files are
+    replaced so deleted or renamed source files cannot remain stale.
     """
 
+    source: Path = config["terraform_source"]
     cache: Path = config["terraform_cache"]
-    branch = config["terraform_branch"]
-    repo = config["terraform_repo"]
-    if not (cache / ".git").exists():
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        if cache.exists() and any(cache.iterdir()):
-            raise ControllerError(
-                f"Terraform cache exists but is not a Git repository: {cache}"
-            )
-        log_event(
-            "terraform.repository.clone",
-            repository=repo,
-            branch=branch,
-            cache=str(cache),
-        )
-        _run_diagnostic(
-            config,
-            ["git", "clone", "--depth", "1", "--branch", branch, repo, str(cache)],
-            label="Git clone",
-        )
-    else:
-        log_event(
-            "terraform.repository.refresh",
-            repository=repo,
-            branch=branch,
-            cache=str(cache),
-        )
-        _run_diagnostic(
-            config,
-            ["git", "-C", str(cache), "fetch", "--depth", "1", "origin", branch],
-            label="Git fetch",
-        )
-        _run_diagnostic(
-            config,
-            ["git", "-C", str(cache), "reset", "--hard", "FETCH_HEAD"],
-            label="Git reset",
-        )
-        _run_diagnostic(
-            config,
-            ["git", "-C", str(cache), "clean", "-fd", "-e", ".terraform"],
-            label="Git clean",
+
+    if not source.is_dir():
+        raise ControllerError(
+            f"Terraform source directory does not exist: {source}"
         )
 
-    tfdir = cache / config["terraform_subdir"]
-    if not tfdir.is_dir():
-        raise ControllerError(f"Terraform subdirectory not found: {tfdir}")
-    return tfdir
+    if cache == source or source in cache.parents:
+        raise ControllerError(
+            "Terraform cache directory must not be inside the Terraform "
+            f"source directory: {cache}"
+        )
+
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.mkdir(parents=True, exist_ok=True)
+
+    log_event(
+        "terraform.source.refresh",
+        source=str(source),
+        cache=str(cache),
+    )
+
+    # Keep Terraform's downloaded-provider working directory, but remove every
+    # other cached file so the execution copy exactly follows current source.
+    for child in cache.iterdir():
+        if child.name == ".terraform":
+            continue
+
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+
+    shutil.copytree(
+        source,
+        cache,
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns(".terraform"),
+    )
+
+    return cache
 
 
-def _operation_payload(operation: dict[str, Any] | None) -> dict[str, Any]:
+def _operation_payload(
+    operation: dict[str, Any] | None,
+) -> dict[str, Any]:
     """Return a complete Terraform operation object with safe defaults.
 
-    A random nonce forces terraform_data.lifecycle_operation to execute again
-    even when the action name and target happen to match a previous command.
+    A random nonce makes one-shot operations unique. Lifecycle operations use
+    it through terraform_data triggers, and database create/delete operations
+    pass it into the Helm release so a retry produces a fresh Helm revision.
     """
 
     payload: dict[str, Any] = {
@@ -212,10 +231,13 @@ def _operation_payload(operation: dict[str, Any] | None) -> dict[str, Any]:
         "target_shards": 0,
         "nonce": "",
     }
+
     if operation:
         payload.update(operation)
+
         if payload["action"] != "none" and not payload["nonce"]:
             payload["nonce"] = uuid.uuid4().hex
+
     return payload
 
 
@@ -230,7 +252,7 @@ def apply_inventory(
     High-level sequence:
       1. Check local tools and Terraform version.
       2. Acquire the cross-process Terraform execution lock.
-      3. Refresh the Terraform module from GitHub.
+      3. Refresh the disposable Terraform cache from the configured local source directory.
       4. Pass environment/config values as TF_VAR_* variables.
       5. Write desired state to a temporary .tfvars.json file.
       6. Run terraform init and terraform apply.
@@ -240,18 +262,31 @@ def apply_inventory(
     the Vault token is passed only through the child-process environment.
     """
 
-    _require("terraform", "git", "kubectl", "bash", "python3")
+    _require(
+        "terraform",
+        "git",
+        "kubectl",
+        "bash",
+        "python3",
+    )
+
     op = _operation_payload(operation)
+
     if config["storage_mode"] == "static-local":
         _require("docker")
 
     _check_version()
 
-    # The shared Git checkout, provider directory, and backend work are treated
+    # The shared Terraform cache, provider directory, and backend work are treated
     # as one transaction. This prevents one worker from resetting the checkout
     # while another worker is executing Terraform from it.
     with _terraform_execution_lock(config):
-        _apply_inventory_locked(config, inventory, op, targets)
+        _apply_inventory_locked(
+            config,
+            inventory,
+            op,
+            targets,
+        )
 
 
 def _apply_inventory_locked(
@@ -263,14 +298,17 @@ def _apply_inventory_locked(
     """Run one Terraform refresh/init/apply while execution access is held."""
 
     tfdir = _sync(config)
+
     token_name = config["vault_token_env"]
     token = os.getenv(token_name, "")
+
     if not token:
         raise ControllerError(
             f"Vault token environment variable '{token_name}' is not set."
         )
 
     env = os.environ.copy()
+
     env.update(
         {
             "VAULT_ADDR": config["vault_address"],
@@ -280,20 +318,39 @@ def _apply_inventory_locked(
             "TF_VAR_vault_base_path": config["vault_base_path"],
             "TF_VAR_rotation_days": str(config["rotation_days"]),
             "TF_VAR_mongodb_namespace": config["mongodb_namespace"],
-            "TF_VAR_ops_manager_config_map": config["ops_manager_config_map"],
+            "TF_VAR_ops_manager_config_map": config[
+                "ops_manager_config_map"
+            ],
             "TF_VAR_ops_manager_credentials_secret": config[
                 "ops_manager_credentials_secret"
             ],
-            "TF_VAR_mongodb_auth_database": config["mongodb_auth_database"],
+            "TF_VAR_mongodb_auth_database": config[
+                "mongodb_auth_database"
+            ],
             "TF_VAR_kubeconfig_path": config["kubeconfig"],
             "TF_VAR_kube_context": config["kube_context"],
             "TF_VAR_mongo_image": config["mongo_image"],
-            "TF_VAR_placeholder_collection": config["placeholder_collection"],
-            "TF_VAR_default_members": str(config["default_members"]),
-            "TF_VAR_default_storage_class": config["storage_class"],
-            "TF_VAR_default_storage_size": config["storage_size"],
-            "TF_VAR_storage_base_path": config["storage_base_path"],
-            "TF_VAR_storage_node_name": config["storage_node_name"],
+            "TF_VAR_placeholder_collection": config[
+                "placeholder_collection"
+            ],
+            "TF_VAR_mongodb_management_timeout_seconds": str(
+                config["job_timeout"]
+            ),
+            "TF_VAR_default_members": str(
+                config["default_members"]
+            ),
+            "TF_VAR_default_storage_class": config[
+                "storage_class"
+            ],
+            "TF_VAR_default_storage_size": config[
+                "storage_size"
+            ],
+            "TF_VAR_storage_base_path": config[
+                "storage_base_path"
+            ],
+            "TF_VAR_storage_node_name": config[
+                "storage_node_name"
+            ],
         }
     )
 
@@ -302,14 +359,31 @@ def _apply_inventory_locked(
         "init",
         "-input=false",
         "-reconfigure",
-        f"-backend-config=secret_suffix={config['backend_secret_suffix']}",
-        f"-backend-config=namespace={config['backend_namespace']}",
-        f"-backend-config=config_path={config['kubeconfig']}",
+        (
+            "-backend-config=secret_suffix="
+            f"{config['backend_secret_suffix']}"
+        ),
+        (
+            "-backend-config=namespace="
+            f"{config['backend_namespace']}"
+        ),
+        (
+            "-backend-config=config_path="
+            f"{config['kubeconfig']}"
+        ),
     ]
-    if config["kube_context"]:
-        init.append(f"-backend-config=config_context={config['kube_context']}")
 
-    log_event("terraform.init.started", directory=str(tfdir))
+    if config["kube_context"]:
+        init.append(
+            "-backend-config=config_context="
+            f"{config['kube_context']}"
+        )
+
+    log_event(
+        "terraform.init.started",
+        directory=str(tfdir),
+    )
+
     _run_diagnostic(
         config,
         init,
@@ -317,16 +391,29 @@ def _apply_inventory_locked(
         env=env,
         label="Terraform initialization",
     )
-    log_event("terraform.init.succeeded", directory=str(tfdir))
+
+    log_event(
+        "terraform.init.succeeded",
+        directory=str(tfdir),
+    )
 
     # Desired state is reconstructed from Vault for each command. The temporary
     # file is removed after the apply so stale controller intent cannot linger.
     temp: Path | None = None
+
     try:
         payload = {
             "deployments": inventory,
             "operation": op,
+
+            # DeleteDatabase --confirm is validated by the user-facing
+            # controller before this point. Translate that approved operation
+            # into Terraform's explicit destructive-operation safety gate.
+            "allow_destructive_mongodb_operations": (
+                op["action"] == "delete_database"
+            ),
         }
+
         with tempfile.NamedTemporaryFile(
             "w",
             encoding="utf-8",
@@ -335,7 +422,12 @@ def _apply_inventory_locked(
             suffix=".tfvars.json",
             delete=False,
         ) as handle:
-            json.dump(payload, handle, indent=2, sort_keys=True)
+            json.dump(
+                payload,
+                handle,
+                indent=2,
+                sort_keys=True,
+            )
             handle.write("\n")
             temp = Path(handle.name)
 
@@ -351,6 +443,7 @@ def _apply_inventory_locked(
             target_shards=op["target_shards"],
             deployment_count=len(inventory),
         )
+
         try:
             command = [
                 "terraform",
@@ -359,8 +452,12 @@ def _apply_inventory_locked(
                 "-auto-approve",
                 f"-var-file={temp.name}",
             ]
+
             for target in targets or []:
-                command.append(f"-target={target}")
+                command.append(
+                    f"-target={target}"
+                )
+
             _run_diagnostic(
                 config,
                 command,
@@ -368,6 +465,7 @@ def _apply_inventory_locked(
                 env=env,
                 label="Terraform apply",
             )
+
         except ControllerError:
             log_event(
                 "terraform.apply.failed",
@@ -386,6 +484,7 @@ def _apply_inventory_locked(
             deployment_type=op["deployment_type"],
             database=op["database"],
         )
+
     finally:
         if temp and temp.exists():
             temp.unlink()

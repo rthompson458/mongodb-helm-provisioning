@@ -21,6 +21,7 @@ from .deployment_lock import (
 )
 from .deployments import deployment_type_label, require_deployment
 from .logging_component import log_event
+from .ops_manager import list_projects as list_ops_manager_projects
 from .terraform_runner import apply_inventory
 from .vault import VaultClient
 
@@ -43,20 +44,41 @@ def managed_resource_inventory(
     config: dict[str, Any],
     vault: VaultClient,
 ) -> dict[str, list[str]]:
-    """Return the controller's deployment-level managed resource inventory.
-
-    This function is intentionally read-only. It combines the Vault-backed
-    desired deployment inventory with the Kubernetes resources used during the
-    controller zero-state check: managed MongoDB custom resources, managed
-    MongoDBUser custom resources, managed PVCs, managed PVs, and
-    privateWorkerReplacement deployment-lock ConfigMaps.
-    """
+    """Return a read-only inventory of controller-owned resources."""
 
     inventory = vault.load_inventory()
+
     deployments = sorted(
-        str(inventory[key].get("display_name", key))
-        for key in inventory
+        str(deployment.get("display_name", key))
+        for key, deployment in inventory.items()
     )
+
+    replica_sets = sorted(
+        str(deployment.get("display_name", key))
+        for key, deployment in inventory.items()
+        if deployment.get("deployment_type") == "ReplicaSet"
+    )
+
+    sharded_clusters = sorted(
+        str(deployment.get("display_name", key))
+        for key, deployment in inventory.items()
+        if deployment.get("deployment_type") == "ShardedCluster"
+    )
+
+    databases = []
+    accounts = []
+
+    for key, deployment in inventory.items():
+        deployment_name = str(deployment.get("display_name", key))
+
+        for db_key, db in deployment.get("databases", {}).items():
+            db_name = str(db.get("display_name", db_key))
+            databases.append(f"{deployment_name}/{db_name}")
+
+            for suffix in ("owner", "readWrite", "read"):
+                accounts.append(
+                    f"{deployment_name}/{db_name}/{db_name}_{suffix}"
+                )
 
     mongodb_resources = kube.list_json(
         config,
@@ -79,22 +101,180 @@ def managed_resource_inventory(
         label_selector=MANAGED_BY_SELECTOR,
         namespaced=False,
     )
+
+    secrets = kube.list_json(config, "secret")
     configmaps = kube.list_json(config, "configmap")
-    locks = [
-        item
-        for item in configmaps
-        if str(item.get("metadata", {}).get("name", "")).startswith(
-            DEPLOYMENT_LOCK_PREFIX
-        )
+
+    secret_names = _kubernetes_names(secrets)
+    configmap_names = _kubernetes_names(configmaps)
+
+    # Controller-owned secrets such as admin/database credentials are active
+    # DBaaS resources. Ops Manager group secrets are classified separately
+    # because their project IDs let us detect orphaned Operator artifacts.
+    controller_secrets = sorted(
+        name
+        for name in secret_names
+        if name.startswith("tc-")
+    )
+
+    group_secrets = sorted(
+        name
+        for name in secret_names
+        if name.endswith("-group-secret")
+    )
+
+    # Terraform backend state and the shared Ops Manager ConfigMap are permanent
+    # controller infrastructure. They remain present when there are zero
+    # customer deployments and therefore must not make zero-state "dirty".
+    terraform_states = sorted(
+        name
+        for name in secret_names
+        if name.startswith("tfstate-")
+        and name.endswith(config["backend_secret_suffix"])
+    )
+
+    controller_infrastructure_configmaps = sorted(
+        name
+        for name in configmap_names
+        if name == "tc-ops-manager-projects"
+    )
+
+    controller_configmaps = sorted(
+        name
+        for name in configmap_names
+        if name.startswith("tc-")
+        and name != "tc-ops-manager-projects"
+        and not name.startswith(DEPLOYMENT_LOCK_PREFIX)
+    )
+
+    locks = sorted(
+        name
+        for name in configmap_names
+        if name.startswith(DEPLOYMENT_LOCK_PREFIX)
+    )
+
+    permanent_project, projects = list_ops_manager_projects(config)
+
+    expected_project_names = {
+        name.lower()
+        for name in deployments
+    }
+
+    platform_project = next(
+        (
+            project
+            for project in projects
+            if project["name"].lower() == permanent_project.lower()
+        ),
+        None,
+    )
+
+    nonplatform_projects = [
+        project
+        for project in projects
+        if project["name"].lower() != permanent_project.lower()
     ]
+
+    active_projects = [
+        project
+        for project in nonplatform_projects
+        if project["name"].lower() in expected_project_names
+    ]
+
+    orphan_projects = [
+        project
+        for project in nonplatform_projects
+        if project["name"].lower() not in expected_project_names
+    ]
+
+    actual_project_names = {
+        project["name"].lower()
+        for project in nonplatform_projects
+    }
+
+    missing_ops_manager_projects = sorted(
+        name
+        for name in deployments
+        if name.lower() not in actual_project_names
+    )
+
+    project_ids = {
+        project["id"]
+        for project in projects
+        if project["id"]
+    }
+
+    platform_project_id = (
+        platform_project["id"]
+        if platform_project is not None
+        else ""
+    )
+
+    active_project_ids = {
+        project["id"]
+        for project in active_projects
+        if project["id"]
+    }
+
+    platform_group_secrets = []
+    active_group_secrets = []
+    orphan_group_secrets = []
+
+    for secret_name in group_secrets:
+        project_id = secret_name.removesuffix("-group-secret")
+        rendered = f"{secret_name} (Project ID: {project_id})"
+
+        if project_id == platform_project_id:
+            platform_group_secrets.append(rendered)
+        elif project_id in active_project_ids:
+            active_group_secrets.append(rendered)
+        elif project_id not in project_ids:
+            orphan_group_secrets.append(rendered)
+        else:
+            # A live non-platform Ops Manager project that is not represented in
+            # Vault is itself orphaned; keep its group secret in the orphan view.
+            orphan_group_secrets.append(rendered)
+
+    ops_manager_platform_project = (
+        [
+            f"{platform_project['name']} (Project ID: {platform_project['id']})"
+        ]
+        if platform_project is not None
+        else [f"{permanent_project} (Project ID: NOT FOUND)"]
+    )
+
+    ops_manager_projects = sorted(
+        f"{project['name']} (Project ID: {project['id']})"
+        for project in active_projects
+    )
+
+    ops_manager_orphans = sorted(
+        f"{project['name']} (Project ID: {project['id']})"
+        for project in orphan_projects
+    )
 
     return {
         "managed_deployments": deployments,
+        "replica_sets": replica_sets,
+        "sharded_clusters": sharded_clusters,
+        "databases": sorted(databases),
+        "managed_accounts": sorted(accounts),
         "mongodb_resources": _kubernetes_names(mongodb_resources),
         "mongodb_users": _kubernetes_names(mongodb_users),
         "pvcs": _kubernetes_names(pvcs),
         "pvs": _kubernetes_names(pvs),
-        "deployment_locks": _kubernetes_names(locks),
+        "controller_secrets": controller_secrets,
+        "controller_configmaps": controller_configmaps,
+        "controller_infrastructure_configmaps": controller_infrastructure_configmaps,
+        "terraform_states": terraform_states,
+        "deployment_locks": locks,
+        "ops_manager_platform_project": ops_manager_platform_project,
+        "ops_manager_projects": ops_manager_projects,
+        "ops_manager_orphans": ops_manager_orphans,
+        "ops_manager_platform_group_secrets": sorted(platform_group_secrets),
+        "ops_manager_group_secrets": sorted(active_group_secrets),
+        "orphan_group_secrets": sorted(orphan_group_secrets),
+        "missing_ops_manager_projects": missing_ops_manager_projects,
     }
 
 

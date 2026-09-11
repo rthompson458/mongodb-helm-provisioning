@@ -1,7 +1,7 @@
 """Predictable runtime paths for controller logs and operation state.
 
 The controller keeps runtime evidence under a single ``logs`` directory beside
-``privateWorkerReplacement.config``.  Centralizing the path rules here prevents
+``dev.config``.  Centralizing the path rules here prevents
 the customer CLI, administrator CLI, logging code, and async worker code from
 each inventing slightly different locations.
 

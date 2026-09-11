@@ -36,13 +36,13 @@ python3 privateWorkerReplacement.py ListDatabaseAccounts --help
 The controller uses this configuration file in the current working directory by default:
 
 ```text
-./privateWorkerReplacement.config
+./dev.config
 ```
 
 To intentionally use another configuration file:
 
 ```bash
-python3 privateWorkerReplacement.py --config ./alternate-privateWorkerReplacement.config ListDeployments
+python3 privateWorkerReplacement.py --config ./alternate-dev.config ListDeployments
 ```
 
 Do not store the Vault token in the configuration file. The local development environment expects the token in the configured environment variable, normally `VAULT_TOKEN`.
@@ -309,6 +309,8 @@ RotatePasswords DEPLOYMENT DATABASE
 RotatePasswords DATABASE
 DisableOwner DEPLOYMENT DATABASE --confirm
 DisableOwner DATABASE --confirm
+EnableOwner DEPLOYMENT DATABASE
+EnableOwner DATABASE
 ```
 
 Examples:
@@ -316,6 +318,7 @@ Examples:
 ```bash
 python3 privateWorkerReplacement.py RotatePasswords RS1 HouseInfo
 python3 privateWorkerReplacement.py DisableOwner RS1 HouseInfo --confirm
+python3 privateWorkerReplacement.py EnableOwner RS1 HouseInfo
 ```
 
 ---
@@ -349,7 +352,7 @@ Status:         Creation requested
 The request is being processed in the background.
 
 Check service status with:
-  python3 privateWorkerReplacement.py --config ./privateWorkerReplacement.config ListDatabase RS1 HouseInfo
+  python3 privateWorkerReplacement.py --config ./dev.config ListDatabase RS1 HouseInfo
 ```
 
 The worker resolves the configuration file to an absolute path internally so the detached process remains reliable. That internal path is not shown in normal customer instructions.
@@ -368,13 +371,13 @@ The public CLI intentionally does not expose:
 
 If an asynchronous request appears not to complete, use the normal public status commands first. A platform administrator can inspect the private operation status and daily operation diagnostics with `privateWorkerReplacementAdmin.py`.
 
-`RotatePasswords` and `DisableOwner` currently remain synchronous. Their underlying Terraform/Git output is captured in the operations log rather than printed to the terminal.
+`RotatePasswords`, `DisableOwner`, and `EnableOwner` currently remain synchronous. Their underlying Terraform/Git output is captured in the operations log rather than printed to the terminal.
 
 ---
 
 ## 6. ReplicaSet behavior
 
-`AddReplicaSet` creates an empty managed ReplicaSet using values from `privateWorkerReplacement.config`, including MongoDB version, member count, storage class, storage size, and storage model.
+`AddReplicaSet` creates an empty managed ReplicaSet using values from `dev.config`, including MongoDB version, member count, storage class, storage size, and storage model.
 
 Typical current development defaults are:
 
@@ -400,7 +403,7 @@ python3 privateWorkerReplacement.py ListReplicaSet RS1
 
 ## 7. ShardedCluster behavior
 
-`AddShardedCluster` creates an empty managed ShardedCluster. If `--shards` is omitted, the initial shard count comes from `privateWorkerReplacement.config`. The current repository configuration uses three shards.
+`AddShardedCluster` creates an empty managed ShardedCluster. If `--shards` is omitted, the initial shard count comes from `dev.config`. The current repository configuration uses three shards.
 
 Typical topology defaults are:
 
@@ -466,7 +469,7 @@ If a shard operation is interrupted after the deployment lock has been acquired,
 
 ### Readiness checks
 
-Before `AddDatabase`, `DeleteDatabase`, `RotatePasswords`, or `DisableOwner` proceeds:
+Before `AddDatabase`, `DeleteDatabase`, `RotatePasswords`, `DisableOwner`, or `EnableOwner` proceeds:
 
 - the target deployment must exist;
 - a ReplicaSet must be `Running`;
@@ -620,7 +623,7 @@ The hidden controller-admin credential is infrastructure state and is not part o
 
 ## 11. Password rotation and Owner policy
 
-The rotation interval comes from `privateWorkerReplacement.config`; the current development value is 30 days.
+The rotation interval comes from `dev.config`; the current development value is 30 days.
 
 Rotate all three passwords:
 
@@ -647,6 +650,14 @@ python3 privateWorkerReplacement.py DisableOwner RS1 HouseInfo --confirm
 ```
 
 The command prints the complete browser URL for the retained Owner credential. `ListDatabaseAccounts` then reports the Owner account as Disabled while the ReadWrite and Read accounts remain Enabled.
+
+To restore the Owner account:
+
+```bash
+python3 privateWorkerReplacement.py EnableOwner RS1 HouseInfo
+```
+
+`EnableOwner` recreates the Owner MongoDB account using the existing managed credential. It does not generate or rotate a new password. After the command completes, `ListDatabaseAccounts` reports the Owner account as Enabled.
 
 ---
 
@@ -760,7 +771,7 @@ Normal users should see:
 
 Normal users should not see routine:
 
-- Git fetch/reset output;
+- Terraform source refresh diagnostics;
 - Terraform provider initialization;
 - Terraform plans/state refreshes;
 - resource IDs and state addresses;
@@ -774,7 +785,7 @@ Detailed implementation diagnostics are preserved in the operations log for admi
 
 ## 14. Runtime logs
 
-Logging is convention-based and does not have a `[Logging]` section in `privateWorkerReplacement.config`.
+Logging is convention-based and does not have a `[Logging]` section in `dev.config`.
 
 Daily structured controller log:
 

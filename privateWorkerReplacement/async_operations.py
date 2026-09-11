@@ -457,7 +457,7 @@ def public_submission_instructions(
 
     ``config_path`` is the resolved path used by the worker. ``config_display``
     is the cleaner path originally supplied by the user, normally
-    ``./privateWorkerReplacement.config``. Keeping them separate prevents internal
+    ``./dev.config``. Keeping them separate prevents internal
     absolute paths from leaking into routine customer instructions.
     """
 
@@ -498,7 +498,7 @@ def admin_submission_instructions(
 
     The worker still uses the resolved absolute path internally. The displayed
     command uses the path the administrator supplied, which is normally the
-    friendlier ``./privateWorkerReplacement.config`` form.
+    friendlier ``./dev.config`` form.
     """
 
     check_command = shlex.join(

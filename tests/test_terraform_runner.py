@@ -119,6 +119,66 @@ with _terraform_execution_lock({"terraform_cache": cache}):
             self.assertEqual(marker.read_text(encoding="utf-8"), "acquired")
 
 
+class TerraformRunnerSyncTests(unittest.TestCase):
+    """Verify local Terraform source is copied into a disposable runtime cache."""
+
+    def test_sync_refreshes_cache_from_local_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "terraform-dbaas"
+            cache = root / ".runtime" / "terraform-cache"
+
+            source.mkdir(parents=True)
+            (source / "main.tf").write_text(
+                'terraform { required_version = ">= 1.11.0" }\n',
+                encoding="utf-8",
+            )
+            (source / "nested").mkdir()
+            (source / "nested" / "values.tf").write_text(
+                'variable "example" {}\n',
+                encoding="utf-8",
+            )
+
+            cache.mkdir(parents=True)
+            (cache / "stale.tf").write_text(
+                "stale\n",
+                encoding="utf-8",
+            )
+            (cache / ".terraform").mkdir()
+            (cache / ".terraform" / "provider-marker").write_text(
+                "keep-me\n",
+                encoding="utf-8",
+            )
+
+            original_source = (source / "main.tf").read_text(
+                encoding="utf-8"
+            )
+
+            with patch.object(terraform_runner, "log_event"):
+                result = terraform_runner._sync(
+                    {
+                        "terraform_source": source,
+                        "terraform_cache": cache,
+                    }
+                )
+
+            self.assertEqual(result, cache)
+            self.assertTrue((cache / "main.tf").is_file())
+            self.assertTrue((cache / "nested" / "values.tf").is_file())
+            self.assertFalse((cache / "stale.tf").exists())
+            self.assertEqual(
+                (cache / ".terraform" / "provider-marker").read_text(
+                    encoding="utf-8"
+                ),
+                "keep-me\n",
+            )
+            self.assertEqual(
+                (source / "main.tf").read_text(encoding="utf-8"),
+                original_source,
+            )
+
+
+
 class TerraformRunnerOutputTests(unittest.TestCase):
     """Keep Git/Terraform implementation chatter off interactive terminals."""
 
@@ -142,7 +202,7 @@ class TerraformRunnerOutputTests(unittest.TestCase):
             ) as log_mock,
         ):
             terraform_runner._run_diagnostic(
-                {"config_path": "/tmp/privateWorkerReplacement.config"},
+                {"config_path": "/tmp/dev.config"},
                 ["terraform", "apply"],
                 label="Terraform apply",
             )
@@ -171,7 +231,7 @@ class TerraformRunnerOutputTests(unittest.TestCase):
         ):
             with self.assertRaises(ControllerError) as ctx:
                 terraform_runner._run_diagnostic(
-                    {"config_path": "/tmp/privateWorkerReplacement.config"},
+                    {"config_path": "/tmp/dev.config"},
                     ["terraform", "apply"],
                     label="Terraform apply",
                 )

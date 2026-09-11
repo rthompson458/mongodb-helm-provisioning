@@ -1,0 +1,6 @@
+apiVersion: v2
+name: mongodb-database-management
+description: Database provisioning and controlled database operations for managed MongoDB deployments.
+type: application
+version: 0.3.0
+appVersion: "8.0"
