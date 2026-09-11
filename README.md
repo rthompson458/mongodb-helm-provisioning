@@ -423,13 +423,15 @@ See `tests/README.md` for profile-by-profile details.
 
 ## Architecture rule
 
-**Terraform performs managed changes.**
+**Terraform owns normal DBaaS desired-state changes.**
 
-Python parses/validates requests, reconstructs desired state from Vault, reads live status, coordinates lifecycle steps, waits for convergence, reports customer/admin results, and records logs. Managed MongoDB, Kubernetes, Vault, storage, account, and lock mutations remain Terraform-driven directly or through:
+Python parses/validates requests, reconstructs desired state from Vault, reads live status, coordinates lifecycle steps, waits for convergence, reports customer/admin results, and records logs. Normal managed MongoDB, Vault, storage, account, and lock mutations remain Terraform-driven directly or through:
 
 ```text
 terraform-dbaas/scripts/lifecycle.sh
 ```
+
+Deployment teardown has one deliberate cross-plane cleanup exception: Python removes the per-deployment Ops Manager project and verifies deletion of its Operator-created `<PROJECT_ID>-group-secret`. Those artifacts are created outside Terraform desired state, so teardown must explicitly retire them before reporting success.
 
 Logical database materialization/deletion is invoked by Terraform through the integrated Helm chart in:
 
