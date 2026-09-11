@@ -66,41 +66,76 @@ These commands are deliberately not accepted by `privateWorkerReplacement.py`.
 python3 privateWorkerReplacementAdmin.py ListManagedResources
 ```
 
-This is the read-only managed-resource inventory and zero-state check. It combines Vault-backed deployment inventory with controller-managed Kubernetes resources:
+This is the read-only authoritative DBaaS inventory and zero-state check. It
+correlates state across Vault, Kubernetes, Terraform backend state, and Ops
+Manager rather than looking only at Kubernetes deployment objects.
+
+The summary includes counts for:
 
 ```text
 Managed deployments
+ReplicaSets
+ShardedClusters
+Databases
+Managed accounts
 MongoDB resources
 MongoDB users
-PVCs (Persistent Volume Claims)
-PVs (Persistent Volumes)
+DBaaS PVCs
+DBaaS PVs
+Controller Secrets
+Controller ConfigMaps
 Deployment locks
+Ops Manager DBaaS projects
+Ops Manager group secrets
+Ops Manager orphan projects
+Orphan group secrets
+Missing Ops Manager projects
+Controller infrastructure ConfigMaps
+Terraform backend states
+Ops Manager platform project
+Ops Manager platform group secrets
 ```
 
-A clean environment reports:
+Ops Manager project and group-secret entries include the project/group ID. For
+example:
 
 ```text
-privateWorkerReplacement Managed Resource Inventory
+Ops Manager platform project:
+  mongodb-development (Project ID: 6a973d4e12c067880c465361)
 
-Managed deployments:             0
-MongoDB resources:               0
-MongoDB users:                   0
-PVCs (Persistent Volume Claims): 0
-PVs (Persistent Volumes):        0
-Deployment locks:                0
-
-Status: CLEAN
+Orphan group secrets:
+  6aa408678225d417ab4d6929-group-secret
+  (Project ID: 6aa408678225d417ab4d6929)
 ```
 
-When legitimate controller-managed resources exist, the command reports:
+The exact line wrapping is terminal-dependent, but the project ID is always
+included in the inventory value.
+
+### Status meanings
+
+`CLEAN` means there are no active DBaaS-managed resources and no detected
+cross-plane leftovers or mismatches. Permanent controller/platform
+infrastructure may still be listed. In particular, these can remain in a clean
+zero-deployment environment:
 
 ```text
-Status: MANAGED RESOURCES PRESENT
+tc-ops-manager-projects
+Terraform backend state Secret
+mongodb-development Ops Manager platform project
+platform group Secret, when present
 ```
 
-and lists the managed names by category.
+`MANAGED RESOURCES PRESENT` means legitimate active DBaaS resources exist. It
+is neutral inventory information, not a health failure.
 
-`MANAGED RESOURCES PRESENT` is neutral inventory information. It does not, by itself, mean the environment is unhealthy. A healthy active deployment is expected to have managed MongoDB resources, MongoDB users, Persistent Volume Claims, and Persistent Volumes.
+`ATTENTION REQUIRED` means the command detected a cross-plane mismatch or
+leftover that an administrator should investigate, including:
+
+```text
+Ops Manager project with no corresponding managed deployment
+<PROJECT_ID>-group-secret with no corresponding live project/deployment
+managed deployment with no corresponding Ops Manager project
+```
 
 The command does not delete, reconcile, or repair anything.
 
@@ -386,6 +421,7 @@ privateWorkerReplacement/deployments.py
 privateWorkerReplacement/databases.py
 privateWorkerReplacement/database_status.py
 privateWorkerReplacement/maintenance.py
+privateWorkerReplacement/ops_manager.py
 privateWorkerReplacement/deployment_lock.py
 privateWorkerReplacement/terraform_runner.py
 privateWorkerReplacement/async_operations.py
