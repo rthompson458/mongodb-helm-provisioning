@@ -104,17 +104,18 @@ def list_managed_resources(
     print()
     print(f"Status: {status}")
 
-    # Always print every detail category. An omitted section can make an
-    # administrator wonder whether the category was checked at all. "None"
-    # makes a zero-result category explicit while keeping the output easy to scan.
+    # Always show every category so an administrator can tell it was checked.
+    # Empty categories stay on one line to keep a clean inventory compact;
+    # categories with entries expand below their heading.
+    print()
+    print("Resource details:")
     for label, key in labels:
         names = resources[key]
 
-        print()
-        print(f"{label}:")
         if not names:
-            print("  None")
+            print(f"{label + ':':<{label_width}} None")
             continue
 
+        print(f"{label}:")
         for name in names:
             print(f"  {name}")
