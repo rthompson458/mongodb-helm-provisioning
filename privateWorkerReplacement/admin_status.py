@@ -1,8 +1,11 @@
 """Administrator-only formatting for controller-managed resource inventory.
 
-ListManagedResources answers a simple inventory question: what controller-owned
-objects currently exist? Having resources is normal while the service is in
-use, so nonzero inventory must not be labeled as an error condition.
+ListManagedResources answers two administrator questions:
+- what DBaaS-managed resources currently exist; and
+- whether any cross-plane leftovers or mismatches require attention.
+
+Permanent controller/platform infrastructure is displayed for visibility but does
+not make an otherwise empty DBaaS environment dirty.
 """
 
 from __future__ import annotations
@@ -33,12 +36,22 @@ def list_managed_resources(
         ("DBaaS PVs", "pvs"),
         ("Controller Secrets", "controller_secrets"),
         ("Controller ConfigMaps", "controller_configmaps"),
-        ("Terraform backend states", "terraform_states"),
         ("Deployment locks", "deployment_locks"),
-        ("Ops Manager platform project", "ops_manager_platform_project"),
         ("Ops Manager DBaaS projects", "ops_manager_projects"),
+        ("Ops Manager group secrets", "ops_manager_group_secrets"),
         ("Ops Manager orphan projects", "ops_manager_orphans"),
+        ("Orphan group secrets", "orphan_group_secrets"),
         ("Missing Ops Manager projects", "missing_ops_manager_projects"),
+        (
+            "Controller infrastructure ConfigMaps",
+            "controller_infrastructure_configmaps",
+        ),
+        ("Terraform backend states", "terraform_states"),
+        ("Ops Manager platform project", "ops_manager_platform_project"),
+        (
+            "Ops Manager platform group secrets",
+            "ops_manager_platform_group_secrets",
+        ),
     ]
 
     attention_keys = {
@@ -47,14 +60,17 @@ def list_managed_resources(
         "missing_ops_manager_projects",
     }
 
-    platform_keys = {
+    infrastructure_keys = {
+        "controller_infrastructure_configmaps",
+        "terraform_states",
         "ops_manager_platform_project",
+        "ops_manager_platform_group_secrets",
     }
 
     managed_keys = {
         key
         for _, key in labels
-        if key not in attention_keys | platform_keys
+        if key not in attention_keys | infrastructure_keys
     }
 
     attention = any(resources[key] for key in attention_keys)
@@ -86,4 +102,3 @@ def list_managed_resources(
         print(f"{label}:")
         for name in names:
             print(f"  {name}")
-
