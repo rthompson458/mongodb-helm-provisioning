@@ -419,7 +419,7 @@ Inventory:
         sp,
         "ListDatabaseAccounts",
         "Show the three managed accounts for one database.",
-        "Shows Owner, ReadWrite, and Read accounts, enabled/disabled state, rotation timing, last rotation, Vault paths, and complete browser-ready Vault URLs.",
+        "Shows Owner, ReadWrite, and Read accounts, enabled/disabled state, rotation due timing, last rotation, Vault paths, and complete browser-ready Vault URLs.",
         "  python3 privateWorkerReplacement.py ListDatabaseAccounts SC9 HouseInfo\n  python3 privateWorkerReplacement.py ListDatabaseAccounts HouseInfo    # only one deployment exists",
     )
     _database_target(x)
