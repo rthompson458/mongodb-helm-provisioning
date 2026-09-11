@@ -32,6 +32,7 @@ def _resources(**overrides: list[str]) -> dict[str, list[str]]:
         "ops_manager_orphans": [],
         "orphan_group_secrets": [],
         "missing_ops_manager_projects": [],
+        "missing_ops_manager_platform_project": [],
         "controller_infrastructure_configmaps": ["tc-ops-manager-projects"],
         "terraform_states": ["tfstate-default-mongodb-vault-controller"],
         "ops_manager_platform_project": [
@@ -135,6 +136,23 @@ class AdminStatusTests(unittest.TestCase):
             "stale-id-group-secret (Project ID: stale-id)",
             text,
         )
+
+    def test_missing_platform_project_requires_attention(self) -> None:
+        text = self._capture(
+            _resources(
+                ops_manager_platform_project=[
+                    "mongodb-development (Project ID: NOT FOUND)"
+                ],
+                missing_ops_manager_platform_project=["mongodb-development"],
+            )
+        )
+
+        self.assertIn("Status: ATTENTION REQUIRED", text)
+        self.assertRegex(
+            text,
+            r"(?m)^Missing Ops Manager platform project:\s+1$",
+        )
+        self.assertIn("Project ID: NOT FOUND", text)
 
 
 if __name__ == "__main__":
