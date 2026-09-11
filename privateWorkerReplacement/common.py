@@ -144,7 +144,7 @@ def run_process(
 
 
 def rotation_remaining(rotated_at: str, rotation_days: int) -> str:
-    """Return a user-friendly countdown until the next password rotation."""
+    """Return a user-friendly countdown until the next rotation is due."""
 
     remaining = parse_utc(rotated_at) + timedelta(days=rotation_days) - utc_now()
     seconds = int(remaining.total_seconds())
