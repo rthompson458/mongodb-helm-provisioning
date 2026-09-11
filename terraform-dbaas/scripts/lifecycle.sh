@@ -90,10 +90,14 @@ EOF
   return 1
 }
 
+# Encode one shell string as a JSON string literal before embedding it in the
+# JavaScript passed to mongosh. This prevents quoting from changing the script.
 json_string() {
   python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"
 }
 
+# Reproduce the same deterministic MongoDBUser resource-name algorithm used by
+# Python/Terraform so verification can locate the correct connection Secret.
 account_resource_name() {
   local account="$1"
   local db_key="${TC_DATABASE,,}"
@@ -139,6 +143,8 @@ verify_account() {
   return 1
 }
 
+# Verify that the hidden per-deployment controller administrator can authenticate.
+# Deployment creation is not considered ready until this real client check passes.
 verify_controller_admin() {
   # A MongoDBUser CR can report Updated slightly before the new SCRAM
   # credential is usable by a real client. Treat successful authentication,
@@ -161,6 +167,8 @@ verify_controller_admin() {
   return 1
 }
 
+# Verify directly in MongoDB that all three fixed application accounts are gone.
+# This closes the gap between Kubernetes object deletion and actual DB user state.
 verify_users_absent() {
   local owner="${TC_DATABASE}_owner"
   local readwrite="${TC_DATABASE}_readWrite"
@@ -192,6 +200,8 @@ verify_users_absent() {
   return 1
 }
 
+# Verify directly in MongoDB that the Owner account no longer exists while the
+# ReadWrite/Read accounts remain managed through their normal verification path.
 verify_owner_absent() {
   local owner="${TC_DATABASE}_owner"
   local owner_json
