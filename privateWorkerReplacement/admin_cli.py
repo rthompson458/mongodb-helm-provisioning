@@ -159,6 +159,8 @@ Normal DBaaS users should use:
         "Read-only authoritative inventory across Vault, Kubernetes, Terraform "
         "backend state, and Ops Manager. The default view shows compact grouped "
         "counts, health/consistency status, and one row per managed deployment. "
+        "Permanent controller infrastructure remains visible without preventing "
+        "CLEAN; orphan or missing cross-plane state reports ATTENTION REQUIRED. "
         "Use --verbose to append the full object-name inventory for troubleshooting.",
         "  python3 privateWorkerReplacementAdmin.py ListManagedResources\n"
         "  python3 privateWorkerReplacementAdmin.py ListManagedResources --verbose",
