@@ -73,7 +73,7 @@ def _sub(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the platform-administrator CLI contract."""
+    """Build the complete platform-administrator CLI contract."""
 
     parser = argparse.ArgumentParser(
         prog="privateWorkerReplacementAdmin.py",
@@ -91,7 +91,7 @@ Use privateWorkerReplacement.py for normal:
   - service status
 
 Use this administrator program for:
-  - managed resource inventory and zero-state verification
+  - authoritative managed-resource inventory and zero-state verification
   - asynchronous operation diagnostics
   - controlled recovery after interrupted lifecycle work
   - controller-wide Terraform reconciliation
@@ -99,8 +99,8 @@ Use this administrator program for:
 Default configuration file:
   ./dev.config
 
-Detailed Git/Terraform output is written to the daily operations log instead of
-being dumped onto the administrator terminal.
+Detailed Terraform/external-command diagnostics are written to the daily
+operations log instead of being dumped onto the administrator terminal.
 
 Run this program with no command, or use -h/--help, to show this help.
 Use '<command> --help' for detailed command-specific help.
@@ -145,12 +145,13 @@ Normal DBaaS users should use:
     _sub(
         sp,
         "ListManagedResources",
-        "List controller-managed deployment resources and zero-state status.",
+        "List authoritative DBaaS resources and zero-state status.",
         "Read-only authoritative inventory across Vault, Kubernetes, Terraform "
         "backend state, and Ops Manager. Shows deployment/database/account resources, "
         "Ops Manager project and group-secret IDs, controller infrastructure, and "
         "orphan or missing cross-plane artifacts. Permanent controller infrastructure "
-        "is visible but does not prevent CLEAN.",
+        "is visible but does not prevent CLEAN; missing permanent Ops Manager "
+        "infrastructure is reported as ATTENTION REQUIRED.",
         "  python3 privateWorkerReplacementAdmin.py ListManagedResources",
     )
 
@@ -175,7 +176,8 @@ Normal DBaaS users should use:
         "ListOperations",
         "List recent background controller operations.",
         "Shows up to 50 recent asynchronous controller operations with their "
-        "operation IDs, commands, scopes, results, and elapsed times.",
+        "operation IDs, commands, scopes, results, and elapsed times. This command "
+        "reads local operation state only and does not require MongoDB/Vault health.",
         "  python3 privateWorkerReplacementAdmin.py ListOperations",
     )
 
@@ -184,10 +186,11 @@ Normal DBaaS users should use:
         "RecoverDeploymentLock",
         "Release a completed ShardedCluster topology lock after validation.",
         "Exceptional recovery for an interrupted AddShard/DeleteShard that already "
-        "reached the lock's target topology. Before releasing the lock, the controller "
-        "verifies the recorded target, live MongoDB shardCount, surviving shard "
-        "readiness, config servers, mongos, and removed StatefulSets. The lock release "
-        "remains Terraform-driven.",
+        "reached the lock's target topology. Requires --confirm. Before releasing "
+        "the lock, the controller verifies the recorded target, live MongoDB "
+        "shardCount, surviving shard readiness, config servers, mongos, and removed "
+        "StatefulSets. Only the exact lifecycle lock release is applied through "
+        "Terraform; unrelated deployment state is not broadly reconciled.",
         "  python3 privateWorkerReplacementAdmin.py RecoverDeploymentLock SC9 --confirm",
     )
     x.add_argument(
@@ -201,11 +204,12 @@ Normal DBaaS users should use:
         sp,
         "RecoverOrphanedResources",
         "Finish Terraform cleanup after desired-state inventory is already empty.",
-        "Exceptional controller-state recovery. The command is allowed only when "
-        "Vault-backed managed deployment inventory is empty AND Kubernetes contains "
-        "no privateWorkerReplacement-managed MongoDB custom resources. If both checks pass, "
-        "Terraform converges the controller backend to empty desired state and finishes "
-        "destroying resources still tracked in state.",
+        "Exceptional asynchronous controller-state recovery. Requires --confirm. "
+        "The request is allowed only when Vault-backed managed deployment inventory "
+        "is empty AND Kubernetes contains no privateWorkerReplacement-managed MongoDB "
+        "custom resources. If both checks pass, Terraform converges the controller "
+        "backend to empty desired state and finishes destroying tracked leftovers. "
+        "Use ListOperation with the returned operation ID to monitor completion.",
         "  python3 privateWorkerReplacementAdmin.py RecoverOrphanedResources --confirm",
     )
     _confirm(x)
@@ -214,9 +218,11 @@ Normal DBaaS users should use:
         sp,
         "Reconcile",
         "Reapply all Vault-backed managed desired state through Terraform.",
-        "Reloads managed desired state from Vault, refreshes Terraform, reapplies the "
-        "complete controller-managed environment, and waits for convergence. Reconcile "
-        "refuses to run while a protected ShardedCluster change is active.",
+        "Reloads managed desired state from Vault, refreshes the local Terraform "
+        "execution cache, reapplies the complete controller-managed environment, "
+        "waits for deployments/accounts to converge, and reports each resulting "
+        "deployment. Reconcile refuses to run while a protected ShardedCluster "
+        "change is active.",
         "  python3 privateWorkerReplacementAdmin.py Reconcile",
     )
 
@@ -268,7 +274,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         # ListManagedResources combines Vault desired-state inventory with
-        # read-only Kubernetes queries. It performs no managed mutation.
+        # read-only Kubernetes/Ops Manager queries. It performs no mutation.
         if args.command == "ListManagedResources":
             vault = VaultClient(config)
             list_managed_resources(config, vault)
@@ -311,10 +317,15 @@ def main(argv: list[str] | None = None) -> int:
         vault = VaultClient(config)
         actions = {
             "RecoverDeploymentLock": lambda: recover_deployment_lock(
-                config, vault, args.deployment, args.confirm
+                config,
+                vault,
+                args.deployment,
+                args.confirm,
             ),
             "RecoverOrphanedResources": lambda: recover_orphaned_resources(
-                config, vault, args.confirm
+                config,
+                vault,
+                args.confirm,
             ),
             "Reconcile": lambda: reconcile(config, vault),
         }
