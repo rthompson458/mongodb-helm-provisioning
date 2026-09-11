@@ -254,7 +254,7 @@ def list_database_accounts(
 
     db = deployment["databases"][db_key]
     print_table(
-        ("DEPLOYMENT", "DATABASE", "ACCOUNT", "TYPE", "STATUS", "ROTATES IN"),
+        ("DEPLOYMENT", "DATABASE", "ACCOUNT", "TYPE", "STATUS", "ROTATION DUE IN"),
         database_rows(deployment, db, config["rotation_days"]),
     )
     print(f"Last rotated: {db['rotated_at']}")
