@@ -152,17 +152,21 @@ Normal DBaaS users should use:
 
     sp = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
 
-    _sub(
+    x = _sub(
         sp,
         "ListManagedResources",
         "List authoritative DBaaS resources and zero-state status.",
         "Read-only authoritative inventory across Vault, Kubernetes, Terraform "
-        "backend state, and Ops Manager. Shows deployment/database/account resources, "
-        "Ops Manager project and group-secret IDs, controller infrastructure, and "
-        "orphan or missing cross-plane artifacts. Permanent controller infrastructure "
-        "is visible but does not prevent CLEAN; missing permanent Ops Manager "
-        "infrastructure is reported as ATTENTION REQUIRED.",
-        "  python3 privateWorkerReplacementAdmin.py ListManagedResources",
+        "backend state, and Ops Manager. The default view shows compact grouped "
+        "counts, health/consistency status, and one row per managed deployment. "
+        "Use --verbose to append the full object-name inventory for troubleshooting.",
+        "  python3 privateWorkerReplacementAdmin.py ListManagedResources\n"
+        "  python3 privateWorkerReplacementAdmin.py ListManagedResources --verbose",
+    )
+    x.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Append full object-name inventory details after the compact summary.",
     )
 
     x = _sub(
@@ -301,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
         # read-only Kubernetes/Ops Manager queries. It performs no mutation.
         if args.command == "ListManagedResources":
             vault = VaultClient(config)
-            list_managed_resources(config, vault)
+            list_managed_resources(config, vault, args.verbose)
             log_event("admin.command.succeeded", command=args.command)
             return 0
 
