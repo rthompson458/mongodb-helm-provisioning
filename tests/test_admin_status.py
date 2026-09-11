@@ -75,20 +75,25 @@ class AdminStatusTests(unittest.TestCase):
             text,
         )
 
-    def test_empty_detail_categories_are_explicitly_shown_as_none(self) -> None:
+    def test_count_table_shows_zero_categories_without_repeating_empty_details(self) -> None:
         text = self._capture(_resources())
 
-        self.assertIn("Resource details:", text)
-        self.assertRegex(text, r"(?m)^Managed deployments:\s+None$")
-        self.assertRegex(text, r"(?m)^ReplicaSets:\s+None$")
-        self.assertRegex(text, r"(?m)^ShardedClusters:\s+None$")
-        self.assertRegex(text, r"(?m)^Databases:\s+None$")
-        self.assertRegex(text, r"(?m)^Ops Manager orphan projects:\s+None$")
+        self.assertIn("Resource counts:", text)
+        self.assertRegex(text, r"(?m)^Managed deployments:\s+0$")
+        self.assertRegex(text, r"(?m)^ReplicaSets:\s+0$")
+        self.assertRegex(text, r"(?m)^ShardedClusters:\s+0$")
+        self.assertRegex(text, r"(?m)^Databases:\s+0$")
+        self.assertRegex(text, r"(?m)^Ops Manager orphan projects:\s+0$")
         self.assertRegex(
             text,
-            r"(?m)^Ops Manager platform group secrets:\s+None$",
+            r"(?m)^Ops Manager platform group secrets:\s+0$",
         )
-        self.assertNotIn("ReplicaSets:\n  None", text)
+        self.assertIn(
+            "Resource details (non-empty categories only):",
+            text,
+        )
+        self.assertNotIn("ReplicaSets: None", text)
+        self.assertNotIn("ShardedClusters: None", text)
 
     def test_nonempty_inventory_reports_neutral_status_and_ids(self) -> None:
         resources = _resources(
@@ -120,8 +125,8 @@ class AdminStatusTests(unittest.TestCase):
             "rs7-id-group-secret (Project ID: rs7-id)",
             text,
         )
-        self.assertIn("DBaaS PVCs:", text)
-        self.assertIn("DBaaS PVs:", text)
+        self.assertIn("DBaaS PVCs: data-rs7-0", text)
+        self.assertIn("DBaaS PVs: rs7-0", text)
 
     def test_orphan_ops_manager_project_requires_attention(self) -> None:
         text = self._capture(
