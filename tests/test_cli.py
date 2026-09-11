@@ -199,6 +199,22 @@ class CliTests(unittest.TestCase):
         self.assertIn("Optional. Default: 1.", add_help)
         self.assertIn("Optional. Default: 1.", delete_help)
 
+    def test_mutating_actions_use_controller_state_lock(self) -> None:
+        action = mock.Mock()
+        with mock.patch.object(cli, "controller_state_mutation_lock") as lock:
+            cli._run_action({}, "AddReplicaSet", action)
+
+        lock.assert_called_once_with({}, "AddReplicaSet")
+        action.assert_called_once_with()
+
+    def test_read_only_actions_do_not_use_controller_state_lock(self) -> None:
+        action = mock.Mock()
+        with mock.patch.object(cli, "controller_state_mutation_lock") as lock:
+            cli._run_action({}, "ListReplicaSets", action)
+
+        lock.assert_not_called()
+        action.assert_called_once_with()
+
     def test_database_help_states_background_behavior(self) -> None:
         parser = cli.build_parser(cli.DEFAULT_CONFIG)
         subparsers = next(
