@@ -419,6 +419,7 @@ Shared lifecycle/support modules include:
 
 ```text
 privateWorkerReplacement/deployments.py
+privateWorkerReplacement/shards.py
 privateWorkerReplacement/deployment_status.py
 privateWorkerReplacement/databases.py
 privateWorkerReplacement/database_status.py
