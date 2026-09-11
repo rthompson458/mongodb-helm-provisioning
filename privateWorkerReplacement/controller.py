@@ -1,7 +1,9 @@
 """Compatibility facade for privateWorkerReplacement lifecycle functions.
 
 The implementation is intentionally split by responsibility:
-- deployments.py: ReplicaSet, ShardedCluster, and shard lifecycle/status
+- deployments.py: ReplicaSet/ShardedCluster lifecycle and shared deployment rules
+- shards.py: ShardedCluster shard-count lifecycle
+- deployment_status.py: read-only deployment and shard status
 - databases.py: database mutation, Vault credential, and rotation lifecycle
 - database_status.py: read-only database and account status
 - admin_status.py: administrator resource-inventory presentation
@@ -22,11 +24,12 @@ from .database_status import (
 )
 from .deployments import (
     add_replica_set,
-    add_shard,
     add_sharded_cluster,
     delete_replica_set,
-    delete_shard,
     delete_sharded_cluster,
+)
+from .shards import add_shard, delete_shard
+from .deployment_status import (
     list_deployment,
     list_deployments,
     list_replica_set,
