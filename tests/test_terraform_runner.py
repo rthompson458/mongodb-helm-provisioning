@@ -1,4 +1,4 @@
-"""Regression tests for Terraform serialization and quiet diagnostic handling."""
+"""Regression tests for Terraform serialization, source refresh, and diagnostics."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ class TerraformRunnerLockTests(unittest.TestCase):
             }
 
             with (
-                patch.object(terraform_runner, "_require"),
+                patch.object(terraform_runner, "_require") as require_mock,
                 patch.object(terraform_runner, "_check_version"),
                 patch.object(
                     terraform_runner,
@@ -62,6 +62,12 @@ class TerraformRunnerLockTests(unittest.TestCase):
 
             self.assertTrue(transaction_seen)
             self.assertFalse(locked)
+            require_mock.assert_called_once_with(
+                "terraform",
+                "kubectl",
+                "bash",
+                "python3",
+            )
 
     def test_execution_lock_blocks_second_process_until_release(self) -> None:
         """flock must serialize two separate controller worker processes."""
@@ -178,9 +184,8 @@ class TerraformRunnerSyncTests(unittest.TestCase):
             )
 
 
-
 class TerraformRunnerOutputTests(unittest.TestCase):
-    """Keep Git/Terraform implementation chatter off interactive terminals."""
+    """Keep Terraform/external-command implementation chatter off terminals."""
 
     def test_diagnostic_command_is_captured_and_logged(self) -> None:
         completed = subprocess.CompletedProcess(
