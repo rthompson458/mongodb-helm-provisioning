@@ -321,32 +321,45 @@ Controller code must not intentionally write Vault tokens or managed plaintext p
 
 ## Administrator managed-resource check
 
-After testing, cleanup, or a recovery operation, an administrator can inspect controller-managed deployment resources with:
+After testing, cleanup, or a recovery operation, an administrator can inspect the
+authoritative DBaaS inventory across Vault, Kubernetes, Terraform state, and Ops
+Manager with:
 
 ```bash
 python3 privateWorkerReplacementAdmin.py ListManagedResources
 ```
 
-A clean environment reports:
+The command reports active ReplicaSets/ShardedClusters, databases, managed
+accounts, MongoDB/MongoDBUser resources, DBaaS PVCs/PVs, controller
+Secrets/ConfigMaps, deployment locks, Ops Manager DBaaS projects and group
+Secrets, orphan/missing Ops Manager artifacts, and permanent controller
+infrastructure.
+
+Ops Manager entries include the project/group ID so an administrator can match a
+project to its `<PROJECT_ID>-group-secret`.
+
+Permanent controller infrastructure such as `tc-ops-manager-projects`, the
+Terraform backend state Secret, and the base `mongodb-development` Ops Manager
+project remains visible but does not prevent:
 
 ```text
-Managed deployments:             0
-MongoDB resources:               0
-MongoDB users:                   0
-PVCs (Persistent Volume Claims): 0
-PVs (Persistent Volumes):        0
-Deployment locks:                0
-
 Status: CLEAN
 ```
 
-An active environment with legitimate managed resources reports:
+Legitimate active DBaaS resources report:
 
 ```text
 Status: MANAGED RESOURCES PRESENT
 ```
 
-That status is informational. It does not, by itself, indicate a health problem.
+Cross-plane leftovers or mismatches such as orphan Ops Manager projects, orphan
+group Secrets, or missing Ops Manager projects report:
+
+```text
+Status: ATTENTION REQUIRED
+```
+
+The command is read-only; it does not delete or repair anything.
 
 ## Testing
 
