@@ -246,6 +246,10 @@ def delete_project(
             item["name"].lower() == project_name.lower()
             for item in remaining
         ):
+            # The MongoDB Operator creates one Kubernetes group Secret for the
+            # Ops Manager project. Ops Manager project deletion does not remove
+            # that Secret, so finish teardown explicitly and verify the stale
+            # credential artifact is gone before reporting success.
             group_secret = f"{project['id']}-group-secret"
 
             result = run_process(
