@@ -5,12 +5,13 @@ The product uses two predictable daily log families beside the selected config:
     logs/controller/controller-YYYYMMDD.log
     logs/operations/operations-YYYYMMDD.log
 
-The controller log is structured JSON Lines.  It answers questions such as
+The controller log is structured JSON Lines. It answers questions such as
 "what command ran?" and "did the controller report success or failure?"
 
-The operations log contains the detailed stdout/stderr from Git, Terraform, and
-other implementation work that would otherwise clutter the customer terminal.
-It is intentionally human-readable troubleshooting evidence.
+The operations log contains detailed stdout/stderr from Terraform and other
+external implementation commands that would otherwise clutter the customer or
+administrator terminal. It is intentionally human-readable troubleshooting
+evidence.
 
 Neither log should ever receive Vault tokens or managed plaintext passwords.
 Callers must not pass secrets as log fields or command-line arguments.
@@ -72,7 +73,7 @@ def _secure_directory(path: Path) -> None:
         path.chmod(0o700)
     except OSError:
         # Logging must remain usable on filesystems that do not support POSIX
-        # permissions.  Production host permissions remain the real boundary.
+        # permissions. Production host permissions remain the real boundary.
         pass
 
 
@@ -88,9 +89,9 @@ def _secure_file(path: Path) -> None:
 def configure_logging(config: dict[str, Any]) -> Path:
     """Configure the process-wide structured controller logger once.
 
-    Logging is deliberately convention-based rather than configurable.  Every
+    Logging is deliberately convention-based rather than configurable. Every
     process appends to the UTC-dated controller log selected from the config
-    file's directory.  Repeated calls return the original path so imported
+    file's directory. Repeated calls return the original path so imported
     modules cannot accidentally install duplicate handlers.
     """
 
@@ -183,9 +184,9 @@ def append_process_diagnostic(
 ) -> Path:
     """Append captured implementation output to the daily operations log.
 
-    Terraform and Git output is valuable to an administrator but is not useful
-    customer-facing output.  The Terraform runner captures it and calls this
-    function before deciding whether the external command succeeded.
+    Terraform and other external-command output is valuable to an administrator
+    but is not useful customer-facing output. The caller captures it and invokes
+    this function before deciding whether the external command succeeded.
     """
 
     path = current_operations_log_path(config)
@@ -227,10 +228,10 @@ def append_worker_transcript(
     """Append one detached worker's buffered transcript to its daily log.
 
     Detached workers write ordinary Python stdout/stderr to a private temporary
-    file while running.  Consolidating that file only after the worker reaches a
+    file while running. Consolidating that file only after the worker reaches a
     terminal result keeps unrelated operation transcripts from becoming mixed.
-    Detailed Terraform/Git blocks may already have been written to the same
-    daily log by append_process_diagnostic().
+    Detailed Terraform/external-command blocks may already have been written to
+    the same daily log by append_process_diagnostic().
     """
 
     path = Path(log_file).expanduser() if log_file else operations_log_path(config_path)
