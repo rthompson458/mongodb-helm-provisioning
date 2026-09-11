@@ -4,8 +4,10 @@ ListManagedResources answers two administrator questions:
 - what DBaaS-managed resources currently exist; and
 - whether any cross-plane leftovers or mismatches require attention.
 
-Permanent controller/platform infrastructure is displayed for visibility but does
-not make an otherwise empty DBaaS environment dirty.
+Permanent controller/platform infrastructure is displayed for visibility but
+does not make an otherwise empty DBaaS environment dirty. Missing permanent
+infrastructure is different: that is an actionable mismatch and must raise
+ATTENTION REQUIRED.
 """
 
 from __future__ import annotations
@@ -43,6 +45,10 @@ def list_managed_resources(
         ("Orphan group secrets", "orphan_group_secrets"),
         ("Missing Ops Manager projects", "missing_ops_manager_projects"),
         (
+            "Missing Ops Manager platform project",
+            "missing_ops_manager_platform_project",
+        ),
+        (
             "Controller infrastructure ConfigMaps",
             "controller_infrastructure_configmaps",
         ),
@@ -54,12 +60,17 @@ def list_managed_resources(
         ),
     ]
 
+    # These categories represent cross-plane disagreement, not ordinary active
+    # service state. Any one of them makes the administrator summary actionable.
     attention_keys = {
         "ops_manager_orphans",
         "orphan_group_secrets",
         "missing_ops_manager_projects",
+        "missing_ops_manager_platform_project",
     }
 
+    # These objects are expected to remain in a clean zero-deployment platform.
+    # Their presence is shown for transparency but is not counted as active DBaaS.
     infrastructure_keys = {
         "controller_infrastructure_configmaps",
         "terraform_states",
