@@ -39,7 +39,7 @@ class HarnessCliTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0)
         self.assertIn("preflight    5 read-only checks", result.stdout)
-        self.assertIn("all         34 checks total", result.stdout)
+        self.assertIn("all         36 checks total", result.stdout)
         self.assertIn("--allow-changes", result.stdout)
         self.assertNotIn("--allow-mutations", result.stdout)
         self.assertNotIn("--allow-destructive", result.stdout)
