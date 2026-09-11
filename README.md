@@ -295,7 +295,7 @@ http://127.0.0.1:8200/ui/vault/secrets/secret/show/mongodb/RS1/HouseInfo/HouseIn
 
 The URL is generated from the configured Vault address and mount; users do not need to manually construct it.
 
-Passwords rotate every configured rotation interval (**30 days in the supplied `dev.config`**). The Owner account is disabled in MongoDB at the first rotation at or after that configured interval, while its rotated credential remains managed in Vault. `EnableOwner` restores the Owner account using that existing managed credential; enabling the account does not rotate its password.
+The configured rotation interval is **30 days in the supplied `dev.config`**. `ListDatabaseAccounts` shows when rotation is due; this POC does not run an internal scheduler. Rotation occurs when `RotatePasswords` is invoked manually or by future external automation. At the first rotation at or after one full configured interval from database creation, the Owner account is disabled in MongoDB while its rotated credential remains managed in Vault. `EnableOwner` restores the Owner account using that existing managed credential; enabling the account does not rotate its password.
 
 ## Runtime source and cache
 
