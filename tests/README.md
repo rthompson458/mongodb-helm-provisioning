@@ -250,20 +250,22 @@ Use the normal Terraform-driven lifecycle/recovery path. An administrator can in
 python3 privateWorkerReplacementAdmin.py ListManagedResources
 ```
 
-A completely empty environment reports:
+A zero-deployment environment can still show permanent controller
+infrastructure such as `tc-ops-manager-projects`, the Terraform backend state
+Secret, and the base `mongodb-development` Ops Manager project. Those entries
+are informational and do not prevent:
 
 ```text
-Managed deployments:             0
-MongoDB resources:               0
-MongoDB users:                   0
-PVCs (Persistent Volume Claims): 0
-PVs (Persistent Volumes):        0
-Deployment locks:                0
-
 Status: CLEAN
 ```
 
-An environment with legitimate managed resources reports `MANAGED RESOURCES PRESENT`; that status alone is not a failure.
+An environment with legitimate active DBaaS resources reports
+`MANAGED RESOURCES PRESENT`; that status alone is not a failure.
+
+An orphan Ops Manager project, orphan `<PROJECT_ID>-group-secret`, or a managed
+deployment missing its expected Ops Manager project reports
+`ATTENTION REQUIRED`. Ops Manager inventory lines include project IDs so cleanup
+failures can be correlated across Kubernetes and Ops Manager.
 
 ---
 
