@@ -1,6 +1,6 @@
 # MongoDB DBaaS Provisioning
 
-Terraform-driven MongoDB Database as a Service proof of concept for ReplicaSet and ShardedCluster deployments managed through the MongoDB Kubernetes Operator, Ops Manager, Vault, Kubernetes, and Terraform-owned lifecycle scripts.
+Terraform-driven MongoDB Database as a Service proof of concept for ReplicaSet and ShardedCluster deployments managed through the MongoDB Kubernetes Operator, Ops Manager, Vault, Kubernetes, Terraform, and an integrated Helm database-management chart.
 
 ## Start here
 
@@ -56,7 +56,7 @@ The request returns promptly while provisioning continues in the background. Che
 python3 privateWorkerReplacement.py ListReplicaSet RS1
 ```
 
-After the ReplicaSet is Running, request a database:
+After the ReplicaSet is `Running`, request a database:
 
 ```bash
 python3 privateWorkerReplacement.py AddDatabase RS1 HouseInfo
@@ -93,9 +93,9 @@ HouseInfo_read       -> read
 | `privateWorkerReplacement.py` | DBaaS user / customer demo | Deployments, shards, databases, credentials, and service status |
 | `privateWorkerReplacementAdmin.py` | Platform administrator | Managed-resource inventory, operation diagnostics, Terraform reconciliation, and guarded recovery |
 
-The public CLI deliberately hides operation IDs, worker PIDs, Terraform plans, Git activity, Kubernetes implementation details used only for troubleshooting, and recovery mechanics.
+The public CLI deliberately hides operation IDs, worker PIDs, Terraform plans, raw implementation diagnostics, Kubernetes implementation details used only for troubleshooting, and recovery mechanics.
 
-The administrator CLI exposes the diagnostics needed to operate and recover the service, but detailed Git/Terraform stdout and stderr are still written to the operations log instead of flooding the terminal.
+The administrator CLI exposes the diagnostics needed to operate and recover the service, but detailed Terraform/external-command stdout and stderr are still written to the operations log instead of flooding the terminal.
 
 The executable split is an interface boundary, not an authorization boundary. Production must still restrict administrator host, Kubernetes, Vault, and Terraform access.
 
@@ -168,6 +168,16 @@ The one-argument database forms are valid only when exactly one managed deployme
 
 `ListDatabases` and `ListDatabase` report database-level lifecycle/service status. Account rows are intentionally excluded from those commands. `ListDatabaseAccounts` owns the three-account, rotation, Enabled/Disabled, and Vault credential view.
 
+Every command also has command-specific help:
+
+```bash
+python3 privateWorkerReplacement.py AddDatabase --help
+python3 privateWorkerReplacement.py DeleteShard --help
+python3 privateWorkerReplacementAdmin.py ListManagedResources --help
+```
+
+Regression tests require every supported public and administrator subcommand to retain a meaningful description and runnable example.
+
 ## Database status model
 
 Database-level status can include:
@@ -179,9 +189,9 @@ Deleting
 Unavailable
 ```
 
-`Creating` can be visible immediately after an asynchronous AddDatabase request, even before normal database inventory has been fully committed.
+`Creating` can be visible immediately after an asynchronous `AddDatabase` request, even before normal database inventory has been fully committed.
 
-`Deleting` indicates an active asynchronous DeleteDatabase operation.
+`Deleting` indicates an active asynchronous `DeleteDatabase` operation.
 
 `Ready` requires the parent deployment to be healthy enough to serve the database. For a ShardedCluster, that includes all expected shards, config servers, and mongos being Online.
 
@@ -216,11 +226,11 @@ python3 privateWorkerReplacement.py DeleteDatabase RS1 HouseInfo --confirm
 python3 privateWorkerReplacement.py ListDatabases RS1
 ```
 
-`RotatePasswords`, `DisableOwner`, and `EnableOwner` currently remain synchronous because the user normally needs the resulting credential/account state immediately. Their Terraform/Git implementation output is captured in the operations log rather than displayed on the terminal.
+`RotatePasswords`, `DisableOwner`, and `EnableOwner` remain synchronous because the user normally needs the resulting credential/account state immediately. Detailed Terraform/external-command implementation diagnostics are captured in the operations log instead of displayed on the terminal.
 
 ## ShardedCluster defaults and safety
 
-`AddShardedCluster` uses the configured initial shard count when `--shards` is omitted. The current repository configuration uses **3 shards**.
+`AddShardedCluster` uses the configured initial shard count when `--shards` is omitted. The current `dev.config` uses **3 shards**.
 
 ```bash
 python3 privateWorkerReplacement.py AddShardedCluster SC9
@@ -242,7 +252,7 @@ Each ShardedCluster uses a Terraform-created deployment lock to serialize confli
 
 ## Database readiness
 
-Before database creation, deletion, password rotation, or Owner disable:
+Before database creation, deletion, password rotation, Owner disable, or Owner enable:
 
 - a ReplicaSet must be `Running`;
 - a ShardedCluster must be `Running`;
@@ -285,7 +295,23 @@ http://127.0.0.1:8200/ui/vault/secrets/secret/show/mongodb/RS1/HouseInfo/HouseIn
 
 The URL is generated from the configured Vault address and mount; users do not need to manually construct it.
 
-Passwords rotate every configured rotation interval, currently 30 days. The Owner account is disabled in MongoDB at the first rotation at or after day 30, while its rotated credential remains managed in Vault. `EnableOwner` restores the Owner account using that existing managed credential; enabling the account does not rotate its password.
+Passwords rotate every configured rotation interval (**30 days in the supplied `dev.config`**). The Owner account is disabled in MongoDB at the first rotation at or after that configured interval, while its rotated credential remains managed in Vault. `EnableOwner` restores the Owner account using that existing managed credential; enabling the account does not rotate its password.
+
+## Runtime source and cache
+
+The current runtime does **not** fetch Terraform from Git or depend on a remote repository. The project-local source directory is authoritative:
+
+```text
+terraform-dbaas/
+```
+
+Before each Terraform transaction, the controller refreshes a disposable execution cache from that local source:
+
+```text
+.runtime/terraform-cache/
+```
+
+The cache preserves Terraform's `.terraform/` provider directory but refreshes the remaining source files so renamed/deleted files do not remain stale. Git is still useful for normal source control, but it is not a controller runtime prerequisite.
 
 ## Runtime logs
 
@@ -323,26 +349,17 @@ Controller code must not intentionally write Vault tokens or managed plaintext p
 
 ## Administrator managed-resource check
 
-After testing, cleanup, or a recovery operation, an administrator can inspect the
-authoritative DBaaS inventory across Vault, Kubernetes, Terraform state, and Ops
-Manager with:
+After testing, cleanup, or a recovery operation, an administrator can inspect the authoritative DBaaS inventory across Vault, Kubernetes, Terraform state, and Ops Manager with:
 
 ```bash
 python3 privateWorkerReplacementAdmin.py ListManagedResources
 ```
 
-The command reports active ReplicaSets/ShardedClusters, databases, managed
-accounts, MongoDB/MongoDBUser resources, DBaaS PVCs/PVs, controller
-Secrets/ConfigMaps, deployment locks, Ops Manager DBaaS projects and group
-Secrets, orphan/missing Ops Manager artifacts, and permanent controller
-infrastructure.
+The command reports active ReplicaSets/ShardedClusters, databases, managed accounts, MongoDB/MongoDBUser resources, DBaaS PVCs/PVs, controller Secrets/ConfigMaps, deployment locks, Ops Manager DBaaS projects and group Secrets, orphan/missing Ops Manager artifacts, and permanent controller infrastructure.
 
-Ops Manager entries include the project/group ID so an administrator can match a
-project to its `<PROJECT_ID>-group-secret`.
+Ops Manager entries include the project/group ID so an administrator can match a project to its `<PROJECT_ID>-group-secret`.
 
-Permanent controller infrastructure such as `tc-ops-manager-projects`, the
-Terraform backend state Secret, and the base `mongodb-development` Ops Manager
-project remains visible but does not prevent:
+Permanent controller infrastructure such as `tc-ops-manager-projects`, the Terraform backend state Secret, and the base `mongodb-development` Ops Manager project remains visible but does not prevent:
 
 ```text
 Status: CLEAN
@@ -354,8 +371,7 @@ Legitimate active DBaaS resources report:
 Status: MANAGED RESOURCES PRESENT
 ```
 
-Cross-plane leftovers or mismatches such as orphan Ops Manager projects, orphan
-group Secrets, or missing Ops Manager projects report:
+Cross-plane leftovers or mismatches—including orphan Ops Manager projects, orphan group Secrets, managed deployments missing an Ops Manager project, **or the permanent Ops Manager platform project itself being missing**—report:
 
 ```text
 Status: ATTENTION REQUIRED
@@ -365,16 +381,26 @@ The command is read-only; it does not delete or repair anything.
 
 ## Testing
 
+Fast unit/regression suite:
+
+```bash
+python3 -m unittest discover -s tests -p "test_*.py" -v
+```
+
 Show complete live-harness help without running tests:
 
 ```bash
 python3 tests/run_harness.py
 ```
 
-Fast unit/regression suite:
+Current live profile totals are derived from scenario definitions and protected by CLI regression tests:
 
-```bash
-python3 -m unittest discover -s tests -p "test_*.py" -v
+```text
+preflight    5
+replicaset  16
+sharded     19
+locking     11
+all         36
 ```
 
 Safe read-only live preflight:
@@ -391,7 +417,7 @@ Complete live acceptance run:
 python3 tests/run_harness.py --profile all --allow-changes
 ```
 
-The complete live harness covers ReplicaSet lifecycle, ShardedCluster lifecycle, database/account lifecycle, password rotation, Owner disable, shard expansion/contraction, the one-shard minimum, storage cleanup, asynchronous request polling, and deployment-lock concurrency. It is fail-fast and cleans successful temporary scenarios.
+The complete live harness covers ReplicaSet lifecycle, ShardedCluster lifecycle, database/account lifecycle, password rotation, Owner disable/re-enable, shard expansion/contraction, the one-shard minimum, storage cleanup, asynchronous request polling, and deployment-lock concurrency. It is fail-fast and cleans successful temporary scenarios.
 
 See `tests/README.md` for profile-by-profile details.
 
@@ -399,11 +425,41 @@ See `tests/README.md` for profile-by-profile details.
 
 **Terraform performs managed changes.**
 
-Python parses/validates requests, reads desired state and live status, coordinates lifecycle steps, waits for convergence, reports customer/admin results, and records logs. Managed MongoDB, Kubernetes, Vault, storage, account, and lock mutations remain Terraform-driven directly or through:
+Python parses/validates requests, reconstructs desired state from Vault, reads live status, coordinates lifecycle steps, waits for convergence, reports customer/admin results, and records logs. Managed MongoDB, Kubernetes, Vault, storage, account, and lock mutations remain Terraform-driven directly or through:
 
 ```text
 terraform-dbaas/scripts/lifecycle.sh
 ```
+
+Logical database materialization/deletion is invoked by Terraform through the integrated Helm chart in:
+
+```text
+terraform-dbaas/mongodb-chart/
+```
+
+### Python module responsibilities
+
+| Module | Responsibility |
+| --- | --- |
+| `cli.py` | Public command definitions, help, parsing, async submission, dispatch |
+| `admin_cli.py` | Administrator command definitions, help, parsing, dispatch |
+| `deployments.py` | ReplicaSet/ShardedCluster/shard mutation workflows |
+| `deployment_status.py` | Read-only deployment and shard status presentation |
+| `databases.py` | Database/account/credential mutation workflows |
+| `database_status.py` | Read-only database and account status presentation |
+| `credential_display.py` | Shared read-only Vault path/URL presentation |
+| `deployment_lock.py` | ShardedCluster mutation lock acquisition/release/validation |
+| `maintenance.py` | Cross-plane inventory classification, Reconcile, guarded recovery |
+| `admin_status.py` | Administrator inventory/status formatting |
+| `ops_manager.py` | Ops Manager project inventory/deletion and group-secret cleanup |
+| `terraform_runner.py` | Local Terraform source refresh, execution lock, init/apply |
+| `kube.py` | Read-only Kubernetes status/query/wait helpers |
+| `vault.py` | Read-only Vault inventory reconstruction |
+| `async_operations.py` | Detached operation journal/worker coordination |
+| `logging_component.py` | Structured controller logs and detailed operation diagnostics |
+| `runtime_paths.py` | Predictable log/state/cache path conventions |
+
+This separation is deliberate: mutation modules should not also become status/UI modules, and read-only status modules should not mutate managed service state.
 
 ## Documentation map
 
