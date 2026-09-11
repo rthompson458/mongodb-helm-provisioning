@@ -95,21 +95,21 @@ It verifies:
 
 It creates, changes, and deletes nothing.
 
-### ReplicaSet — 15 total checks
+### ReplicaSet — 16 total checks
 
 ```bash
 python3 tests/run_harness.py --profile replicaset --allow-changes
 ```
 
-The ReplicaSet scenario adds 10 lifecycle checks after preflight. It creates a temporary ReplicaSet and database, verifies database/account status, verifies blocked deletion while the database exists, rotates credentials, disables Owner, deletes the database, and deletes the temporary ReplicaSet.
+The ReplicaSet scenario adds 11 lifecycle checks after preflight. It creates a temporary ReplicaSet and database, verifies database/account status, verifies blocked deletion while the database exists, rotates credentials, disables and re-enables Owner, deletes the database, and deletes the temporary ReplicaSet.
 
-### ShardedCluster — 18 total checks
+### ShardedCluster — 19 total checks
 
 ```bash
 python3 tests/run_harness.py --profile sharded --allow-changes
 ```
 
-The ShardedCluster scenario adds 13 lifecycle checks after preflight. It exercises cluster creation, shard status, shard expansion, database creation, shard contraction, password rotation, Owner disable, database deletion, final-shard protection, and cluster deletion.
+The ShardedCluster scenario adds 14 lifecycle checks after preflight. It exercises cluster creation, shard status, shard expansion, database creation, shard contraction, password rotation, Owner disable/re-enable, database deletion, final-shard protection, and cluster deletion.
 
 ### Locking — 11 total checks
 
@@ -119,7 +119,7 @@ python3 tests/run_harness.py --profile locking --allow-changes
 
 The locking scenario adds 6 checks after preflight. It verifies that the Terraform-created ShardedCluster deployment lock appears during an active topology change, blocks conflicting work, disappears after completion, and leaves the cluster readable before cleanup.
 
-### Complete acceptance run — 34 total checks
+### Complete acceptance run — 36 total checks
 
 Run the full gauntlet only when broad end-to-end acceptance is needed:
 
@@ -203,7 +203,7 @@ At the end, the harness reports pass/fail totals plus elapsed time for each prof
 A successful complete run ends with:
 
 ```text
-HARNESS SUMMARY: 34 passed / 0 failed
+HARNESS SUMMARY: 36 passed / 0 failed
 ```
 
 ---
