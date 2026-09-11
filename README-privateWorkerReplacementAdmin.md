@@ -135,6 +135,7 @@ leftover that an administrator should investigate, including:
 Ops Manager project with no corresponding managed deployment
 <PROJECT_ID>-group-secret with no corresponding live project/deployment
 managed deployment with no corresponding Ops Manager project
+permanent Ops Manager platform project missing
 ```
 
 The command does not delete, reconcile, or repair anything.
@@ -221,7 +222,7 @@ Structured controller events are appended to:
 logs/controller/controller-YYYYMMDD.log
 ```
 
-Detailed Git/Terraform/worker diagnostics are appended to:
+Detailed Terraform/external-command/worker diagnostics are appended to:
 
 ```text
 logs/operations/operations-YYYYMMDD.log
@@ -241,7 +242,7 @@ logs/operations/work/<operation-id>.tmp
 
 When the worker reaches a terminal state, that transcript is appended as one block to the daily operations log and the temporary file is removed. This keeps concurrent worker output from becoming unreadably interleaved.
 
-The daily files are append-only and use the UTC date in the filename. Detailed Git/Terraform output is written here rather than to the customer or administrator terminal.
+The daily files are append-only and use the UTC date in the filename. Detailed Terraform/external-command output is written here rather than to the customer or administrator terminal.
 
 The JSON operation files are controller state, not logs. They are needed for operation status, interrupted-worker detection, test-harness polling, and safe recovery decisions.
 
@@ -269,7 +270,7 @@ python3 privateWorkerReplacementAdmin.py Reconcile
 
 For ShardedClusters, Reconcile refuses to run while a protected managed change is active so a broad Terraform apply cannot race with shard, database, or credential work.
 
-Routine Git/Terraform output is captured in the daily operations log instead of being printed to the administrator terminal.
+Routine Terraform/external-command output is captured in the daily operations log instead of being printed to the administrator terminal.
 
 ---
 
@@ -418,8 +419,10 @@ Shared lifecycle/support modules include:
 
 ```text
 privateWorkerReplacement/deployments.py
+privateWorkerReplacement/deployment_status.py
 privateWorkerReplacement/databases.py
 privateWorkerReplacement/database_status.py
+privateWorkerReplacement/credential_display.py
 privateWorkerReplacement/maintenance.py
 privateWorkerReplacement/ops_manager.py
 privateWorkerReplacement/deployment_lock.py
@@ -431,7 +434,7 @@ privateWorkerReplacement/kube.py
 privateWorkerReplacement/vault.py
 ```
 
-Managed infrastructure mutations remain Terraform-driven. The Python controller validates, coordinates, waits, reports, and logs; it does not bypass Terraform to directly mutate managed MongoDB/Vault/Kubernetes lifecycle state.
+Normal managed DBaaS desired-state mutations remain Terraform-driven. The Python controller validates, coordinates, waits, reports, and logs. Deployment teardown explicitly removes the per-deployment Ops Manager project and Operator-created group Secret because those cross-plane artifacts are not Terraform desired-state resources.
 
 ---
 
