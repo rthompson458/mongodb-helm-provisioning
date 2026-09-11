@@ -51,7 +51,7 @@ Use `--config FILE` only when another configuration file is intentionally select
 
 | Command | Purpose | Mutation |
 | --- | --- | --- |
-| `ListManagedResources` | List controller-managed resources and report whether managed resources are present | Read-only |
+| `ListManagedResources [--verbose]` | Show compact controller-managed resource/health summary; optionally append full object-name inventory | Read-only |
 | `ListOperations` | List recent asynchronous controller operations | Read-only |
 | `ListOperation OPERATION_ID` | Show detailed status for one asynchronous operation | Read-only |
 | `Reconcile` | Reapply complete Vault-backed desired state through Terraform | Yes |
@@ -64,54 +64,49 @@ These commands are deliberately not accepted by `privateWorkerReplacement.py`.
 
 ## 3. ListManagedResources
 
+Normal compact view:
+
 ```bash
 python3 privateWorkerReplacementAdmin.py ListManagedResources
+```
+
+Full forensic object-name view:
+
+```bash
+python3 privateWorkerReplacementAdmin.py ListManagedResources --verbose
 ```
 
 This is the read-only authoritative DBaaS inventory and zero-state check. It
 correlates state across Vault, Kubernetes, Terraform backend state, and Ops
 Manager rather than looking only at Kubernetes deployment objects.
 
-The summary includes counts for:
+The default output is grouped for fast operations use:
 
 ```text
-Managed deployments
-ReplicaSets
-ShardedClusters
-Databases
-Managed accounts
-MongoDB resources
-MongoDB users
-DBaaS PVCs
-DBaaS PVs
-Controller Secrets
-Controller ConfigMaps
-Deployment locks
-Ops Manager DBaaS projects
-Ops Manager group secrets
-Ops Manager orphan projects
-Orphan group secrets
-Missing Ops Manager projects
-Controller infrastructure ConfigMaps
-Terraform backend states
-Ops Manager platform project
-Ops Manager platform group secrets
+Managed Resources
+Platform Resources
+Health / Consistency
+Deployment Details
 ```
 
-Ops Manager project and group-secret entries include the project/group ID. For
-example:
+The grouped summary preserves every important count, including zero-valued
+health checks, without repeating long PVC/PV/Secret lists. `Deployment Details`
+shows each managed deployment, type, MongoDB resource, PVC/PV ownership counts,
+and managed database count.
+
+Use `--verbose` when exact object names or Ops Manager project/group IDs are
+needed for troubleshooting. The verbose section appends non-empty categories
+such as PVCs, PVs, controller Secrets, Ops Manager projects, and group Secrets
+without changing the compact summary above it.
+
+For example, verbose output can include:
 
 ```text
-Ops Manager platform project:
-  mongodb-development (Project ID: 6a973d4e12c067880c465361)
-
-Orphan group secrets:
-  6aa408678225d417ab4d6929-group-secret
-  (Project ID: 6aa408678225d417ab4d6929)
+Ops Manager DBaaS projects: RS7 (Project ID: rs7-id)
+Ops Manager group secrets: rs7-id-group-secret (Project ID: rs7-id)
 ```
 
-The exact line wrapping is terminal-dependent, but the project ID is always
-included in the inventory value.
+Long value lists wrap with a hanging indent for terminal readability.
 
 ### Status meanings
 
@@ -140,7 +135,7 @@ managed deployment with no corresponding Ops Manager project
 permanent Ops Manager platform project missing
 ```
 
-The count table always shows every inventory category, including categories with a zero count, so an administrator can see that the full inventory was checked. The detail section repeats only non-empty categories and wraps long value lists with a hanging indent. This keeps the output complete without duplicating dozens of empty `None` rows.
+The compact grouped summary always shows the important inventory and health counts, including zero-valued consistency checks. The default view does not dump low-level object names; use `--verbose` to append the full non-empty object inventory when forensic detail is needed.
 
 The command does not delete, reconcile, or repair anything.
 
