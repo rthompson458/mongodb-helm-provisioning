@@ -75,6 +75,16 @@ class AdminStatusTests(unittest.TestCase):
             text,
         )
 
+    def test_empty_detail_categories_are_explicitly_shown_as_none(self) -> None:
+        text = self._capture(_resources())
+
+        self.assertIn("Managed deployments:\n  None", text)
+        self.assertIn("ReplicaSets:\n  None", text)
+        self.assertIn("ShardedClusters:\n  None", text)
+        self.assertIn("Databases:\n  None", text)
+        self.assertIn("Ops Manager orphan projects:\n  None", text)
+        self.assertIn("Ops Manager platform group secrets:\n  None", text)
+
     def test_nonempty_inventory_reports_neutral_status_and_ids(self) -> None:
         resources = _resources(
             managed_deployments=["RS7"],
