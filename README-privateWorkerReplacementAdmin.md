@@ -140,7 +140,7 @@ managed deployment with no corresponding Ops Manager project
 permanent Ops Manager platform project missing
 ```
 
-The detail section always shows every inventory category. Empty categories stay compact on one line, such as `ReplicaSets: None`; categories with entries expand underneath their heading. This makes it clear every category was checked without giving empty categories unnecessary vertical space.
+The count table always shows every inventory category, including categories with a zero count, so an administrator can see that the full inventory was checked. The detail section repeats only non-empty categories and wraps long value lists with a hanging indent. This keeps the output complete without duplicating dozens of empty `None` rows.
 
 The command does not delete, reconcile, or repair anything.
 
