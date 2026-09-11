@@ -278,44 +278,6 @@ def managed_resource_inventory(
     }
 
 
-def list_managed_resources(
-    config: dict[str, Any],
-    vault: VaultClient,
-) -> None:
-    """Print a concise read-only administrator inventory and zero-state result."""
-
-    resources = managed_resource_inventory(config, vault)
-    labels = [
-        ("Managed deployments", "managed_deployments"),
-        ("MongoDB resources", "mongodb_resources"),
-        ("MongoDB users", "mongodb_users"),
-        ("PVCs", "pvcs"),
-        ("PVs", "pvs"),
-        ("Deployment locks", "deployment_locks"),
-    ]
-    clean = all(not resources[key] for _, key in labels)
-
-    print("privateWorkerReplacement Managed Resource Inventory")
-    print()
-    for label, key in labels:
-        print(f"{label + ':':<21} {len(resources[key])}")
-
-    print()
-    print(f"Status: {'CLEAN' if clean else 'ATTENTION REQUIRED'}")
-
-    if clean:
-        return
-
-    for label, key in labels:
-        names = resources[key]
-        if not names:
-            continue
-        print()
-        print(f"{label}:")
-        for name in names:
-            print(f"  {name}")
-
-
 def reconcile(config: dict[str, Any], vault: VaultClient) -> None:
     """Reapply complete Vault-backed desired state and verify convergence."""
     inventory = vault.load_inventory()
