@@ -132,7 +132,7 @@ class AdminStatusTests(unittest.TestCase):
         self.assertIn("Deployment Details", text)
         self.assertRegex(
             text,
-            r"(?m)^RS7\s+ReplicaSet\s+rs7\s+1\s+1\s+1$",
+            r"(?m)^RS7\s+ReplicaSet\s+rs7\s+1\s+1\s+1\s*$",
         )
         self.assertNotIn("Project ID: rs7-id", text)
         self.assertNotIn("data-rs7-0", text)
@@ -171,10 +171,10 @@ class AdminStatusTests(unittest.TestCase):
 
         text = self._capture(resources)
 
-        self.assertRegex(text, r"(?m)^RS1\s+ReplicaSet\s+rs1\s+3\s+3\s+0$")
+        self.assertRegex(text, r"(?m)^RS1\s+ReplicaSet\s+rs1\s+3\s+3\s+0\s*$")
         self.assertRegex(
             text,
-            r"(?m)^SC2\s+ShardedCluster\s+sc2\s+6\s+6\s+0$",
+            r"(?m)^SC2\s+ShardedCluster\s+sc2\s+6\s+6\s+0\s*$",
         )
 
     def test_verbose_appends_full_object_names_and_project_ids(self) -> None:
