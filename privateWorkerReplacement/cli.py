@@ -173,7 +173,7 @@ Each managed database gets exactly three accounts:
   <Database>_read       -> read
 
 Database inventory/status commands intentionally do not mix in account details.
-Use ListDatabaseAccounts when you need roles, account status, rotation timing,
+Use ListDatabaseAccounts when you need roles, account status, rotation due timing,
 or browser-ready Vault credential URLs.
 
 Database commands can omit the deployment only when exactly one managed
