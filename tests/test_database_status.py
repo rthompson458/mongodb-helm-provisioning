@@ -45,7 +45,7 @@ class DatabaseStatusTests(unittest.TestCase):
         self.assertIn("HouseInfo", text)
         self.assertIn("Ready", text)
         self.assertNotIn("HouseInfo_owner", text)
-        self.assertNotIn("ROTATES IN", text)
+        self.assertNotIn("ROTATION DUE IN", text)
 
     def test_list_database_shows_unavailable_when_parent_is_not_running(self) -> None:
         vault = FakeVault(deployment_inventory(with_db=True))
@@ -142,7 +142,7 @@ class DatabaseStatusTests(unittest.TestCase):
         )
 
         self.assertIn("HouseInfo_owner", text)
-        self.assertIn("ROTATES IN", text)
+        self.assertIn("ROTATION DUE IN", text)
         self.assertIn("Last rotated:", text)
         self.assertIn(
             "http://127.0.0.1:8200/ui/vault/secrets/secret/show/",
