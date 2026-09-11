@@ -346,6 +346,8 @@ DeleteDatabase
 
 They return after the request has been accepted, then complete through a detached local worker. The customer does not need an internal operation ID.
 
+Because every Terraform apply receives the complete Vault-backed desired-state inventory, mutating controller commands are serialized across the current private-worker host. A second mutation can be accepted while another is running, but its worker waits for the shared desired-state mutation lock before loading and changing inventory. Read-only status commands remain available throughout. This prevents an older worker from re-applying a stale inventory snapshot and accidentally removing a newer worker's changes.
+
 An AddDatabase acknowledgement is service-oriented, for example:
 
 ```text
