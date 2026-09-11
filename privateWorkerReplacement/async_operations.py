@@ -235,8 +235,9 @@ def launch_operation(
         *worker_arguments,
     ]
 
-    # Environment context lets low-level Terraform/Git diagnostic blocks identify
-    # which async request produced them without exposing the ID to DBaaS users.
+    # Environment context lets low-level Terraform/external-command diagnostic
+    # blocks identify which async request produced them without exposing the
+    # internal operation ID to DBaaS users.
     worker_env = os.environ.copy()
     worker_env["TC_OPERATION_ID"] = operation_id
     worker_env["TC_OPERATION_COMMAND"] = command
