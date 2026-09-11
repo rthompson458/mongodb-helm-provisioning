@@ -84,6 +84,8 @@ def _configured_default_shards(config_path: Path) -> int | None:
 
 
 def _confirm(parser: argparse.ArgumentParser) -> None:
+    """Add the shared explicit-confirmation flag used by destructive commands."""
+
     parser.add_argument(
         "--confirm",
         action="store_true",
@@ -92,6 +94,8 @@ def _confirm(parser: argparse.ArgumentParser) -> None:
 
 
 def _deployment(parser: argparse.ArgumentParser, label: str = "DEPLOYMENT") -> None:
+    """Add one required managed-deployment positional argument."""
+
     parser.add_argument(
         "deployment",
         metavar=label,
