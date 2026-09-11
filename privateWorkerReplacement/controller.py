@@ -1,13 +1,18 @@
-"""Compatibility facade for privateWorkerReplacement lifecycle functions.
+"""Compatibility facade for public/admin controller functions.
 
-The implementation is intentionally split by responsibility:
-- deployments.py: ReplicaSet, ShardedCluster, and shard lifecycle/status
-- databases.py: database mutation, Vault credential, and rotation lifecycle
-- database_status.py: read-only database and account status
-- admin_status.py: administrator resource-inventory presentation
-- maintenance.py: reconciliation and recovery
+The implementation is split by responsibility so entry points can import one
+stable facade without turning one source file into a catch-all:
+
+- deployments.py: ReplicaSet/ShardedCluster lifecycle and shared validation
+- shards.py: ShardedCluster shard-topology mutation workflows
+- deployment_status.py: read-only deployment and shard presentation
+- databases.py: database/credential mutation workflows
+- database_status.py: read-only database and account presentation
+- admin_status.py: administrator managed-resource presentation
+- maintenance.py: controller-wide reconciliation and guarded recovery
 """
 
+from .admin_status import list_managed_resources
 from .databases import (
     add_database,
     delete_database,
@@ -22,11 +27,11 @@ from .database_status import (
 )
 from .deployments import (
     add_replica_set,
-    add_shard,
     add_sharded_cluster,
     delete_replica_set,
-    delete_shard,
     delete_sharded_cluster,
+)
+from .deployment_status import (
     list_deployment,
     list_deployments,
     list_replica_set,
@@ -35,7 +40,7 @@ from .deployments import (
     list_sharded_clusters,
     list_shards,
 )
-from .admin_status import list_managed_resources
+from .shards import add_shard, delete_shard
 from .maintenance import (
     reconcile,
     recover_deployment_lock,

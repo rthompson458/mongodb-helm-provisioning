@@ -2,13 +2,14 @@
 
 An intern reading this project should think of this file as the "toolbox."
 It contains validation, date/time formatting, subprocess execution, table
-printing, and resource-name helpers.  It must not contain MongoDB lifecycle
-policy.  Higher-level modules such as deployments.py and databases.py decide
+printing, and resource-name helpers. It must not contain MongoDB lifecycle
+policy. Higher-level modules such as deployments.py and databases.py decide
 *what* should happen; helpers here only perform small reusable operations.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -35,27 +36,41 @@ class ControllerError(RuntimeError):
 
 
 def utc_now() -> datetime:
+    """Return the current UTC time without microseconds for stable metadata."""
+
     return datetime.now(timezone.utc).replace(microsecond=0)
 
 
 def iso_utc(value: datetime) -> str:
-    return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    """Render a datetime as the UTC ISO-8601 form stored in Vault metadata."""
+
+    return (
+        value.astimezone(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def parse_utc(value: str) -> datetime:
+    """Parse one stored UTC timestamp or raise a controller-friendly error."""
+
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
         raise ControllerError(f"Invalid UTC timestamp in Vault metadata: {value}") from exc
-    return (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    return (
+        parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    ).astimezone(timezone.utc)
 
 
 def normalize_deployment(name: str) -> tuple[str, str]:
     """Validate a deployment name and return (lowercase_key, display_name).
 
-    Kubernetes resource names are stored using the lowercase key.  We also keep
+    Kubernetes resource names are stored using the lowercase key. We also keep
     the user's original capitalization for friendly command output.
     """
+
     display = name.strip()
     if not display or not DEPLOYMENT_RE.fullmatch(display):
         raise ControllerError(
@@ -66,11 +81,14 @@ def normalize_deployment(name: str) -> tuple[str, str]:
 
 
 def normalize_replica_set(name: str) -> tuple[str, str]:
+    """Compatibility alias for callers that still use ReplicaSet terminology."""
+
     return normalize_deployment(name)
 
 
 def normalize_database(name: str) -> tuple[str, str]:
-    """Validate a database name and return its key and display form."""
+    """Validate a database name and return its lowercase key and display form."""
+
     display = name.strip()
     if not display or not DATABASE_RE.fullmatch(display):
         raise ControllerError(
@@ -80,26 +98,40 @@ def normalize_database(name: str) -> tuple[str, str]:
 
 
 def normalize_account_type(value: str) -> str:
+    """Normalize Owner/Read/ReadWrite input to the internal account-type key."""
+
     key = value.strip().lower()
     if key not in ACCOUNT_TYPES:
-        raise ControllerError("ACCOUNT_TYPE must be Owner, Read, or ReadWrite. Matching is case-insensitive.")
+        raise ControllerError(
+            "ACCOUNT_TYPE must be Owner, Read, or ReadWrite. Matching is case-insensitive."
+        )
     return key
 
 
 def run_process(
-    command: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None,
-    input_text: str | None = None, capture: bool = False, check: bool = True,
+    command: list[str],
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    input_text: str | None = None,
+    capture: bool = False,
+    check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     """Run an external command and convert common failures to ControllerError.
 
-    Most real work eventually reaches tools such as terraform, kubectl, git, or
-    docker.  Centralizing subprocess handling keeps error behavior consistent.
+    Most real work eventually reaches tools such as terraform, kubectl, or
+    docker. Centralizing subprocess handling keeps error behavior consistent.
     """
 
     try:
         result = subprocess.run(
-            command, cwd=cwd, env=env, input=input_text, text=True,
-            capture_output=capture, check=False,
+            command,
+            cwd=cwd,
+            env=env,
+            input=input_text,
+            text=True,
+            capture_output=capture,
+            check=False,
         )
     except FileNotFoundError as exc:
         raise ControllerError(f"Required executable was not found: {command[0]}") from exc
@@ -112,7 +144,8 @@ def run_process(
 
 
 def rotation_remaining(rotated_at: str, rotation_days: int) -> str:
-    """Return a user-friendly countdown until the next password rotation."""
+    """Return a user-friendly countdown until the next rotation is due."""
+
     remaining = parse_utc(rotated_at) + timedelta(days=rotation_days) - utc_now()
     seconds = int(remaining.total_seconds())
     if seconds <= 0:
@@ -126,13 +159,17 @@ def rotation_remaining(rotated_at: str, rotation_days: int) -> str:
 
 def print_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> None:
     """Print a simple aligned text table without adding external dependencies."""
+
     if not rows:
         return
-    widths = [max(len(headers[i]), max(len(row[i]) for row in rows)) for i in range(len(headers))]
-    print("  ".join(headers[i].ljust(widths[i]) for i in range(len(headers))))
-    print("  ".join("-" * widths[i] for i in range(len(headers))))
+    widths = [
+        max(len(headers[index]), max(len(row[index]) for row in rows))
+        for index in range(len(headers))
+    ]
+    print("  ".join(headers[index].ljust(widths[index]) for index in range(len(headers))))
+    print("  ".join("-" * widths[index] for index in range(len(headers))))
     for row in rows:
-        print("  ".join(row[i].ljust(widths[i]) for i in range(len(row))))
+        print("  ".join(row[index].ljust(widths[index]) for index in range(len(row))))
 
 
 def account_resource_name(deployment_key: str, db_key: str, account_key: str) -> str:
@@ -142,24 +179,35 @@ def account_resource_name(deployment_key: str, db_key: str, account_key: str) ->
     names must be RFC 1123 compatible. Only the Kubernetes-facing database
     segment is changed; the inventory key and digest input remain unchanged.
     """
-    import hashlib
-    digest = hashlib.md5(f"{deployment_key}/{db_key}/{account_key}".encode()).hexdigest()[:6]
+
+    digest = hashlib.md5(
+        f"{deployment_key}/{db_key}/{account_key}".encode()
+    ).hexdigest()[:6]
     db_resource_key = db_key.lower().replace("_", "-")
-    return f"tc-{deployment_key.lower()[:8]}-{db_resource_key[:10]}-{account_key.lower()}-{digest}"
+    return (
+        f"tc-{deployment_key.lower()[:8]}-{db_resource_key[:10]}-"
+        f"{account_key.lower()}-{digest}"
+    )
 
 
 def database_rows(
     deployment: dict[str, Any], db: dict[str, Any], rotation_days: int
 ) -> list[tuple[str, ...]]:
-    """Build the three display rows used by ListDatabase/ListDatabases."""
+    """Build the three account rows used by ListDatabaseAccounts."""
 
     rotates = rotation_remaining(db["rotated_at"], rotation_days)
     rows = []
     for key in ("owner", "readwrite", "read"):
         account = ACCOUNT_TYPES[key]
         status = "Disabled" if key == "owner" and db["owner_disabled"] else "Enabled"
-        rows.append((
-            deployment["display_name"], db["display_name"],
-            f"{db['display_name']}_{account['suffix']}", account["display"], status, rotates,
-        ))
+        rows.append(
+            (
+                deployment["display_name"],
+                db["display_name"],
+                f"{db['display_name']}_{account['suffix']}",
+                account["display"],
+                status,
+                rotates,
+            )
+        )
     return rows

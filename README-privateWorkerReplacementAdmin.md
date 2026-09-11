@@ -4,6 +4,8 @@
 
 Use the customer CLI for normal deployment, shard, database, credential, and service-status work. Use the administrator CLI for operation diagnostics, reconciliation, managed-resource inventory, and exceptional recovery.
 
+Customer and administrator mutations share one controller-wide desired-state serialization boundary on the current private-worker host. This protects the complete Vault-backed Terraform inventory from stale-snapshot/lost-update races while leaving read-only status and diagnostic commands available.
+
 The executable split is an interface boundary, not an authorization boundary. Production must also restrict administrator host access, Kubernetes privileges, Vault policy, and Terraform backend access.
 
 ---
@@ -49,7 +51,7 @@ Use `--config FILE` only when another configuration file is intentionally select
 
 | Command | Purpose | Mutation |
 | --- | --- | --- |
-| `ListManagedResources` | List controller-managed resources and report whether managed resources are present | Read-only |
+| `ListManagedResources [--verbose]` | Show compact controller-managed resource/health summary; optionally append full object-name inventory | Read-only |
 | `ListOperations` | List recent asynchronous controller operations | Read-only |
 | `ListOperation OPERATION_ID` | Show detailed status for one asynchronous operation | Read-only |
 | `Reconcile` | Reapply complete Vault-backed desired state through Terraform | Yes |
@@ -62,54 +64,49 @@ These commands are deliberately not accepted by `privateWorkerReplacement.py`.
 
 ## 3. ListManagedResources
 
+Normal compact view:
+
 ```bash
 python3 privateWorkerReplacementAdmin.py ListManagedResources
+```
+
+Full forensic object-name view:
+
+```bash
+python3 privateWorkerReplacementAdmin.py ListManagedResources --verbose
 ```
 
 This is the read-only authoritative DBaaS inventory and zero-state check. It
 correlates state across Vault, Kubernetes, Terraform backend state, and Ops
 Manager rather than looking only at Kubernetes deployment objects.
 
-The summary includes counts for:
+The default output is grouped for fast operations use:
 
 ```text
-Managed deployments
-ReplicaSets
-ShardedClusters
-Databases
-Managed accounts
-MongoDB resources
-MongoDB users
-DBaaS PVCs
-DBaaS PVs
-Controller Secrets
-Controller ConfigMaps
-Deployment locks
-Ops Manager DBaaS projects
-Ops Manager group secrets
-Ops Manager orphan projects
-Orphan group secrets
-Missing Ops Manager projects
-Controller infrastructure ConfigMaps
-Terraform backend states
-Ops Manager platform project
-Ops Manager platform group secrets
+Managed Resources
+Platform Resources
+Health / Consistency
+Deployment Details
 ```
 
-Ops Manager project and group-secret entries include the project/group ID. For
-example:
+The grouped summary preserves every important count, including zero-valued
+health checks, without repeating long PVC/PV/Secret lists. `Deployment Details`
+shows each managed deployment, type, MongoDB resource, PVC/PV ownership counts,
+and managed database count.
+
+Use `--verbose` when exact object names or Ops Manager project/group IDs are
+needed for troubleshooting. The verbose section appends non-empty categories
+such as PVCs, PVs, controller Secrets, Ops Manager projects, and group Secrets
+without changing the compact summary above it.
+
+For example, verbose output can include:
 
 ```text
-Ops Manager platform project:
-  mongodb-development (Project ID: 6a973d4e12c067880c465361)
-
-Orphan group secrets:
-  6aa408678225d417ab4d6929-group-secret
-  (Project ID: 6aa408678225d417ab4d6929)
+Ops Manager DBaaS projects: RS7 (Project ID: rs7-id)
+Ops Manager group secrets: rs7-id-group-secret (Project ID: rs7-id)
 ```
 
-The exact line wrapping is terminal-dependent, but the project ID is always
-included in the inventory value.
+Long value lists wrap with a hanging indent for terminal readability.
 
 ### Status meanings
 
@@ -135,7 +132,10 @@ leftover that an administrator should investigate, including:
 Ops Manager project with no corresponding managed deployment
 <PROJECT_ID>-group-secret with no corresponding live project/deployment
 managed deployment with no corresponding Ops Manager project
+permanent Ops Manager platform project missing
 ```
+
+The compact grouped summary always shows the important inventory and health counts, including zero-valued consistency checks. The default view does not dump low-level object names; use `--verbose` to append the full non-empty object inventory when forensic detail is needed.
 
 The command does not delete, reconcile, or repair anything.
 
@@ -221,7 +221,7 @@ Structured controller events are appended to:
 logs/controller/controller-YYYYMMDD.log
 ```
 
-Detailed Git/Terraform/worker diagnostics are appended to:
+Detailed Terraform/external-command/worker diagnostics are appended to:
 
 ```text
 logs/operations/operations-YYYYMMDD.log
@@ -241,7 +241,7 @@ logs/operations/work/<operation-id>.tmp
 
 When the worker reaches a terminal state, that transcript is appended as one block to the daily operations log and the temporary file is removed. This keeps concurrent worker output from becoming unreadably interleaved.
 
-The daily files are append-only and use the UTC date in the filename. Detailed Git/Terraform output is written here rather than to the customer or administrator terminal.
+The daily files are append-only and use the UTC date in the filename. Detailed Terraform/external-command output is written here rather than to the customer or administrator terminal.
 
 The JSON operation files are controller state, not logs. They are needed for operation status, interrupted-worker detection, test-harness polling, and safe recovery decisions.
 
@@ -269,7 +269,7 @@ python3 privateWorkerReplacementAdmin.py Reconcile
 
 For ShardedClusters, Reconcile refuses to run while a protected managed change is active so a broad Terraform apply cannot race with shard, database, or credential work.
 
-Routine Git/Terraform output is captured in the daily operations log instead of being printed to the administrator terminal.
+Routine Terraform/external-command output is captured in the daily operations log instead of being printed to the administrator terminal.
 
 ---
 
@@ -418,8 +418,11 @@ Shared lifecycle/support modules include:
 
 ```text
 privateWorkerReplacement/deployments.py
+privateWorkerReplacement/shards.py
+privateWorkerReplacement/deployment_status.py
 privateWorkerReplacement/databases.py
 privateWorkerReplacement/database_status.py
+privateWorkerReplacement/credential_display.py
 privateWorkerReplacement/maintenance.py
 privateWorkerReplacement/ops_manager.py
 privateWorkerReplacement/deployment_lock.py
@@ -427,11 +430,12 @@ privateWorkerReplacement/terraform_runner.py
 privateWorkerReplacement/async_operations.py
 privateWorkerReplacement/logging_component.py
 privateWorkerReplacement/runtime_paths.py
+privateWorkerReplacement/mutation_lock.py
 privateWorkerReplacement/kube.py
 privateWorkerReplacement/vault.py
 ```
 
-Managed infrastructure mutations remain Terraform-driven. The Python controller validates, coordinates, waits, reports, and logs; it does not bypass Terraform to directly mutate managed MongoDB/Vault/Kubernetes lifecycle state.
+Normal managed DBaaS desired-state mutations remain Terraform-driven. The Python controller validates, coordinates, waits, reports, and logs. Deployment teardown explicitly removes the per-deployment Ops Manager project and Operator-created group Secret because those cross-plane artifacts are not Terraform desired-state resources.
 
 ---
 
@@ -445,6 +449,7 @@ This proof of concept establishes a clear interface and recovery model. A produc
 - Kubernetes RBAC appropriate to customer vs administrator workflows;
 - Vault policies appropriate to credential consumers vs administrators;
 - operational approval/runbook requirements for destructive recovery;
+- external scheduling/automation for enforcing the configured password-rotation cadence;
 - backup/retention policy for operation state if local worker state remains part of the production design.
 
 The local `logs/` convention makes development/support evidence easy to find; production can later map the same controller/operations distinction onto durable worker storage or centralized logging without changing the customer CLI contract.

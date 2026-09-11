@@ -1,3 +1,12 @@
+{{/*
+This post-install/post-upgrade hook materializes every desired managed database.
+MongoDB does not retain a truly empty database, so the Job creates only the
+internal placeholder collection when necessary.
+
+Hook weight +10 is intentional. The destructive-operation hook runs first at
+weight -10, allowing DeleteDatabase to drop a database before this provisioner
+reconciles the remaining desired database list.
+*/}}
 apiVersion: batch/v1
 kind: Job
 

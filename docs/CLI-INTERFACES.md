@@ -89,13 +89,13 @@ The customer receives a concise acknowledgement and a normal resource-status com
 - internal operation IDs;
 - worker PIDs;
 - operation-state files;
-- raw Git/Terraform output;
+- raw Terraform/external-command output;
 - Terraform recovery commands;
 - deployment-lock recovery;
 - orphaned-state recovery;
 - controller-wide Reconcile.
 
-`RotatePasswords`, `DisableOwner`, and `EnableOwner` remain synchronous, but their Git/Terraform implementation output is captured in the operations log rather than displayed on the customer terminal. `EnableOwner` restores the Owner account using the existing managed credential and does not rotate its password.
+`RotatePasswords`, `DisableOwner`, and `EnableOwner` remain synchronous, but their Terraform/external-command implementation output is captured in the operations log rather than displayed on the customer terminal. `EnableOwner` restores the Owner account using the existing managed credential and does not rotate its password.
 
 `ListDatabaseAccounts` provides the complete Vault browser URLs for each managed credential, along with the logical Vault paths.
 
@@ -146,13 +146,14 @@ MANAGED RESOURCES PRESENT
 
 ATTENTION REQUIRED
   Cross-plane leftovers or mismatches were detected, such as an orphan Ops
-  Manager project, orphan group Secret, or missing expected Ops Manager project.
+  Manager project, orphan group Secret, missing expected DBaaS project, or the
+  permanent Ops Manager platform project itself being missing.
 ```
 
 
 The shorter name `ListResources` is intentionally not supported because it could imply a cluster-wide resource listing.
 
-`ListOperations` and `ListOperation` expose the private asynchronous operation journal used for troubleshooting and recovery. Detailed Git/Terraform output is still kept in the operations log rather than routinely printed on the admin terminal.
+`ListOperations` and `ListOperation` expose the private asynchronous operation journal used for troubleshooting and recovery. Detailed Terraform/external-command output is still kept in the operations log rather than routinely printed on the admin terminal.
 
 ## Asynchronous execution model
 
@@ -198,7 +199,7 @@ logs/
       <operation-id>.tmp       # temporary while a detached worker runs
 ```
 
-The controller log is structured JSON Lines. The operations log contains detailed Git/Terraform and worker diagnostics. Both are append-only daily files using a UTC date.
+The controller log is structured JSON Lines. The operations log contains detailed Terraform/external-command and worker diagnostics. Both are append-only daily files using a UTC date.
 
 Operation-state JSON files are not human log files. They provide durable-enough local state for operation result tracking, interrupted-worker detection, acceptance-harness polling, database lifecycle status, and guarded recovery.
 
@@ -218,11 +219,14 @@ privateWorkerReplacementAdmin.py
   -> privateWorkerReplacement/admin_cli.py
      -> privateWorkerReplacement/admin_status.py
 
-Customer database status/account presentation:
+Customer read-only status presentation:
+  -> privateWorkerReplacement/deployment_status.py
   -> privateWorkerReplacement/database_status.py
+  -> privateWorkerReplacement/credential_display.py
 
 Both use shared lifecycle/support modules:
   privateWorkerReplacement/deployments.py
+  privateWorkerReplacement/shards.py
   privateWorkerReplacement/databases.py
   privateWorkerReplacement/maintenance.py
   privateWorkerReplacement/ops_manager.py
@@ -235,7 +239,7 @@ Both use shared lifecycle/support modules:
   privateWorkerReplacement/vault.py
 ```
 
-This avoids duplicating lifecycle logic and preserves the Terraform-driven mutation boundary.
+This avoids duplicating lifecycle logic and preserves the Terraform-driven mutation boundary. Normal DBaaS desired-state changes remain Terraform-owned. Deployment teardown separately removes the per-deployment Ops Manager project and Operator-created group Secret because those cross-plane artifacts are not Terraform desired-state resources.
 
 ## Security boundary
 

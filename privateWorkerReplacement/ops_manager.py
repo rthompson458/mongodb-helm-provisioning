@@ -1,4 +1,22 @@
-"""Read and manage Ops Manager projects used by privateWorkerReplacement."""
+"""Read and retire Ops Manager project artifacts used by DBaaS deployments.
+
+Each managed MongoDB deployment receives its own Ops Manager project. Terraform
+creates the MongoDB custom resource that causes the Operator to create/use that
+project, but the project itself and the Operator-generated <PROJECT_ID>-group-
+secret are not Terraform desired-state resources.
+
+This module therefore has a narrow cross-plane responsibility:
+- list Ops Manager projects without changing them;
+- refuse deletion of the permanent platform project;
+- delete one DBaaS project only during deployment teardown;
+- wait until Ops Manager confirms that project is absent; and
+- remove/verify the matching Operator-generated group Secret.
+
+The Ops Manager API is reached from inside the Ops Manager pod because that pod
+already has network access to the service endpoint. API credentials are passed
+to curl through stdin rather than command-line arguments so they are not exposed
+in the process argument list.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +32,13 @@ from .common import ControllerError, run_process
 def list_projects(
     config: dict[str, Any],
 ) -> tuple[str, list[dict[str, str]]]:
-    """Return the permanent platform project name and all Ops Manager projects."""
+    """Return the permanent project name plus every project in the organization.
+
+    Connection details come from the configured Ops Manager ConfigMap and API
+    credential Secret. This function is read-only and is also used by the admin
+    cross-plane inventory to distinguish platform, active DBaaS, and orphan
+    projects.
+    """
 
     project_config = kube.get_json(
         config,
@@ -124,12 +148,22 @@ def list_projects(
 
     return permanent_project, projects
 
+
 def delete_project(
     config: dict[str, Any],
     project_name: str,
     timeout: int = 180,
 ) -> None:
-    """Delete one DBaaS Ops Manager project and wait until it is absent."""
+    """Delete one DBaaS Ops Manager project and verify cross-plane cleanup.
+
+    The permanent platform project is never eligible for deletion. A missing
+    DBaaS project is treated as an idempotent success so retries are safe.
+
+    Ops Manager may return 202 while deletion continues asynchronously, so this
+    function polls project inventory until the project disappears. Only then is
+    the Operator-generated group Secret removed and verified absent. Callers do
+    not report deployment deletion success until this function returns.
+    """
 
     permanent_project, projects = list_projects(config)
 

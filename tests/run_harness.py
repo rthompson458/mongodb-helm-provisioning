@@ -32,22 +32,46 @@ from harness import (
 )
 
 
+def _profile_totals() -> dict[str, int]:
+    """Return the displayed check count for every live-test profile.
+
+    Every lifecycle profile includes the read-only preflight checks. Deriving
+    these values from each scenario's TEST_COUNT keeps --help synchronized with
+    the checks the harness actually executes when scenarios are added or removed.
+    """
+
+    preflight = scenario_preflight.TEST_COUNT
+    return {
+        "preflight": preflight,
+        "replicaset": preflight + scenario_replicaset.TEST_COUNT,
+        "sharded": preflight + scenario_sharded.TEST_COUNT,
+        "locking": preflight + scenario_locking.TEST_COUNT,
+        "all": (
+            preflight
+            + scenario_replicaset.TEST_COUNT
+            + scenario_sharded.TEST_COUNT
+            + scenario_locking.TEST_COUNT
+        ),
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the live-harness command-line parser."""
 
+    totals = _profile_totals()
     parser = argparse.ArgumentParser(
         description=(
             "Live end-to-end test harness for privateWorkerReplacement. "
             "Choose a profile explicitly before running tests."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog=f"""
 Profiles:
-  preflight    5 read-only checks. Creates, changes, and deletes nothing.
-  replicaset  15 checks total. Tests ReplicaSet + database lifecycle.
-  sharded     18 checks total. Tests ShardedCluster + shard + database lifecycle.
-  locking     11 checks total. Tests ShardedCluster mutation locking.
-  all         34 checks total. Runs the complete live acceptance gauntlet.
+  preflight   {totals['preflight']:2d} read-only checks. Creates, changes, and deletes nothing.
+  replicaset  {totals['replicaset']:2d} checks total. Tests ReplicaSet + database lifecycle.
+  sharded     {totals['sharded']:2d} checks total. Tests ShardedCluster + shard + database lifecycle.
+  locking     {totals['locking']:2d} checks total. Tests ShardedCluster mutation locking.
+  all         {totals['all']:2d} checks total. Runs the complete live acceptance gauntlet.
 
 Safety:
   Lifecycle profiles (replicaset, sharded, locking, all) require --allow-changes.
@@ -68,7 +92,7 @@ Common commands:
   Locking/concurrency only:
     python3 tests/run_harness.py --profile locking --allow-changes
 
-  FULL GAUNTLET - all 34 live acceptance checks:
+  FULL GAUNTLET - all {totals['all']} live acceptance checks:
     python3 tests/run_harness.py --profile all --allow-changes
 
 Configuration:
@@ -81,8 +105,9 @@ Configuration:
         choices=("preflight", "replicaset", "sharded", "locking", "all"),
         required=True,
         help=(
-            "Test group to run. Every profile starts with the 5 read-only preflight "
-            "checks. Use 'all' only for the complete 34-check live acceptance run."
+            "Test group to run. Every profile starts with the read-only preflight "
+            f"checks. Use 'all' only for the complete {totals['all']}-check live "
+            "acceptance run."
         ),
     )
     parser.add_argument(
@@ -129,21 +154,7 @@ def _require_live_opt_in(args: argparse.Namespace) -> None:
 def _total_tests(profile: str) -> int:
     """Return the exact number of PASS/FAIL checks for the selected profile."""
 
-    total = scenario_preflight.TEST_COUNT
-    if profile == "replicaset":
-        return total + scenario_replicaset.TEST_COUNT
-    if profile == "sharded":
-        return total + scenario_sharded.TEST_COUNT
-    if profile == "locking":
-        return total + scenario_locking.TEST_COUNT
-    if profile == "all":
-        return (
-            total
-            + scenario_replicaset.TEST_COUNT
-            + scenario_sharded.TEST_COUNT
-            + scenario_locking.TEST_COUNT
-        )
-    return total
+    return _profile_totals()[profile]
 
 
 def main(argv: list[str] | None = None) -> int:

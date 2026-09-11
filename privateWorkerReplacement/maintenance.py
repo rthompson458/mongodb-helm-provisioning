@@ -1,8 +1,16 @@
-"""Reconcile all Vault-backed desired state through Terraform.
+"""Administrator reconciliation, inventory, and guarded recovery workflows.
 
-Reconcile is the repair/convergence command.  It does not invent new desired
-state; it reloads the state already recorded in Vault, asks Terraform to apply
-it, then verifies Kubernetes resources converge.
+This module owns controller-wide administrative behavior that does not belong to
+one customer deployment command:
+
+- build the authoritative cross-plane managed-resource inventory;
+- reconcile Vault-backed desired state through Terraform;
+- recover a completed but stranded ShardedCluster topology lock; and
+- finish exceptional orphaned Terraform cleanup after independent safety checks.
+
+The administrator *presentation* of managed-resource inventory lives in
+admin_status.py. Keeping formatting out of this module prevents the inventory
+classification rules and terminal output rules from drifting into two copies.
 
 A live ShardedCluster mutation lock blocks Reconcile because a broad Terraform
 apply must not race with an AddShard/DeleteShard/database operation.
@@ -31,7 +39,7 @@ DEPLOYMENT_LOCK_PREFIX = "tc-deployment-lock-"
 
 
 def _kubernetes_names(items: list[dict[str, Any]]) -> list[str]:
-    """Return stable Kubernetes resource names for administrator reporting."""
+    """Return sorted Kubernetes resource names for administrator reporting."""
 
     names = [
         str(item.get("metadata", {}).get("name", "<unknown>"))
@@ -44,7 +52,21 @@ def managed_resource_inventory(
     config: dict[str, Any],
     vault: VaultClient,
 ) -> dict[str, list[str]]:
-    """Return a read-only inventory of controller-owned resources."""
+    """Return the authoritative read-only cross-plane DBaaS inventory.
+
+    The inventory intentionally compares multiple systems instead of trusting
+    one source in isolation:
+
+    - Vault says which deployments/databases/accounts should exist.
+    - Kubernetes says which controller-managed runtime objects actually exist.
+    - Ops Manager says which deployment projects exist and gives their IDs.
+    - Terraform backend/config objects identify permanent controller plumbing.
+
+    The returned dictionary separates permanent infrastructure, legitimate
+    active resources, and mismatch/orphan conditions. admin_status.py turns
+    those categories into CLEAN, MANAGED RESOURCES PRESENT, or ATTENTION
+    REQUIRED without repeating the classification logic here.
+    """
 
     inventory = vault.load_inventory()
 
@@ -52,34 +74,32 @@ def managed_resource_inventory(
         str(deployment.get("display_name", key))
         for key, deployment in inventory.items()
     )
-
     replica_sets = sorted(
         str(deployment.get("display_name", key))
         for key, deployment in inventory.items()
         if deployment.get("deployment_type") == "ReplicaSet"
     )
-
     sharded_clusters = sorted(
         str(deployment.get("display_name", key))
         for key, deployment in inventory.items()
         if deployment.get("deployment_type") == "ShardedCluster"
     )
 
-    databases = []
-    accounts = []
-
+    databases: list[str] = []
+    accounts: list[str] = []
     for key, deployment in inventory.items():
         deployment_name = str(deployment.get("display_name", key))
-
         for db_key, db in deployment.get("databases", {}).items():
             db_name = str(db.get("display_name", db_key))
             databases.append(f"{deployment_name}/{db_name}")
-
             for suffix in ("owner", "readWrite", "read"):
                 accounts.append(
                     f"{deployment_name}/{db_name}/{db_name}_{suffix}"
                 )
 
+    # Label selectors keep customer-unrelated Kubernetes objects out of the
+    # DBaaS inventory. Secrets/ConfigMaps need separate name-based handling
+    # below because some permanent or Operator-created objects use other labels.
     mongodb_resources = kube.list_json(
         config,
         "mongodb",
@@ -101,38 +121,35 @@ def managed_resource_inventory(
         label_selector=MANAGED_BY_SELECTOR,
         namespaced=False,
     )
-
     secrets = kube.list_json(config, "secret")
     configmaps = kube.list_json(config, "configmap")
 
     secret_names = _kubernetes_names(secrets)
     configmap_names = _kubernetes_names(configmaps)
 
-    # Controller-owned secrets such as admin/database credentials are active
-    # DBaaS resources. Ops Manager group secrets are classified separately
-    # because their project IDs let us detect orphaned Operator artifacts.
+    # Controller-owned credentials such as deployment admin/database-account
+    # Secrets are active DBaaS resources. Ops Manager group Secrets are handled
+    # separately because the Secret name itself contains the Ops Manager ID.
     controller_secrets = sorted(
         name
         for name in secret_names
         if name.startswith("tc-")
     )
-
     group_secrets = sorted(
         name
         for name in secret_names
         if name.endswith("-group-secret")
     )
 
-    # Terraform backend state and the shared Ops Manager ConfigMap are permanent
-    # controller infrastructure. They remain present when there are zero
-    # customer deployments and therefore must not make zero-state "dirty".
+    # These objects are permanent controller infrastructure. They remain when
+    # there are zero customer deployments and therefore must not make a clean
+    # zero-deployment environment look dirty.
     terraform_states = sorted(
         name
         for name in secret_names
         if name.startswith("tfstate-")
         and name.endswith(config["backend_secret_suffix"])
     )
-
     controller_infrastructure_configmaps = sorted(
         name
         for name in configmap_names
@@ -146,7 +163,6 @@ def managed_resource_inventory(
         and name != "tc-ops-manager-projects"
         and not name.startswith(DEPLOYMENT_LOCK_PREFIX)
     )
-
     locks = sorted(
         name
         for name in configmap_names
@@ -155,11 +171,7 @@ def managed_resource_inventory(
 
     permanent_project, projects = list_ops_manager_projects(config)
 
-    expected_project_names = {
-        name.lower()
-        for name in deployments
-    }
-
+    expected_project_names = {name.lower() for name in deployments}
     platform_project = next(
         (
             project
@@ -169,18 +181,19 @@ def managed_resource_inventory(
         None,
     )
 
+    # Every user-facing deployment gets a distinct non-platform Ops Manager
+    # project. Matching by case-insensitive display name lets us compare Vault
+    # desired state to Ops Manager without exposing internal Kubernetes names.
     nonplatform_projects = [
         project
         for project in projects
         if project["name"].lower() != permanent_project.lower()
     ]
-
     active_projects = [
         project
         for project in nonplatform_projects
         if project["name"].lower() in expected_project_names
     ]
-
     orphan_projects = [
         project
         for project in nonplatform_projects
@@ -191,11 +204,18 @@ def managed_resource_inventory(
         project["name"].lower()
         for project in nonplatform_projects
     }
-
     missing_ops_manager_projects = sorted(
         name
         for name in deployments
         if name.lower() not in actual_project_names
+    )
+
+    # The base project is platform infrastructure, but *missing* permanent
+    # infrastructure is still a fault. Keep that condition separate so the
+    # administrator formatter can raise ATTENTION REQUIRED instead of silently
+    # treating "Project ID: NOT FOUND" as healthy infrastructure.
+    missing_ops_manager_platform_project = (
+        [permanent_project] if platform_project is None else []
     )
 
     project_ids = {
@@ -203,22 +223,20 @@ def managed_resource_inventory(
         for project in projects
         if project["id"]
     }
-
     platform_project_id = (
         platform_project["id"]
         if platform_project is not None
         else ""
     )
-
     active_project_ids = {
         project["id"]
         for project in active_projects
         if project["id"]
     }
 
-    platform_group_secrets = []
-    active_group_secrets = []
-    orphan_group_secrets = []
+    platform_group_secrets: list[str] = []
+    active_group_secrets: list[str] = []
+    orphan_group_secrets: list[str] = []
 
     for secret_name in group_secrets:
         project_id = secret_name.removesuffix("-group-secret")
@@ -228,11 +246,10 @@ def managed_resource_inventory(
             platform_group_secrets.append(rendered)
         elif project_id in active_project_ids:
             active_group_secrets.append(rendered)
-        elif project_id not in project_ids:
-            orphan_group_secrets.append(rendered)
         else:
-            # A live non-platform Ops Manager project that is not represented in
-            # Vault is itself orphaned; keep its group secret in the orphan view.
+            # This includes both a Secret whose project ID no longer exists and
+            # a Secret for a live non-platform project that Vault does not know
+            # about. In either case the Secret is not legitimate active state.
             orphan_group_secrets.append(rendered)
 
     ops_manager_platform_project = (
@@ -242,12 +259,10 @@ def managed_resource_inventory(
         if platform_project is not None
         else [f"{permanent_project} (Project ID: NOT FOUND)"]
     )
-
     ops_manager_projects = sorted(
         f"{project['name']} (Project ID: {project['id']})"
         for project in active_projects
     )
-
     ops_manager_orphans = sorted(
         f"{project['name']} (Project ID: {project['id']})"
         for project in orphan_projects
@@ -275,56 +290,24 @@ def managed_resource_inventory(
         "ops_manager_group_secrets": sorted(active_group_secrets),
         "orphan_group_secrets": sorted(orphan_group_secrets),
         "missing_ops_manager_projects": missing_ops_manager_projects,
+        "missing_ops_manager_platform_project": missing_ops_manager_platform_project,
     }
-
-
-def list_managed_resources(
-    config: dict[str, Any],
-    vault: VaultClient,
-) -> None:
-    """Print a concise read-only administrator inventory and zero-state result."""
-
-    resources = managed_resource_inventory(config, vault)
-    labels = [
-        ("Managed deployments", "managed_deployments"),
-        ("MongoDB resources", "mongodb_resources"),
-        ("MongoDB users", "mongodb_users"),
-        ("PVCs", "pvcs"),
-        ("PVs", "pvs"),
-        ("Deployment locks", "deployment_locks"),
-    ]
-    clean = all(not resources[key] for _, key in labels)
-
-    print("privateWorkerReplacement Managed Resource Inventory")
-    print()
-    for label, key in labels:
-        print(f"{label + ':':<21} {len(resources[key])}")
-
-    print()
-    print(f"Status: {'CLEAN' if clean else 'ATTENTION REQUIRED'}")
-
-    if clean:
-        return
-
-    for label, key in labels:
-        names = resources[key]
-        if not names:
-            continue
-        print()
-        print(f"{label}:")
-        for name in names:
-            print(f"  {name}")
 
 
 def reconcile(config: dict[str, Any], vault: VaultClient) -> None:
     """Reapply complete Vault-backed desired state and verify convergence."""
+
     inventory = vault.load_inventory()
     if not inventory:
-        print("No privateWorkerReplacement-managed MongoDB deployments exist. Nothing to reconcile.")
+        print(
+            "No privateWorkerReplacement-managed MongoDB deployments exist. "
+            "Nothing to reconcile."
+        )
         return
 
-    # Reconcile touches the complete inventory.  Refuse to start while any
-    # ShardedCluster has a protected mutation in flight.
+    # Reconcile touches the complete inventory. Refuse to start while any
+    # ShardedCluster has a protected mutation in flight; otherwise a broad
+    # Terraform apply could race a narrower shard/database operation.
     active = []
     for key in sorted(inventory):
         deployment = inventory[key]
@@ -344,8 +327,9 @@ def reconcile(config: dict[str, Any], vault: VaultClient) -> None:
         )
 
     log_event("reconcile.requested", deployments=len(inventory))
-    # From this point forward Terraform owns the mutation.  Python only waits
-    # for the resulting Kubernetes state and reports it.
+
+    # From this point forward Terraform owns the mutation. Python only waits
+    # for the resulting Kubernetes state and reports whether it converged.
     apply_inventory(config, inventory)
     print("\nWaiting for managed deployments and accounts to converge ...")
 
@@ -360,7 +344,10 @@ def reconcile(config: dict[str, Any], vault: VaultClient) -> None:
 
         if dtype == "ShardedCluster":
             kube.wait_sharded_cluster_ready(
-                config, key, int(deployment["shard_count"]), timeout
+                config,
+                key,
+                int(deployment["shard_count"]),
+                timeout,
             )
         else:
             kube.wait_phase(config, "mongodb", key, "Running", timeout)
@@ -401,7 +388,6 @@ def reconcile(config: dict[str, Any], vault: VaultClient) -> None:
     print("\nReconcile complete.")
 
 
-
 def recover_deployment_lock(
     config: dict[str, Any],
     vault: VaultClient,
@@ -434,7 +420,7 @@ def recover_deployment_lock(
         )
     if lock["category"] != "topology" or lock["action"] not in {"AddShard", "DeleteShard"}:
         raise ControllerError(
-            f"RecoverDeploymentLock only supports topology locks. Active change: "
+            "RecoverDeploymentLock only supports topology locks. Active change: "
             f"{describe_deployment_lock(lock)}."
         )
 
@@ -491,6 +477,8 @@ def recover_deployment_lock(
         operation_id=lock["operation_id"],
     )
 
+    # Target only the lifecycle-operation resource. Recovery should release the
+    # exact stranded lock, not reconcile unrelated storage or topology state.
     release_deployment_lock(
         config,
         inventory,
@@ -515,7 +503,6 @@ def recover_deployment_lock(
     print("Deployment lock: Released")
 
 
-
 def recover_orphaned_resources(
     config: dict[str, Any],
     vault: VaultClient,
@@ -528,13 +515,13 @@ def recover_orphaned_resources(
     controller-managed Kubernetes/storage resources.
 
     Safety rules are intentionally strict:
-    - explicit --confirm is required,
-    - Vault inventory must already be completely empty,
+    - explicit --confirm is required;
+    - Vault inventory must already be completely empty; and
     - Kubernetes must contain no privateWorkerReplacement-managed MongoDB CRs.
 
     Only after both independent checks prove there is no live managed deployment
     does Terraform receive an empty desired-state inventory so it can finish
-    destroying any resources still recorded in the controller backend state.
+    destroying resources still recorded in the controller backend state.
     """
 
     if not confirmed:
@@ -556,7 +543,7 @@ def recover_orphaned_resources(
     live = kube.list_json(
         config,
         "mongodb",
-        label_selector="app.kubernetes.io/managed-by=privateWorkerReplacement",
+        label_selector=MANAGED_BY_SELECTOR,
     )
     if live:
         names = ", ".join(
@@ -581,7 +568,7 @@ def recover_orphaned_resources(
     remaining = kube.list_json(
         config,
         "mongodb",
-        label_selector="app.kubernetes.io/managed-by=privateWorkerReplacement",
+        label_selector=MANAGED_BY_SELECTOR,
     )
     if remaining:
         raise ControllerError(

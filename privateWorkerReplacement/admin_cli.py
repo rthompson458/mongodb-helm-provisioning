@@ -34,6 +34,7 @@ from .controller import (
     recover_orphaned_resources,
 )
 from .logging_component import configure_logging, log_event, log_exception
+from .mutation_lock import controller_state_mutation_lock
 from .vault import VaultClient
 
 # Keep these values separate on purpose. REPO_ROOT locates the administrator
@@ -42,6 +43,15 @@ from .vault import VaultClient
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_DISPLAY = "./dev.config"
 DEFAULT_CONFIG = Path(DEFAULT_CONFIG_DISPLAY)
+
+# Administrator mutations share the same complete Terraform/Vault desired state
+# as customer mutations, so they must participate in the same controller-wide
+# serialization boundary.
+ADMIN_MUTATING_COMMANDS = {
+    "RecoverDeploymentLock",
+    "RecoverOrphanedResources",
+    "Reconcile",
+}
 
 
 def _confirm(parser: argparse.ArgumentParser) -> None:
@@ -73,7 +83,7 @@ def _sub(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the platform-administrator CLI contract."""
+    """Build the complete platform-administrator CLI contract."""
 
     parser = argparse.ArgumentParser(
         prog="privateWorkerReplacementAdmin.py",
@@ -91,7 +101,7 @@ Use privateWorkerReplacement.py for normal:
   - service status
 
 Use this administrator program for:
-  - managed resource inventory and zero-state verification
+  - authoritative managed-resource inventory and zero-state verification
   - asynchronous operation diagnostics
   - controlled recovery after interrupted lifecycle work
   - controller-wide Terraform reconciliation
@@ -99,8 +109,8 @@ Use this administrator program for:
 Default configuration file:
   ./dev.config
 
-Detailed Git/Terraform output is written to the daily operations log instead of
-being dumped onto the administrator terminal.
+Detailed Terraform/external-command diagnostics are written to the daily
+operations log instead of being dumped onto the administrator terminal.
 
 Run this program with no command, or use -h/--help, to show this help.
 Use '<command> --help' for detailed command-specific help.
@@ -142,16 +152,23 @@ Normal DBaaS users should use:
 
     sp = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
 
-    _sub(
+    x = _sub(
         sp,
         "ListManagedResources",
-        "List controller-managed deployment resources and zero-state status.",
+        "List authoritative DBaaS resources and zero-state status.",
         "Read-only authoritative inventory across Vault, Kubernetes, Terraform "
-        "backend state, and Ops Manager. Shows deployment/database/account resources, "
-        "Ops Manager project and group-secret IDs, controller infrastructure, and "
-        "orphan or missing cross-plane artifacts. Permanent controller infrastructure "
-        "is visible but does not prevent CLEAN.",
-        "  python3 privateWorkerReplacementAdmin.py ListManagedResources",
+        "backend state, and Ops Manager. The default view shows compact grouped "
+        "counts, health/consistency status, and one row per managed deployment. "
+        "Permanent controller infrastructure remains visible without preventing "
+        "CLEAN; orphan or missing cross-plane state reports ATTENTION REQUIRED. "
+        "Use --verbose to append the full object-name inventory for troubleshooting.",
+        "  python3 privateWorkerReplacementAdmin.py ListManagedResources\n"
+        "  python3 privateWorkerReplacementAdmin.py ListManagedResources --verbose",
+    )
+    x.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Append full object-name inventory details after the compact summary.",
     )
 
     x = _sub(
@@ -175,7 +192,8 @@ Normal DBaaS users should use:
         "ListOperations",
         "List recent background controller operations.",
         "Shows up to 50 recent asynchronous controller operations with their "
-        "operation IDs, commands, scopes, results, and elapsed times.",
+        "operation IDs, commands, scopes, results, and elapsed times. This command "
+        "reads local operation state only and does not require MongoDB/Vault health.",
         "  python3 privateWorkerReplacementAdmin.py ListOperations",
     )
 
@@ -184,10 +202,11 @@ Normal DBaaS users should use:
         "RecoverDeploymentLock",
         "Release a completed ShardedCluster topology lock after validation.",
         "Exceptional recovery for an interrupted AddShard/DeleteShard that already "
-        "reached the lock's target topology. Before releasing the lock, the controller "
-        "verifies the recorded target, live MongoDB shardCount, surviving shard "
-        "readiness, config servers, mongos, and removed StatefulSets. The lock release "
-        "remains Terraform-driven.",
+        "reached the lock's target topology. Requires --confirm. Before releasing "
+        "the lock, the controller verifies the recorded target, live MongoDB "
+        "shardCount, surviving shard readiness, config servers, mongos, and removed "
+        "StatefulSets. Only the exact lifecycle lock release is applied through "
+        "Terraform; unrelated deployment state is not broadly reconciled.",
         "  python3 privateWorkerReplacementAdmin.py RecoverDeploymentLock SC9 --confirm",
     )
     x.add_argument(
@@ -201,11 +220,12 @@ Normal DBaaS users should use:
         sp,
         "RecoverOrphanedResources",
         "Finish Terraform cleanup after desired-state inventory is already empty.",
-        "Exceptional controller-state recovery. The command is allowed only when "
-        "Vault-backed managed deployment inventory is empty AND Kubernetes contains "
-        "no privateWorkerReplacement-managed MongoDB custom resources. If both checks pass, "
-        "Terraform converges the controller backend to empty desired state and finishes "
-        "destroying resources still tracked in state.",
+        "Exceptional asynchronous controller-state recovery. Requires --confirm. "
+        "The request is allowed only when Vault-backed managed deployment inventory "
+        "is empty AND Kubernetes contains no privateWorkerReplacement-managed MongoDB "
+        "custom resources. If both checks pass, Terraform converges the controller "
+        "backend to empty desired state and finishes destroying tracked leftovers. "
+        "Use ListOperation with the returned operation ID to monitor completion.",
         "  python3 privateWorkerReplacementAdmin.py RecoverOrphanedResources --confirm",
     )
     _confirm(x)
@@ -214,9 +234,11 @@ Normal DBaaS users should use:
         sp,
         "Reconcile",
         "Reapply all Vault-backed managed desired state through Terraform.",
-        "Reloads managed desired state from Vault, refreshes Terraform, reapplies the "
-        "complete controller-managed environment, and waits for convergence. Reconcile "
-        "refuses to run while a protected ShardedCluster change is active.",
+        "Reloads managed desired state from Vault, refreshes the local Terraform "
+        "execution cache, reapplies the complete controller-managed environment, "
+        "waits for deployments/accounts to converge, and reports each resulting "
+        "deployment. Reconcile refuses to run while a protected ShardedCluster "
+        "change is active.",
         "  python3 privateWorkerReplacementAdmin.py Reconcile",
     )
 
@@ -230,6 +252,20 @@ def _recover_orphans_worker_arguments(args: argparse.Namespace) -> list[str]:
     if args.confirm:
         values.append("--confirm")
     return values
+
+
+def _run_admin_action(
+    config: dict[str, object],
+    command: str,
+    action,
+) -> None:
+    """Run one administrator mutation under the shared desired-state lock."""
+
+    if command in ADMIN_MUTATING_COMMANDS:
+        with controller_state_mutation_lock(config, command):
+            action()
+        return
+    action()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -268,10 +304,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         # ListManagedResources combines Vault desired-state inventory with
-        # read-only Kubernetes queries. It performs no managed mutation.
+        # read-only Kubernetes/Ops Manager queries. It performs no mutation.
         if args.command == "ListManagedResources":
             vault = VaultClient(config)
-            list_managed_resources(config, vault)
+            list_managed_resources(config, vault, args.verbose)
             log_event("admin.command.succeeded", command=args.command)
             return 0
 
@@ -311,14 +347,19 @@ def main(argv: list[str] | None = None) -> int:
         vault = VaultClient(config)
         actions = {
             "RecoverDeploymentLock": lambda: recover_deployment_lock(
-                config, vault, args.deployment, args.confirm
+                config,
+                vault,
+                args.deployment,
+                args.confirm,
             ),
             "RecoverOrphanedResources": lambda: recover_orphaned_resources(
-                config, vault, args.confirm
+                config,
+                vault,
+                args.confirm,
             ),
             "Reconcile": lambda: reconcile(config, vault),
         }
-        actions[args.command]()
+        _run_admin_action(config, args.command, actions[args.command])
 
         if operation_id:
             mark_succeeded(config_path, operation_id)

@@ -52,6 +52,7 @@ from .controller import (
     rotate_passwords,
 )
 from .logging_component import configure_logging, log_event, log_exception
+from .mutation_lock import controller_state_mutation_lock
 from .vault import VaultClient
 
 # Keep these values separate on purpose. REPO_ROOT locates the controller code
@@ -60,6 +61,23 @@ from .vault import VaultClient
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_DISPLAY = "./dev.config"
 DEFAULT_CONFIG = Path(DEFAULT_CONFIG_DISPLAY)
+
+# Terraform applies the complete Vault-backed desired-state inventory. Serialize
+# every public mutation across the controller so an older worker cannot later
+# re-apply a stale inventory snapshot and erase a newer worker's changes.
+PUBLIC_MUTATING_COMMANDS = {
+    "AddReplicaSet",
+    "DeleteReplicaSet",
+    "AddShardedCluster",
+    "DeleteShardedCluster",
+    "AddShard",
+    "DeleteShard",
+    "AddDatabase",
+    "DeleteDatabase",
+    "RotatePasswords",
+    "DisableOwner",
+    "EnableOwner",
+}
 
 
 def _config_path_from_argv(argv: list[str]) -> Path:
@@ -84,6 +102,8 @@ def _configured_default_shards(config_path: Path) -> int | None:
 
 
 def _confirm(parser: argparse.ArgumentParser) -> None:
+    """Add the shared explicit-confirmation flag used by destructive commands."""
+
     parser.add_argument(
         "--confirm",
         action="store_true",
@@ -92,6 +112,8 @@ def _confirm(parser: argparse.ArgumentParser) -> None:
 
 
 def _deployment(parser: argparse.ArgumentParser, label: str = "DEPLOYMENT") -> None:
+    """Add one required managed-deployment positional argument."""
+
     parser.add_argument(
         "deployment",
         metavar=label,
@@ -169,7 +191,7 @@ Each managed database gets exactly three accounts:
   <Database>_read       -> read
 
 Database inventory/status commands intentionally do not mix in account details.
-Use ListDatabaseAccounts when you need roles, account status, rotation timing,
+Use ListDatabaseAccounts when you need roles, account status, rotation due timing,
 or browser-ready Vault credential URLs.
 
 Database commands can omit the deployment only when exactly one managed
@@ -290,7 +312,7 @@ Inventory:
         sp,
         "ListReplicaSets",
         "List managed ReplicaSets.",
-        "Lists only privateWorkerReplacement-managed ReplicaSet deployments.",
+        "Lists all privateWorkerReplacement-managed ReplicaSet deployments with live phase, topology, MongoDB version, and managed database count.",
         "  python3 privateWorkerReplacement.py ListReplicaSets",
     )
 
@@ -307,7 +329,7 @@ Inventory:
         sp,
         "ListShardedClusters",
         "List managed ShardedClusters.",
-        "Lists only privateWorkerReplacement-managed ShardedCluster deployments.",
+        "Lists all privateWorkerReplacement-managed ShardedCluster deployments with live phase, topology, MongoDB version, and managed database count.",
         "  python3 privateWorkerReplacement.py ListShardedClusters",
     )
 
@@ -415,7 +437,7 @@ Inventory:
         sp,
         "ListDatabaseAccounts",
         "Show the three managed accounts for one database.",
-        "Shows Owner, ReadWrite, and Read accounts, enabled/disabled state, rotation timing, last rotation, Vault paths, and complete browser-ready Vault URLs.",
+        "Shows Owner, ReadWrite, and Read accounts, enabled/disabled state, rotation due timing, last rotation, Vault paths, and complete browser-ready Vault URLs.",
         "  python3 privateWorkerReplacement.py ListDatabaseAccounts SC9 HouseInfo\n  python3 privateWorkerReplacement.py ListDatabaseAccounts HouseInfo    # only one deployment exists",
     )
     _database_target(x)
@@ -564,6 +586,20 @@ def _public_async_feedback(
     raise ControllerError(f"Command '{command}' is not configured for public async feedback.")
 
 
+def _run_action(
+    config: dict[str, object],
+    command: str,
+    action,
+) -> None:
+    """Run one public action with controller-wide serialization when mutating."""
+
+    if command in PUBLIC_MUTATING_COMMANDS:
+        with controller_state_mutation_lock(config, command):
+            action()
+        return
+    action()
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse and execute one customer command; no command prints full help."""
 
@@ -642,7 +678,7 @@ def main(argv: list[str] | None = None) -> int:
             "DisableOwner": lambda: disable_owner(config, vault, args.deployment_or_database, args.database, args.confirm),
             "EnableOwner": lambda: enable_owner(config, vault, args.deployment_or_database, args.database),
         }
-        actions[args.command]()
+        _run_action(config, args.command, actions[args.command])
 
         if operation_id:
             mark_succeeded(config_path, operation_id)

@@ -21,6 +21,7 @@ from .logging_component import log_event
 
 def base(config: dict[str, Any]) -> list[str]:
     """Build the common kubectl command prefix for the configured environment."""
+
     command = ["kubectl", "--kubeconfig", config["kubeconfig"]]
     if config["kube_context"]:
         command += ["--context", config["kube_context"]]
@@ -28,10 +29,18 @@ def base(config: dict[str, Any]) -> list[str]:
 
 
 def get_json(config: dict[str, Any], resource: str, name: str) -> dict[str, Any] | None:
-    """Return one Kubernetes resource as JSON, or None when it does not exist."""
+    """Return one namespaced Kubernetes resource as JSON, or None if absent."""
+
     result = run_process(
-        base(config) + [
-            "-n", config["mongodb_namespace"], "get", resource, name, "-o", "json"
+        base(config)
+        + [
+            "-n",
+            config["mongodb_namespace"],
+            "get",
+            resource,
+            name,
+            "-o",
+            "json",
         ],
         capture=True,
         check=False,
@@ -87,11 +96,15 @@ def list_json(
 
 
 def phase(config: dict[str, Any], deployment_key: str) -> str:
+    """Return a MongoDB custom resource's phase, or Absent if it is gone."""
+
     obj = get_json(config, "mongodb", deployment_key)
     return str(obj.get("status", {}).get("phase", "Unknown")) if obj else "Absent"
 
 
 def phase_message(config: dict[str, Any], deployment_key: str) -> str:
+    """Return the MongoDB Operator status message for one deployment, if any."""
+
     obj = get_json(config, "mongodb", deployment_key)
     if not obj:
         return ""
@@ -153,10 +166,14 @@ def wait_absent(
 
 
 def controller_user(deployment_key: str) -> str:
+    """Return the hidden controller-admin MongoDBUser resource name."""
+
     return f"tc-{deployment_key}-admin"
 
 
 def controller_connection_secret(deployment_key: str) -> str:
+    """Return the Operator connection Secret for the hidden controller admin."""
+
     return f"tc-{deployment_key}-admin-connection"
 
 
@@ -212,7 +229,7 @@ def sharded_cluster_status(
     """Return one combined status snapshot for a ShardedCluster.
 
     MongoDB creates separate StatefulSets for each shard, config servers, and
-    mongos.  The controller combines them so callers do not need to understand
+    mongos. The controller combines them so callers do not need to understand
     every Kubernetes object name.
     """
 

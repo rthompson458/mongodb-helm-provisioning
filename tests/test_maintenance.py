@@ -1,10 +1,8 @@
-"""Unit tests for Reconcile safety and convergence orchestration."""
+"""Unit tests for administrator inventory, Reconcile, and recovery safety."""
 
 from __future__ import annotations
 
-import io
 import unittest
-from contextlib import redirect_stdout
 from unittest.mock import patch
 
 from privateWorkerReplacement import maintenance, ops_manager
@@ -13,7 +11,7 @@ from helpers import FakeVault, deployment_inventory, online_sc_status, topology_
 
 
 class MaintenanceTests(unittest.TestCase):
-    """Verify Reconcile does not race with active ShardedCluster mutations."""
+    """Verify cross-plane inventory and guarded recovery/convergence behavior."""
 
     def setUp(self) -> None:
         self.config = {
@@ -66,7 +64,7 @@ class MaintenanceTests(unittest.TestCase):
                 '{"results":['
                 '{"id":"2","name":"RSTest"},'
                 '{"id":"1","name":"mongodb-development"}'
-                ']}'
+                "]}"
             ),
             stderr="",
         )
@@ -181,7 +179,6 @@ class MaintenanceTests(unittest.TestCase):
 
         secret_call = run_mock.call_args_list[1]
         secret_command = secret_call.args[0]
-
         self.assertIn("delete", secret_command)
         self.assertIn("secret", secret_command)
         self.assertIn("rs1-id-group-secret", secret_command)
@@ -225,101 +222,13 @@ class MaintenanceTests(unittest.TestCase):
         self.assertIn("Refusing to delete permanent", str(ctx.exception))
         run_mock.assert_not_called()
 
-    def test_list_managed_resources_reports_clean_zero_state(self) -> None:
-        vault = FakeVault({})
-
-        def fake_list(_config, resource, **kwargs):
-            self.assertIn(
-                resource,
-                {"mongodb", "mongodbuser", "pvc", "pv", "configmap", "secret"},
-            )
-            if resource == "pv":
-                self.assertFalse(kwargs.get("namespaced", True))
-            return []
-
-        output = io.StringIO()
-        with (
-            patch.object(maintenance.kube, "list_json", side_effect=fake_list),
-            patch.object(
-                maintenance,
-                "list_ops_manager_projects",
-                return_value=("mongodb-development", []),
-            ),
-            redirect_stdout(output),
-        ):
-            maintenance.list_managed_resources(self.config, vault)
-
-        text = output.getvalue()
-        self.assertRegex(text, r"(?m)^Managed deployments:\s+0$")
-        self.assertRegex(text, r"(?m)^MongoDB resources:\s+0$")
-        self.assertRegex(text, r"(?m)^MongoDB users:\s+0$")
-        self.assertRegex(text, r"(?m)^PVCs:\s+0$")
-        self.assertRegex(text, r"(?m)^PVs:\s+0$")
-        self.assertRegex(text, r"(?m)^Deployment locks:\s+0$")
-        self.assertIn("Status: CLEAN", text)
-
-    def test_list_managed_resources_reports_remaining_resource_names(self) -> None:
-        vault = FakeVault(
-            deployment_inventory(
-                deployment_type="ShardedCluster",
-                name="SC9",
-            )
-        )
-
-        def fake_list(_config, resource, **kwargs):
-            if resource == "mongodb":
-                return [{"metadata": {"name": "sc9"}}]
-            if resource == "mongodbuser":
-                return [{"metadata": {"name": "tc-sc9-admin"}}]
-            if resource == "pvc":
-                return [{"metadata": {"name": "data-sc9-0-0"}}]
-            if resource == "pv":
-                return [{"metadata": {"name": "sc9-shard-0"}}]
-            if resource == "configmap":
-                return [
-                    {"metadata": {"name": "unrelated-config"}},
-                    {"metadata": {"name": "tc-deployment-lock-sc9"}},
-                ]
-            if resource == "secret":
-                return []
-            raise AssertionError(resource)
-
-        output = io.StringIO()
-        with (
-            patch.object(maintenance.kube, "list_json", side_effect=fake_list),
-            patch.object(
-                maintenance,
-                "list_ops_manager_projects",
-                return_value=(
-                    "mongodb-development",
-                    [{"id": "sc9-id", "name": "SC9"}],
-                ),
-            ),
-            redirect_stdout(output),
-        ):
-            maintenance.list_managed_resources(self.config, vault)
-
-        text = output.getvalue()
-        self.assertRegex(text, r"(?m)^Managed deployments:\s+1$")
-        self.assertRegex(text, r"(?m)^MongoDB resources:\s+1$")
-        self.assertRegex(text, r"(?m)^MongoDB users:\s+1$")
-        self.assertRegex(text, r"(?m)^PVCs:\s+1$")
-        self.assertRegex(text, r"(?m)^PVs:\s+1$")
-        self.assertRegex(text, r"(?m)^Deployment locks:\s+1$")
-        self.assertIn("Status: ATTENTION REQUIRED", text)
-        self.assertIn("SC9", text)
-        self.assertIn("sc9", text)
-        self.assertIn("tc-sc9-admin", text)
-        self.assertIn("data-sc9-0-0", text)
-        self.assertIn("sc9-shard-0", text)
-        self.assertIn("tc-deployment-lock-sc9", text)
-        self.assertNotIn("unrelated-config", text)
-
     def test_inventory_classifies_platform_state_and_orphan_group_secret(self) -> None:
         vault = FakeVault({})
 
         def fake_list(_config, resource, **kwargs):
             if resource in {"mongodb", "mongodbuser", "pvc", "pv"}:
+                if resource == "pv":
+                    self.assertFalse(kwargs.get("namespaced", True))
                 return []
             if resource == "configmap":
                 return [{"metadata": {"name": "tc-ops-manager-projects"}}]
@@ -358,12 +267,40 @@ class MaintenanceTests(unittest.TestCase):
             resources["ops_manager_platform_project"],
             ["mongodb-development (Project ID: base-id)"],
         )
+        self.assertEqual(resources["missing_ops_manager_platform_project"], [])
         self.assertEqual(
             resources["orphan_group_secrets"],
             [
                 "stale-project-id-group-secret "
                 "(Project ID: stale-project-id)"
             ],
+        )
+
+    def test_inventory_flags_missing_platform_project(self) -> None:
+        vault = FakeVault({})
+
+        def fake_list(_config, resource, **_kwargs):
+            if resource in {"mongodb", "mongodbuser", "pvc", "pv", "configmap", "secret"}:
+                return []
+            raise AssertionError(resource)
+
+        with (
+            patch.object(maintenance.kube, "list_json", side_effect=fake_list),
+            patch.object(
+                maintenance,
+                "list_ops_manager_projects",
+                return_value=("mongodb-development", []),
+            ),
+        ):
+            resources = maintenance.managed_resource_inventory(self.config, vault)
+
+        self.assertEqual(
+            resources["ops_manager_platform_project"],
+            ["mongodb-development (Project ID: NOT FOUND)"],
+        )
+        self.assertEqual(
+            resources["missing_ops_manager_platform_project"],
+            ["mongodb-development"],
         )
 
     def test_reconcile_with_no_inventory_is_noop(self) -> None:
@@ -391,7 +328,6 @@ class MaintenanceTests(unittest.TestCase):
 
         self.assertIn("Reconcile is blocked", str(ctx.exception))
         apply_mock.assert_not_called()
-
 
     def test_recover_completed_delete_shard_releases_only_lock(self) -> None:
         inventory = deployment_inventory(
@@ -460,7 +396,6 @@ class MaintenanceTests(unittest.TestCase):
                 )
 
         release_mock.assert_not_called()
-
 
     def test_recover_orphaned_resources_applies_empty_inventory(self) -> None:
         vault = FakeVault({})

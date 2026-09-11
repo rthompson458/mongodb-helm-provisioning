@@ -7,13 +7,18 @@ to the integrated Helm chart, while the lifecycle resource/script continues to
 perform verification, storage, and lock work where required.
 
 User-interface rule:
-    Git and Terraform stdout/stderr are implementation diagnostics. They are
+    Terraform stdout/stderr is implementation diagnostic information. It is
     captured here and appended to the daily operations log instead of being
     dumped onto customer or administrator terminals.
 
 Architecture rule:
     Do not add direct MongoDB, Vault, or Kubernetes mutations here. This module
     prepares Terraform inputs and executes Terraform only.
+
+Source rule:
+    terraform-dbaas/ in the selected project directory is authoritative. The
+    runner copies it into a disposable runtime cache; no Git checkout or remote
+    repository access is part of the current execution path.
 """
 
 from __future__ import annotations
@@ -33,7 +38,7 @@ from .logging_component import append_process_diagnostic, log_event
 
 
 def _require(*names: str) -> None:
-    """Fail early if an executable needed by Terraform is missing."""
+    """Fail early if an executable needed by the current runtime is missing."""
 
     missing = [name for name in names if not shutil.which(name)]
     if missing:
@@ -103,22 +108,20 @@ def _run_diagnostic(
 def _terraform_execution_lock(config: dict[str, Any]):
     """Serialize shared Terraform cache/workdir activity across processes.
 
-    Every controller command shares one disposable Git checkout and one
-    terraform-dbaas/.terraform provider directory. Detached workers make
-    overlap likely, so Git refresh, terraform init, and terraform apply must be
-    one cross-process critical section.
+    Every controller command shares one disposable Terraform execution cache
+    and one .terraform provider directory. Detached workers make overlap likely,
+    so source refresh, terraform init, and terraform apply must be one
+    cross-process critical section.
 
     ``flock`` is process-safe on Linux/WSL and is automatically released if a
-    worker exits or is killed. The lock file lives beside the cache so a Git
-    reset or clean cannot remove it.
+    worker exits or is killed. The lock file lives beside the cache so refreshing
+    the cache cannot remove it.
     """
 
     cache: Path = config["terraform_cache"]
     cache.parent.mkdir(parents=True, exist_ok=True)
 
-    lock_path = cache.parent / (
-        f".{cache.name}.privateWorkerReplacement.lock"
-    )
+    lock_path = cache.parent / f".{cache.name}.privateWorkerReplacement.lock"
 
     with lock_path.open("a+", encoding="utf-8") as handle:
         log_event(
@@ -252,7 +255,7 @@ def apply_inventory(
     High-level sequence:
       1. Check local tools and Terraform version.
       2. Acquire the cross-process Terraform execution lock.
-      3. Refresh the disposable Terraform cache from the configured local source directory.
+      3. Refresh the disposable Terraform cache from local source.
       4. Pass environment/config values as TF_VAR_* variables.
       5. Write desired state to a temporary .tfvars.json file.
       6. Run terraform init and terraform apply.
@@ -264,7 +267,6 @@ def apply_inventory(
 
     _require(
         "terraform",
-        "git",
         "kubectl",
         "bash",
         "python3",
@@ -277,9 +279,9 @@ def apply_inventory(
 
     _check_version()
 
-    # The shared Terraform cache, provider directory, and backend work are treated
-    # as one transaction. This prevents one worker from resetting the checkout
-    # while another worker is executing Terraform from it.
+    # The shared Terraform cache, provider directory, and backend work are one
+    # transaction. This prevents one worker from refreshing source while another
+    # worker is executing Terraform from the same cache.
     with _terraform_execution_lock(config):
         _apply_inventory_locked(
             config,
@@ -454,9 +456,7 @@ def _apply_inventory_locked(
             ]
 
             for target in targets or []:
-                command.append(
-                    f"-target={target}"
-                )
+                command.append(f"-target={target}")
 
             _run_diagnostic(
                 config,

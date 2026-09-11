@@ -15,6 +15,9 @@ if [[ -n "${TC_KUBE_CONTEXT:-}" ]]; then
   K+=(--context "${TC_KUBE_CONTEXT}")
 fi
 
+# Run one short-lived in-cluster mongosh Job using an Operator connection Secret.
+# This gives Terraform-driven verification the same network path and credentials
+# a real MongoDB client would use. Every Job is deleted after logs are captured.
 run_mongo_job() {
   local connection_secret="${1:-tc-${TC_DEPLOYMENT}-admin-connection}"
   local job="tc-runtime-${TC_DEPLOYMENT:0:12}-$(date +%s)-${RANDOM}"
@@ -87,10 +90,14 @@ EOF
   return 1
 }
 
+# Encode one shell string as a JSON string literal before embedding it in the
+# JavaScript passed to mongosh. This prevents quoting from changing the script.
 json_string() {
   python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"
 }
 
+# Reproduce the same deterministic MongoDBUser resource-name algorithm used by
+# Python/Terraform so verification can locate the correct connection Secret.
 account_resource_name() {
   local account="$1"
   local db_key="${TC_DATABASE,,}"
@@ -109,6 +116,9 @@ account_resource_name() {
     "${digest}"
 }
 
+# Prove that one managed database account can authenticate with its current
+# Operator-generated connection Secret. Reconciliation alone is not enough:
+# a MongoDBUser may be Updated briefly before SCRAM authentication is usable.
 verify_account() {
   local account="$1"
   local secret
@@ -133,6 +143,8 @@ verify_account() {
   return 1
 }
 
+# Verify that the hidden per-deployment controller administrator can authenticate.
+# Deployment creation is not considered ready until this real client check passes.
 verify_controller_admin() {
   # A MongoDBUser CR can report Updated slightly before the new SCRAM
   # credential is usable by a real client. Treat successful authentication,
@@ -155,6 +167,8 @@ verify_controller_admin() {
   return 1
 }
 
+# Verify directly in MongoDB that all three fixed application accounts are gone.
+# This closes the gap between Kubernetes object deletion and actual DB user state.
 verify_users_absent() {
   local owner="${TC_DATABASE}_owner"
   local readwrite="${TC_DATABASE}_readWrite"
@@ -186,6 +200,8 @@ verify_users_absent() {
   return 1
 }
 
+# Verify directly in MongoDB that the Owner account no longer exists while the
+# ReadWrite/Read accounts remain managed through their normal verification path.
 verify_owner_absent() {
   local owner="${TC_DATABASE}_owner"
   local owner_json
@@ -212,6 +228,9 @@ verify_owner_absent() {
   return 1
 }
 
+# Create one deterministic static-local PV for a specific expected PVC.
+# Pre-binding is intentional: broad label selection previously allowed Kubernetes
+# to bind a shard member to the wrong PV, which made later cleanup ambiguous.
 prepare_local_pv() {
   local pv="$1"
   local component="$2"
@@ -265,6 +284,8 @@ spec:
 EOF
 }
 
+# Return the names of pods currently mounting one PVC. Storage cleanup uses this
+# as a safety gate so a PV/PVC is never deleted while a workload still uses it.
 pvc_users() {
   local namespace="$1"
   local claim="$2"
@@ -291,6 +312,10 @@ print(" ".join(users))
 ' "$claim" <<<"$pod_json"
 }
 
+# Safely remove one static-local PVC/PV/directory triplet.
+# Live shard contraction requires exact expected binding. Full deployment teardown
+# may encounter legacy nondeterministic bindings, so it follows the PV's actual
+# claim only after proving no pod still uses it. Every wait is bounded.
 cleanup_local_pv() {
   local pv="$1"
   local expected_pvc="${2:-}"

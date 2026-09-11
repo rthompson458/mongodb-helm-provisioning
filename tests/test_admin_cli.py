@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from privateWorkerReplacement import admin_cli
 
@@ -34,6 +35,25 @@ class AdminCliTests(unittest.TestCase):
                 )
                 self.assertEqual(args.command, command)
 
+    def test_every_admin_command_has_detailed_help_and_examples(self) -> None:
+        """No administrator command may degrade to a name-only help stub."""
+
+        parser = admin_cli.build_parser()
+        subparsers = next(
+            action
+            for action in parser._actions
+            if getattr(action, "choices", None)
+            and "ListManagedResources" in action.choices
+        )
+
+        for command, command_parser in subparsers.choices.items():
+            with self.subTest(command=command):
+                help_text = command_parser.format_help()
+                self.assertTrue(command_parser.description)
+                self.assertGreater(len(command_parser.description.split()), 8)
+                self.assertIn("Examples:", help_text)
+                self.assertIn("privateWorkerReplacementAdmin.py", help_text)
+
     def test_admin_parser_does_not_expose_customer_lifecycle_commands(self) -> None:
         parser = admin_cli.build_parser()
         for command in (
@@ -54,6 +74,14 @@ class AdminCliTests(unittest.TestCase):
         parser = admin_cli.build_parser()
         with self.assertRaises(SystemExit):
             parser.parse_args(["ListResources"])
+
+    def test_managed_resources_accepts_verbose_flag(self) -> None:
+        """The forensic object-name dump is opt-in through --verbose."""
+
+        args = admin_cli.build_parser().parse_args(
+            ["ListManagedResources", "--verbose"]
+        )
+        self.assertTrue(args.verbose)
 
     def test_recover_deployment_lock_requires_confirmation_shape(self) -> None:
         args = admin_cli.build_parser().parse_args(
@@ -77,6 +105,17 @@ class AdminCliTests(unittest.TestCase):
             ["RecoverOrphanedResources", "--confirm"],
         )
 
+    def test_admin_mutations_use_controller_state_lock(self) -> None:
+        action = mock.Mock()
+        with mock.patch.object(
+            admin_cli,
+            "controller_state_mutation_lock",
+        ) as lock:
+            admin_cli._run_admin_action({}, "Reconcile", action)
+
+        lock.assert_called_once_with({}, "Reconcile")
+        action.assert_called_once_with()
+
     def test_admin_help_identifies_operator_interface(self) -> None:
         help_text = admin_cli.build_parser().format_help()
         self.assertIn("platform administration interface", help_text)
@@ -87,6 +126,23 @@ class AdminCliTests(unittest.TestCase):
         self.assertIn("Reconcile", help_text)
         self.assertIn("NOT the DBaaS end-user interface", help_text)
         self.assertIn("./dev.config", help_text)
+        self.assertNotIn("Git/Terraform", help_text)
+
+    def test_managed_resource_help_explains_attention_semantics(self) -> None:
+        parser = admin_cli.build_parser()
+        subparsers = next(
+            action
+            for action in parser._actions
+            if getattr(action, "choices", None)
+            and "ListManagedResources" in action.choices
+        )
+        text = " ".join(
+            subparsers.choices["ListManagedResources"].format_help().split()
+        )
+        self.assertIn("Vault, Kubernetes, Terraform backend state, and Ops Manager", text)
+        self.assertIn("ATTENTION REQUIRED", text)
+        self.assertIn("Permanent controller infrastructure", text)
+        self.assertIn("--verbose", text)
 
     def test_admin_default_config_is_current_directory_file(self) -> None:
         args = admin_cli.build_parser().parse_args(["ListOperations"])

@@ -136,6 +136,8 @@ def load_config(path: Path) -> dict[str, Any]:
     expand = lambda v: os.path.expandvars(os.path.expanduser(v.strip()))
 
     def project_path(value: str) -> Path:
+        """Resolve a configured project path relative to dev.config when needed."""
+
         resolved = Path(expand(value))
         if not resolved.is_absolute():
             resolved = path.parent / resolved
