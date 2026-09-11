@@ -273,6 +273,12 @@ python3 privateWorkerReplacement.py DeleteShard SC9 2 --confirm
 python3 privateWorkerReplacement.py DeleteShardedCluster SC9 --confirm
 ```
 
+A deployment deletion is not reported as successful until the MongoDB resource is
+gone, the deployment's distinct Ops Manager project is deleted, Ops Manager
+confirms that project is absent, and the Operator-created
+`<PROJECT_ID>-group-secret` is removed and verified absent. This applies to both
+`DeleteReplicaSet` and `DeleteShardedCluster`.
+
 ### Database lifecycle and status
 
 ```text
