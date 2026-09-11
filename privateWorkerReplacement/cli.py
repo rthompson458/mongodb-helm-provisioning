@@ -290,7 +290,7 @@ Inventory:
         sp,
         "ListReplicaSets",
         "List managed ReplicaSets.",
-        "Lists only privateWorkerReplacement-managed ReplicaSet deployments.",
+        "Lists all privateWorkerReplacement-managed ReplicaSet deployments with live phase, topology, MongoDB version, and managed database count.",
         "  python3 privateWorkerReplacement.py ListReplicaSets",
     )
 
@@ -307,7 +307,7 @@ Inventory:
         sp,
         "ListShardedClusters",
         "List managed ShardedClusters.",
-        "Lists only privateWorkerReplacement-managed ShardedCluster deployments.",
+        "Lists all privateWorkerReplacement-managed ShardedCluster deployments with live phase, topology, MongoDB version, and managed database count.",
         "  python3 privateWorkerReplacement.py ListShardedClusters",
     )
 
