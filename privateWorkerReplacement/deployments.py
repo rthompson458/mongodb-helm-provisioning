@@ -4,10 +4,8 @@ This module owns deployment-level policy:
 - validate deployment names/types,
 - require healthy resources before changes,
 - create/delete ReplicaSets and ShardedClusters through Terraform,
-- add/delete shard counts through Terraform,
-- enforce the one-shard minimum,
-- block unsafe shard deletion,
-- format deployment/shard status.
+- create/delete ReplicaSets and ShardedClusters through Terraform, and
+- provide shared deployment lookup/readiness rules used by other modules.
 
 Python does not edit MongoDB CRs or persistent volumes directly.  Every managed
 change is expressed as desired state and passed to apply_inventory().
@@ -18,18 +16,11 @@ from __future__ import annotations
 from typing import Any
 
 from . import kube
-from .common import ControllerError, iso_utc, normalize_deployment, print_table, utc_now
+from .common import ControllerError, iso_utc, normalize_deployment, utc_now
 from .logging_component import log_event
 from .ops_manager import delete_project as delete_ops_manager_project
 from .terraform_runner import apply_inventory
-from .deployment_lock import (
-    acquire_deployment_lock,
-    describe_deployment_lock,
-    read_deployment_lock,
-    release_deployment_lock,
-    require_no_active_change,
-    validate_topology_resume,
-)
+from .deployment_lock import require_no_active_change
 from .vault import VaultClient
 
 
@@ -167,6 +158,12 @@ def _deployment_operation(
 def _new_common(
     config: dict[str, Any], display: str, deployment_type: str
 ) -> dict[str, Any]:
+    """Build the shared Vault inventory record for a new deployment.
+
+    Both deployment types use the same durable schema. Type-specific fields are
+    filled in by the public create function immediately after this helper.
+    """
+
     return {
         "display_name": display,
         "deployment_type": deployment_type,
@@ -196,6 +193,8 @@ def _check_new_name(
     display: str,
     deployment_type: str,
 ) -> None:
+    """Refuse duplicate names and unsafe adoption of unrelated live resources."""
+
     if key in inventory:
         existing = inventory[key]
         raise ControllerError(
@@ -340,6 +339,13 @@ def _delete_deployment(
     expected_type: str,
     command: str,
 ) -> None:
+    """Delete one empty deployment and finish its cross-plane cleanup.
+
+    Terraform removes managed MongoDB/Vault/Kubernetes desired state first.
+    Python then waits for the MongoDB CR to disappear and removes the distinct
+    Ops Manager project plus its Operator-created group Secret.
+    """
+
     if not confirmed:
         raise ControllerError(
             f"{command} is destructive and requires '--confirm'. "
@@ -420,504 +426,4 @@ def delete_sharded_cluster(
         confirmed,
         "ShardedCluster",
         "DeleteShardedCluster",
-    )
-
-
-def _require_positive_shard_count(count: int) -> None:
-    if count < 1:
-        raise ControllerError("Shard COUNT must be at least 1.")
-
-
-def _resume_or_acquire_lock(
-    config: dict[str, Any],
-    inventory: dict[str, dict[str, Any]],
-    key: str,
-    item: dict[str, Any],
-    action: str,
-    count: int,
-    target: int,
-) -> dict[str, Any]:
-    existing = read_deployment_lock(config, key)
-    if existing:
-        validate_topology_resume(item, existing, action, count)
-        print(
-            f"Resuming {existing['action']} on ShardedCluster "
-            f"'{item['display_name']}' ({existing['start_shards']} -> "
-            f"{existing['target_shards']} shards) ..."
-        )
-        log_event(
-            "shard.operation.resumed",
-            deployment=item["display_name"],
-            lock_action=existing["action"],
-            start_shards=existing["start_shards"],
-            target_shards=existing["target_shards"],
-            operation_id=existing["operation_id"],
-        )
-        return existing
-
-    require_running(config, key, item)
-    return acquire_deployment_lock(
-        config,
-        inventory,
-        key,
-        item,
-        category="topology",
-        action=action,
-        start_shards=int(item["shard_count"]),
-        target_shards=target,
-    )
-
-
-def _raise_topology_failure(
-    item: dict[str, Any],
-    action: str,
-    count: int,
-    exc: ControllerError,
-) -> None:
-    raise ControllerError(
-        f"{action} did not complete for ShardedCluster '{item['display_name']}'. "
-        "The deployment lock remains in place to prevent conflicting changes. "
-        f"Correct the reported problem, then rerun '{action} "
-        f"{item['display_name']} {count}'"
-        + (" --confirm" if action == "DeleteShard" else "")
-        + f" to resume safely. Underlying error: {exc}"
-    ) from exc
-
-
-def add_shard(
-    config: dict[str, Any], vault: VaultClient, name: str, count: int = 1
-) -> None:
-    """Add COUNT shards with a resume-safe, two-stage Terraform workflow.
-
-    Stage 1 prepares all required persistent storage.  Stage 2 raises shardCount.
-    A deployment lock prevents concurrent mutations until the target is Online.
-    """
-
-    _require_positive_shard_count(count)
-    inventory = vault.load_inventory()
-    key, item = require_deployment(inventory, name, "ShardedCluster")
-
-    existing = read_deployment_lock(config, key)
-    if existing:
-        validate_topology_resume(item, existing, "AddShard", count)
-        target = int(existing["target_shards"])
-        start = int(existing["start_shards"])
-        lock = existing
-        print(
-            f"Resuming AddShard on ShardedCluster '{item['display_name']}' "
-            f"({start} -> {target} shards) ..."
-        )
-    else:
-        start = int(item["shard_count"])
-        target = start + count
-        lock = _resume_or_acquire_lock(
-            config, inventory, key, item, "AddShard", count, target
-        )
-
-    log_event(
-        "shard.add.requested",
-        deployment=item["display_name"],
-        add_count=count,
-        previous_shards=start,
-        target_shards=target,
-        operation_id=lock["operation_id"],
-    )
-
-    try:
-        if int(item["storage_shard_count"]) < target:
-            item["storage_shard_count"] = target
-            apply_inventory(config, inventory)
-
-        if int(item["shard_count"]) < target:
-            item["shard_count"] = target
-            apply_inventory(config, inventory)
-
-        print(
-            f"Waiting for ShardedCluster '{item['display_name']}' to reach "
-            f"{target} fully online shards ..."
-        )
-        kube.wait_sharded_cluster_ready(
-            config, key, target, config["sc_ready_timeout"]
-        )
-
-        release_deployment_lock(config, inventory, key, item, lock)
-    except ControllerError as exc:
-        _raise_topology_failure(item, "AddShard", count, exc)
-
-    log_event(
-        "shard.add.succeeded",
-        deployment=item["display_name"],
-        added=count,
-        previous_shards=start,
-        shard_count=target,
-    )
-    print(
-        f"\nSuccessfully added {count} shard(s) to ShardedCluster "
-        f"'{item['display_name']}'."
-    )
-    print(f"Previous shards: {start}")
-    print(f"Total shards:    {target}")
-    print("Status:          Running")
-
-
-def delete_shard(
-    config: dict[str, Any],
-    vault: VaultClient,
-    name: str,
-    count: int = 1,
-    confirmed: bool = False,
-) -> None:
-    """Delete COUNT highest-numbered shards while always retaining at least one.
-
-    Shard removal is allowed while application databases exist. Python owns
-    validation, locking, waiting, and reporting only. The topology mutation is
-    still Terraform-driven: Terraform lowers the MongoDB ShardedCluster
-    spec.shardCount and the MongoDB Kubernetes Operator/Ops Manager reconciles
-    the supported scale-down before Terraform removes old storage.
-    """
-
-    _require_positive_shard_count(count)
-    if not confirmed:
-        raise ControllerError(
-            "DeleteShard is destructive and requires '--confirm'. "
-            f"Example: privateWorkerReplacement.py DeleteShard {name} {count} --confirm"
-        )
-
-    inventory = vault.load_inventory()
-    key, item = require_deployment(inventory, name, "ShardedCluster")
-    existing = read_deployment_lock(config, key)
-
-    if existing:
-        validate_topology_resume(item, existing, "DeleteShard", count)
-        start = int(existing["start_shards"])
-        target = int(existing["target_shards"])
-        lock = existing
-        print(
-            f"Resuming DeleteShard on ShardedCluster '{item['display_name']}' "
-            f"({start} -> {target} shards) ..."
-        )
-    else:
-        start = int(item["shard_count"])
-        target = start - count
-        if target < 1:
-            maximum = max(0, start - 1)
-            raise ControllerError(
-                f"Cannot delete {count} shard(s) from ShardedCluster "
-                f"'{item['display_name']}'. It currently has {start} shard(s), "
-                "and a ShardedCluster must retain at least 1 shard. "
-                f"Maximum deletable now: {maximum}."
-            )
-
-        require_running(config, key, item)
-
-        lock = acquire_deployment_lock(
-            config,
-            inventory,
-            key,
-            item,
-            category="topology",
-            action="DeleteShard",
-            start_shards=start,
-            target_shards=target,
-        )
-
-    log_event(
-        "shard.delete.requested",
-        deployment=item["display_name"],
-        delete_count=count,
-        previous_shards=start,
-        target_shards=target,
-        operation_id=lock["operation_id"],
-    )
-
-    try:
-        if int(item["shard_count"]) > target:
-            print(
-                f"Scaling ShardedCluster '{item['display_name']}' from "
-                f"{start} to {target} shard(s) through Terraform ..."
-            )
-            if item["databases"]:
-                print(
-                    "Existing databases will be preserved while the MongoDB "
-                    "Kubernetes Operator/Ops Manager reconciles the shard scale-down."
-                )
-            item["shard_count"] = target
-            apply_inventory(config, inventory)
-
-        kube.wait_sharded_cluster_ready(
-            config, key, target, config["sc_ready_timeout"]
-        )
-        for index in range(target, start):
-            kube.wait_absent(
-                config,
-                "statefulset",
-                f"{key}-{index}",
-                config["sc_ready_timeout"],
-            )
-
-        if int(item["storage_shard_count"]) > target:
-            item["storage_shard_count"] = target
-            apply_inventory(config, inventory)
-
-        release_deployment_lock(config, inventory, key, item, lock)
-    except ControllerError as exc:
-        _raise_topology_failure(item, "DeleteShard", count, exc)
-
-    log_event(
-        "shard.delete.succeeded",
-        deployment=item["display_name"],
-        deleted=count,
-        previous_shards=start,
-        shard_count=target,
-    )
-    print(
-        f"\nSuccessfully deleted {count} shard(s) from ShardedCluster "
-        f"'{item['display_name']}'."
-    )
-    print(f"Previous shards: {start}")
-    print(f"Total shards:    {target}")
-    print("Status:          Running")
-    if item["databases"]:
-        print(f"Databases:       {len(item['databases'])} preserved")
-
-
-def _deployment_row(
-    config: dict[str, Any], key: str, item: dict[str, Any]
-) -> tuple[str, ...]:
-    dtype = deployment_type_label(item)
-    if dtype == "ShardedCluster":
-        topology = (
-            f"{item['shard_count']} shards / "
-            f"{item['members_per_shard']} members"
-        )
-    else:
-        topology = f"{item['members']} members"
-    return (
-        item["display_name"],
-        dtype,
-        kube.phase(config, key),
-        topology,
-        item["version"],
-        str(len(item["databases"])),
-    )
-
-
-def list_deployments(config: dict[str, Any], vault: VaultClient) -> None:
-    """List all managed ReplicaSets and ShardedClusters."""
-    inventory = vault.load_inventory()
-    if not inventory:
-        print("No privateWorkerReplacement-managed MongoDB deployments exist.")
-        return
-    rows = [
-        _deployment_row(config, key, inventory[key])
-        for key in sorted(inventory)
-    ]
-    print_table(
-        ("DEPLOYMENT", "TYPE", "PHASE", "TOPOLOGY", "MONGODB", "DATABASES"),
-        rows,
-    )
-
-
-def list_replica_sets(config: dict[str, Any], vault: VaultClient) -> None:
-    inventory = vault.load_inventory()
-    rows = [
-        _deployment_row(config, key, inventory[key])
-        for key in sorted(inventory)
-        if deployment_type_label(inventory[key]) == "ReplicaSet"
-    ]
-    if not rows:
-        print("No privateWorkerReplacement-managed ReplicaSets exist.")
-        return
-    print_table(
-        ("REPLICA SET", "TYPE", "PHASE", "TOPOLOGY", "MONGODB", "DATABASES"),
-        rows,
-    )
-
-
-def list_sharded_clusters(config: dict[str, Any], vault: VaultClient) -> None:
-    inventory = vault.load_inventory()
-    rows = [
-        _deployment_row(config, key, inventory[key])
-        for key in sorted(inventory)
-        if deployment_type_label(inventory[key]) == "ShardedCluster"
-    ]
-    if not rows:
-        print("No privateWorkerReplacement-managed ShardedClusters exist.")
-        return
-    print_table(
-        (
-            "SHARDED CLUSTER",
-            "TYPE",
-            "PHASE",
-            "TOPOLOGY",
-            "MONGODB",
-            "DATABASES",
-        ),
-        rows,
-    )
-
-
-def _status_count(item: dict[str, Any], lock: dict[str, Any] | None) -> int:
-    count = int(item["shard_count"])
-    if not lock:
-        return count
-    return max(
-        count,
-        int(lock["start_shards"]),
-        int(lock["target_shards"]),
-    )
-
-
-def _shard_status(
-    config: dict[str, Any],
-    key: str,
-    item: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    lock = read_deployment_lock(config, key)
-    status = kube.sharded_cluster_status(
-        config, key, _status_count(item, lock)
-    )
-
-    if lock:
-        start = int(lock["start_shards"])
-        target = int(lock["target_shards"])
-        for index, shard in enumerate(status["shards"]):
-            if (
-                lock["action"] == "AddShard"
-                and start <= index < target
-                and shard["desired"] == 0
-            ):
-                shard["status"] = "Creating"
-            elif lock["action"] == "DeleteShard" and target <= index < start:
-                shard["status"] = (
-                    "Removed" if shard["desired"] == 0 else "Removing"
-                )
-    return status, lock
-
-
-def _print_shards(
-    config: dict[str, Any], key: str, item: dict[str, Any]
-) -> None:
-    status, lock = _shard_status(config, key, item)
-    rows = [
-        (
-            x["shard"],
-            x["status"],
-            str(x["ready"]),
-            str(x["desired"]),
-            str(x["updated"]),
-        )
-        for x in status["shards"]
-    ]
-    print_table(("SHARD", "STATUS", "READY", "DESIRED", "UPDATED"), rows)
-    if lock:
-        print(f"Active change:   {describe_deployment_lock(lock)}")
-        if lock["started_at"]:
-            print(f"Started:         {lock['started_at']}")
-    else:
-        print("Active change:   None")
-    print(
-        f"Config servers: {status['config_servers']['status']} "
-        f"({status['config_servers']['ready']}/"
-        f"{status['config_servers']['desired']})"
-    )
-    print(
-        f"mongos:         {status['mongos']['status']} "
-        f"({status['mongos']['ready']}/{status['mongos']['desired']})"
-    )
-
-
-def list_deployment(
-    config: dict[str, Any], vault: VaultClient, name: str
-) -> None:
-    inventory = vault.load_inventory()
-    key, item = require_deployment(inventory, name)
-    dtype = deployment_type_label(item)
-    print(f"Deployment:      {item['display_name']}")
-    print(f"Type:            {dtype}")
-    print(f"K8s Resource:    {key}")
-    print(f"Phase:           {kube.phase(config, key)}")
-    print(f"MongoDB:         {item['version']}")
-    print(f"Databases:       {len(item['databases'])}")
-    if dtype == "ReplicaSet":
-        print(f"Members:         {item['members']}")
-    else:
-        print(f"Shards:          {item['shard_count']}")
-        print(f"Members/Shard:   {item['members_per_shard']}")
-        print(f"mongos:          {item['mongos_count']}")
-        print(f"Config Servers:  {item['config_server_count']}")
-        print()
-        _print_shards(config, key, item)
-
-
-def list_replica_set(
-    config: dict[str, Any], vault: VaultClient, name: str
-) -> None:
-    inventory = vault.load_inventory()
-    _, item = require_deployment(inventory, name, "ReplicaSet")
-    list_deployment(config, vault, item["display_name"])
-
-
-def list_sharded_cluster(
-    config: dict[str, Any], vault: VaultClient, name: str
-) -> None:
-    inventory = vault.load_inventory()
-    _, item = require_deployment(inventory, name, "ShardedCluster")
-    list_deployment(config, vault, item["display_name"])
-
-
-def list_shards(
-    config: dict[str, Any],
-    vault: VaultClient,
-    name: str | None = None,
-) -> None:
-    """List shard status globally or for one targeted ShardedCluster."""
-
-    inventory = vault.load_inventory()
-
-    if name:
-        key, item = require_deployment(inventory, name, "ShardedCluster")
-        print(f"ShardedCluster: {item['display_name']}")
-        print(f"Phase:          {kube.phase(config, key)}")
-        print()
-        _print_shards(config, key, item)
-        return
-
-    clusters = [
-        (key, inventory[key])
-        for key in sorted(inventory)
-        if deployment_type_label(inventory[key]) == "ShardedCluster"
-    ]
-    if not clusters:
-        print("No privateWorkerReplacement-managed ShardedClusters exist.")
-        return
-
-    rows: list[tuple[str, ...]] = []
-    for key, item in clusters:
-        status, lock = _shard_status(config, key, item)
-        change = describe_deployment_lock(lock) if lock else "-"
-        for shard in status["shards"]:
-            rows.append(
-                (
-                    item["display_name"],
-                    shard["shard"],
-                    shard["status"],
-                    str(shard["ready"]),
-                    str(shard["desired"]),
-                    str(shard["updated"]),
-                    change,
-                )
-            )
-
-    print_table(
-        (
-            "CLUSTER",
-            "SHARD",
-            "STATUS",
-            "READY",
-            "DESIRED",
-            "UPDATED",
-            "ACTIVE CHANGE",
-        ),
-        rows,
     )
