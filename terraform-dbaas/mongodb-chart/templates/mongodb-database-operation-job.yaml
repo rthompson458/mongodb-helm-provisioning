@@ -1,3 +1,12 @@
+{{/*
+Render this hook only when Terraform supplies an explicit one-shot database
+operation. It currently supports DeleteDatabase only.
+
+Hook weight -10 makes deletion run before the +10 database provisioner hook.
+Terraform separately requires allow_destructive_mongodb_operations=true for the
+selected deployment, so rendering this Job is not the destructive safety gate
+by itself.
+*/}}
 {{- if gt (len (.Values.mongodbDatabaseOperations | default (list))) 0 }}
 {{- $operationName := printf "%s-database-operation" .Release.Name | trunc 63 | trimSuffix "-" }}
 apiVersion: batch/v1
