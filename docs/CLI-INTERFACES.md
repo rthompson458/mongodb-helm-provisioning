@@ -226,6 +226,7 @@ Customer read-only status presentation:
 
 Both use shared lifecycle/support modules:
   privateWorkerReplacement/deployments.py
+  privateWorkerReplacement/shards.py
   privateWorkerReplacement/databases.py
   privateWorkerReplacement/maintenance.py
   privateWorkerReplacement/ops_manager.py
