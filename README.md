@@ -445,7 +445,8 @@ terraform-dbaas/mongodb-chart/
 | --- | --- |
 | `cli.py` | Public command definitions, help, parsing, async submission, dispatch |
 | `admin_cli.py` | Administrator command definitions, help, parsing, dispatch |
-| `deployments.py` | ReplicaSet/ShardedCluster/shard mutation workflows |
+| `deployments.py` | ReplicaSet/ShardedCluster lifecycle and shared deployment validation |
+| `shards.py` | ShardedCluster shard-topology mutation workflows |
 | `deployment_status.py` | Read-only deployment and shard status presentation |
 | `databases.py` | Database/account/credential mutation workflows |
 | `database_status.py` | Read-only database and account status presentation |
