@@ -315,6 +315,57 @@ class MaintenanceTests(unittest.TestCase):
         self.assertIn("tc-deployment-lock-sc9", text)
         self.assertNotIn("unrelated-config", text)
 
+    def test_inventory_classifies_platform_state_and_orphan_group_secret(self) -> None:
+        vault = FakeVault({})
+
+        def fake_list(_config, resource, **kwargs):
+            if resource in {"mongodb", "mongodbuser", "pvc", "pv"}:
+                return []
+            if resource == "configmap":
+                return [{"metadata": {"name": "tc-ops-manager-projects"}}]
+            if resource == "secret":
+                return [
+                    {"metadata": {"name": "tfstate-default-test-state"}},
+                    {"metadata": {"name": "stale-project-id-group-secret"}},
+                ]
+            raise AssertionError(resource)
+
+        with (
+            patch.object(maintenance.kube, "list_json", side_effect=fake_list),
+            patch.object(
+                maintenance,
+                "list_ops_manager_projects",
+                return_value=(
+                    "mongodb-development",
+                    [{"id": "base-id", "name": "mongodb-development"}],
+                ),
+            ),
+        ):
+            resources = maintenance.managed_resource_inventory(
+                self.config,
+                vault,
+            )
+
+        self.assertEqual(
+            resources["controller_infrastructure_configmaps"],
+            ["tc-ops-manager-projects"],
+        )
+        self.assertEqual(
+            resources["terraform_states"],
+            ["tfstate-default-test-state"],
+        )
+        self.assertEqual(
+            resources["ops_manager_platform_project"],
+            ["mongodb-development (Project ID: base-id)"],
+        )
+        self.assertEqual(
+            resources["orphan_group_secrets"],
+            [
+                "stale-project-id-group-secret "
+                "(Project ID: stale-project-id)"
+            ],
+        )
+
     def test_reconcile_with_no_inventory_is_noop(self) -> None:
         vault = FakeVault({})
         with patch.object(maintenance, "apply_inventory") as apply_mock:
