@@ -271,7 +271,7 @@ failures can be correlated across Kubernetes and Ops Manager.
 
 ## 9. Recommended validation workflow after changes
 
-Do not run the complete 34-check harness after every small change.
+Do not run the complete 36-check harness after every small change.
 
 Use this approach:
 
@@ -282,4 +282,4 @@ Use this approach:
 5. For deployment-lock/concurrency changes, run `--profile locking --allow-changes`.
 6. Reserve `--profile all --allow-changes` for broad cross-cutting lifecycle changes, release/demo baselines, or other true acceptance milestones.
 
-This keeps normal feedback fast while preserving the full 34-check run for the occasions when its broad coverage is actually valuable.
+This keeps normal feedback fast while preserving the full 36-check run for the occasions when its broad coverage is actually valuable.
