@@ -642,9 +642,9 @@ The controller rotates Owner, ReadWrite, and Read credentials and verifies authe
 The policy follows the configured rotation interval (currently 30 days in `dev.config`):
 
 ```text
-Owner:     rotate every configured interval; disable in MongoDB at the first rotation at/after one full interval
-ReadWrite: rotate every configured interval
-Read:      rotate every configured interval
+Owner:     rotation due every configured interval; disable in MongoDB at the first RotatePasswords run at/after one full interval
+ReadWrite: rotation due every configured interval
+Read:      rotation due every configured interval
 ```
 
 Disabling the Owner prevents MongoDB login, but the Owner credential remains in Vault and continues to participate in rotation.
