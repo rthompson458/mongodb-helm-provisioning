@@ -40,6 +40,8 @@ class JsonLineFormatter(logging.Formatter):
     """Convert one Python LogRecord into one compact JSON object."""
 
     def format(self, record: logging.LogRecord) -> str:
+        """Render one log record as compact, single-line JSON."""
+
         payload: dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc)
             .isoformat(timespec="milliseconds")
