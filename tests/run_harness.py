@@ -44,10 +44,10 @@ def build_parser() -> argparse.ArgumentParser:
         epilog="""
 Profiles:
   preflight    5 read-only checks. Creates, changes, and deletes nothing.
-  replicaset  15 checks total. Tests ReplicaSet + database lifecycle.
-  sharded     18 checks total. Tests ShardedCluster + shard + database lifecycle.
+  replicaset  16 checks total. Tests ReplicaSet + database lifecycle.
+  sharded     19 checks total. Tests ShardedCluster + shard + database lifecycle.
   locking     11 checks total. Tests ShardedCluster mutation locking.
-  all         34 checks total. Runs the complete live acceptance gauntlet.
+  all         36 checks total. Runs the complete live acceptance gauntlet.
 
 Safety:
   Lifecycle profiles (replicaset, sharded, locking, all) require --allow-changes.
@@ -68,7 +68,7 @@ Common commands:
   Locking/concurrency only:
     python3 tests/run_harness.py --profile locking --allow-changes
 
-  FULL GAUNTLET - all 34 live acceptance checks:
+  FULL GAUNTLET - all 36 live acceptance checks:
     python3 tests/run_harness.py --profile all --allow-changes
 
 Configuration:
@@ -82,7 +82,7 @@ Configuration:
         required=True,
         help=(
             "Test group to run. Every profile starts with the 5 read-only preflight "
-            "checks. Use 'all' only for the complete 34-check live acceptance run."
+            "checks. Use 'all' only for the complete 36-check live acceptance run."
         ),
     )
     parser.add_argument(
