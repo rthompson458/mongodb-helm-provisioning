@@ -75,6 +75,14 @@ class AdminCliTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parser.parse_args(["ListResources"])
 
+    def test_managed_resources_accepts_verbose_flag(self) -> None:
+        """The forensic object-name dump is opt-in through --verbose."""
+
+        args = admin_cli.build_parser().parse_args(
+            ["ListManagedResources", "--verbose"]
+        )
+        self.assertTrue(args.verbose)
+
     def test_recover_deployment_lock_requires_confirmation_shape(self) -> None:
         args = admin_cli.build_parser().parse_args(
             ["RecoverDeploymentLock", "SC9", "--confirm"]
@@ -134,6 +142,7 @@ class AdminCliTests(unittest.TestCase):
         self.assertIn("Vault, Kubernetes, Terraform backend state, and Ops Manager", text)
         self.assertIn("ATTENTION REQUIRED", text)
         self.assertIn("Permanent controller infrastructure", text)
+        self.assertIn("--verbose", text)
 
     def test_admin_default_config_is_current_directory_file(self) -> None:
         args = admin_cli.build_parser().parse_args(["ListOperations"])
