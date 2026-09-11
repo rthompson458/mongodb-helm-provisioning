@@ -448,6 +448,7 @@ This proof of concept establishes a clear interface and recovery model. A produc
 - Kubernetes RBAC appropriate to customer vs administrator workflows;
 - Vault policies appropriate to credential consumers vs administrators;
 - operational approval/runbook requirements for destructive recovery;
+- external scheduling/automation for enforcing the configured password-rotation cadence;
 - backup/retention policy for operation state if local worker state remains part of the production design.
 
 The local `logs/` convention makes development/support evidence easy to find; production can later map the same controller/operations distinction onto durable worker storage or centralized logging without changing the customer CLI contract.
