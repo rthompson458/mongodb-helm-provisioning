@@ -34,6 +34,7 @@ from .controller import (
     recover_orphaned_resources,
 )
 from .logging_component import configure_logging, log_event, log_exception
+from .mutation_lock import controller_state_mutation_lock
 from .vault import VaultClient
 
 # Keep these values separate on purpose. REPO_ROOT locates the administrator
@@ -42,6 +43,15 @@ from .vault import VaultClient
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_DISPLAY = "./dev.config"
 DEFAULT_CONFIG = Path(DEFAULT_CONFIG_DISPLAY)
+
+# Administrator mutations share the same complete Terraform/Vault desired state
+# as customer mutations, so they must participate in the same controller-wide
+# serialization boundary.
+ADMIN_MUTATING_COMMANDS = {
+    "RecoverDeploymentLock",
+    "RecoverOrphanedResources",
+    "Reconcile",
+}
 
 
 def _confirm(parser: argparse.ArgumentParser) -> None:
@@ -238,6 +248,20 @@ def _recover_orphans_worker_arguments(args: argparse.Namespace) -> list[str]:
     return values
 
 
+def _run_admin_action(
+    config: dict[str, object],
+    command: str,
+    action,
+) -> None:
+    """Run one administrator mutation under the shared desired-state lock."""
+
+    if command in ADMIN_MUTATING_COMMANDS:
+        with controller_state_mutation_lock(config, command):
+            action()
+        return
+    action()
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse and execute one administrator command; no command prints help."""
 
@@ -329,7 +353,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
             "Reconcile": lambda: reconcile(config, vault),
         }
-        actions[args.command]()
+        _run_admin_action(config, args.command, actions[args.command])
 
         if operation_id:
             mark_succeeded(config_path, operation_id)
