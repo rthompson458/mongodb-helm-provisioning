@@ -73,10 +73,14 @@ def operation_directory(config_path: Path) -> Path:
 
 
 def _state_path(config_path: Path, operation_id: str) -> Path:
+    """Return the JSON state-file path for one asynchronous operation."""
+
     return operation_directory(config_path) / f"{operation_id}.json"
 
 
 def _work_path(config_path: Path, operation_id: str) -> Path:
+    """Return the temporary transcript path used while one worker is running."""
+
     return operation_work_directory(config_path) / f"{operation_id}.tmp"
 
 
@@ -274,6 +278,8 @@ def launch_operation(
 
 
 def mark_running(config_path: Path, operation_id: str) -> None:
+    """Record that the detached worker has started executing the request."""
+
     state = load_operation(config_path, operation_id)
     state["result"] = "In Progress"
     state["started_at"] = state.get("started_at") or _now()
@@ -338,6 +344,8 @@ def _finalize_transcript(
 
 
 def mark_succeeded(config_path: Path, operation_id: str) -> None:
+    """Record successful completion and archive the worker transcript."""
+
     state = load_operation(config_path, operation_id)
     state["result"] = "Succeeded"
     state["message"] = f"{state['command']} completed successfully."
@@ -347,6 +355,8 @@ def mark_succeeded(config_path: Path, operation_id: str) -> None:
 
 
 def mark_failed(config_path: Path, operation_id: str, message: str) -> None:
+    """Record terminal failure details and archive the worker transcript."""
+
     state = load_operation(config_path, operation_id)
     state["result"] = "Failed"
     state["message"] = message
@@ -356,6 +366,8 @@ def mark_failed(config_path: Path, operation_id: str, message: str) -> None:
 
 
 def _elapsed_seconds(state: dict[str, Any]) -> int | None:
+    """Return elapsed operation seconds, or None when timestamps are invalid."""
+
     start_text = state.get("started_at") or state.get("submitted_at")
     end_text = state.get("completed_at") or _now()
     try:
