@@ -52,6 +52,7 @@ from .controller import (
     rotate_passwords,
 )
 from .logging_component import configure_logging, log_event, log_exception
+from .mutation_lock import controller_state_mutation_lock
 from .vault import VaultClient
 
 # Keep these values separate on purpose. REPO_ROOT locates the controller code
@@ -60,6 +61,23 @@ from .vault import VaultClient
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_DISPLAY = "./dev.config"
 DEFAULT_CONFIG = Path(DEFAULT_CONFIG_DISPLAY)
+
+# Terraform applies the complete Vault-backed desired-state inventory. Serialize
+# every public mutation across the controller so an older worker cannot later
+# re-apply a stale inventory snapshot and erase a newer worker's changes.
+PUBLIC_MUTATING_COMMANDS = {
+    "AddReplicaSet",
+    "DeleteReplicaSet",
+    "AddShardedCluster",
+    "DeleteShardedCluster",
+    "AddShard",
+    "DeleteShard",
+    "AddDatabase",
+    "DeleteDatabase",
+    "RotatePasswords",
+    "DisableOwner",
+    "EnableOwner",
+}
 
 
 def _config_path_from_argv(argv: list[str]) -> Path:
@@ -568,6 +586,20 @@ def _public_async_feedback(
     raise ControllerError(f"Command '{command}' is not configured for public async feedback.")
 
 
+def _run_action(
+    config: dict[str, object],
+    command: str,
+    action,
+) -> None:
+    """Run one public action with controller-wide serialization when mutating."""
+
+    if command in PUBLIC_MUTATING_COMMANDS:
+        with controller_state_mutation_lock(config, command):
+            action()
+        return
+    action()
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse and execute one customer command; no command prints full help."""
 
@@ -646,7 +678,7 @@ def main(argv: list[str] | None = None) -> int:
             "DisableOwner": lambda: disable_owner(config, vault, args.deployment_or_database, args.database, args.confirm),
             "EnableOwner": lambda: enable_owner(config, vault, args.deployment_or_database, args.database),
         }
-        actions[args.command]()
+        _run_action(config, args.command, actions[args.command])
 
         if operation_id:
             mark_succeeded(config_path, operation_id)
