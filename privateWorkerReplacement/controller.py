@@ -3,7 +3,8 @@
 The implementation is split by responsibility so entry points can import one
 stable facade without turning one source file into a catch-all:
 
-- deployments.py: ReplicaSet/ShardedCluster/shard mutation workflows
+- deployments.py: ReplicaSet/ShardedCluster lifecycle and shared validation
+- shards.py: ShardedCluster shard-topology mutation workflows
 - deployment_status.py: read-only deployment and shard presentation
 - databases.py: database/credential mutation workflows
 - database_status.py: read-only database and account presentation
@@ -26,10 +27,8 @@ from .database_status import (
 )
 from .deployments import (
     add_replica_set,
-    add_shard,
     add_sharded_cluster,
     delete_replica_set,
-    delete_shard,
     delete_sharded_cluster,
 )
 from .deployment_status import (
@@ -41,6 +40,7 @@ from .deployment_status import (
     list_sharded_clusters,
     list_shards,
 )
+from .shards import add_shard, delete_shard
 from .maintenance import (
     reconcile,
     recover_deployment_lock,
