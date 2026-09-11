@@ -138,7 +138,9 @@ managed deployment with no corresponding Ops Manager project
 permanent Ops Manager platform project missing
 ```
 
-The detail section always shows every inventory category. If a category has no entries, it displays `None` so an administrator does not have to infer whether the category was checked.\n\nThe command does not delete, reconcile, or repair anything.
+The detail section always shows every inventory category. Empty categories stay compact on one line, such as `ReplicaSets: None`; categories with entries expand underneath their heading. This makes it clear every category was checked without giving empty categories unnecessary vertical space.
+
+The command does not delete, reconcile, or repair anything.
 
 ---
 
