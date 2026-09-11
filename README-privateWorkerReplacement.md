@@ -629,7 +629,7 @@ The hidden controller-admin credential is infrastructure state and is not part o
 
 ## 11. Password rotation and Owner policy
 
-The rotation interval comes from `dev.config`; the current development value is 30 days.
+The rotation interval comes from `dev.config`; the current development value is 30 days. The interval is a policy/due-date setting, not an internal scheduler. This POC rotates credentials when `RotatePasswords` is invoked manually or by future external automation.
 
 Rotate all three passwords:
 
@@ -637,7 +637,7 @@ Rotate all three passwords:
 python3 privateWorkerReplacement.py RotatePasswords RS1 HouseInfo
 ```
 
-The controller rotates Owner, ReadWrite, and Read credentials and verifies authentication. `ListDatabaseAccounts` shows the last rotation time and the remaining time until the next rotation.
+The controller rotates Owner, ReadWrite, and Read credentials and verifies authentication. `ListDatabaseAccounts` shows the last rotation time and the remaining time until the next rotation is due.
 
 The policy follows the configured rotation interval (currently 30 days in `dev.config`):
 
@@ -756,7 +756,7 @@ It does not serve as the account-detail view.
 python3 privateWorkerReplacement.py ListDatabaseAccounts RS1 HouseInfo
 ```
 
-`ListDatabaseAccounts` shows the three managed accounts, their Enabled/Disabled state, password-rotation timing, last-rotation information, logical Vault paths, and complete browser-ready Vault URLs.
+`ListDatabaseAccounts` shows the three managed accounts, their Enabled/Disabled state, password-rotation due timing, last-rotation information, logical Vault paths, and complete browser-ready Vault URLs.
 
 Use this command when the question is about database credentials or account state rather than database lifecycle state.
 
