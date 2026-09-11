@@ -370,14 +370,14 @@ The public CLI intentionally does not expose:
 - operation IDs;
 - worker PIDs;
 - operation-state JSON files;
-- raw Git output;
+- raw Terraform/external-command output;
 - Terraform plans or apply output;
 - Terraform state details;
 - deployment-lock recovery mechanics.
 
 If an asynchronous request appears not to complete, use the normal public status commands first. A platform administrator can inspect the private operation status and daily operation diagnostics with `privateWorkerReplacementAdmin.py`.
 
-`RotatePasswords`, `DisableOwner`, and `EnableOwner` currently remain synchronous. Their underlying Terraform/Git output is captured in the operations log rather than printed to the terminal.
+`RotatePasswords`, `DisableOwner`, and `EnableOwner` currently remain synchronous. Their underlying Terraform/external-command output is captured in the operations log rather than printed to the terminal.
 
 ---
 
@@ -639,12 +639,12 @@ python3 privateWorkerReplacement.py RotatePasswords RS1 HouseInfo
 
 The controller rotates Owner, ReadWrite, and Read credentials and verifies authentication. `ListDatabaseAccounts` shows the last rotation time and the remaining time until the next rotation.
 
-The Owner policy is:
+The policy follows the configured rotation interval (currently 30 days in `dev.config`):
 
 ```text
-Owner:     rotate every 30 days; disable in MongoDB at first rotation at/after day 30
-ReadWrite: rotate every 30 days
-Read:      rotate every 30 days
+Owner:     rotate every configured interval; disable in MongoDB at the first rotation at/after one full interval
+ReadWrite: rotate every configured interval
+Read:      rotate every configured interval
 ```
 
 Disabling the Owner prevents MongoDB login, but the Owner credential remains in Vault and continues to participate in rotation.
@@ -817,7 +817,7 @@ Temporary detached-worker transcripts may briefly exist in:
 logs/operations/work/
 ```
 
-Both human-readable logs are append-only and roll to a new filename by UTC date. Git/Terraform stdout and stderr are captured in the operations log instead of being displayed on normal user terminals.
+Both human-readable logs are append-only and roll to a new filename by UTC date. Terraform and other implementation-command stdout/stderr are captured in the operations log instead of being displayed on normal user terminals.
 
 The JSON files are controller state, not customer log files. They support administrator `ListOperation`, interrupted-worker detection, automated acceptance-test polling, and recovery decisions.
 
@@ -839,7 +839,7 @@ Expected validation failures are shown as concise `ERROR:` messages. Examples in
 - shard deletion would reduce the cluster below one shard;
 - a deployment still contains managed databases.
 
-If a request fails because Git/Terraform execution failed, the customer receives a concise failure while the detailed diagnostic output is retained in:
+If a request fails because Terraform or another implementation command failed, the customer receives a concise failure while the detailed diagnostic output is retained in:
 
 ```text
 logs/operations/operations-YYYYMMDD.log
@@ -851,7 +851,7 @@ Normal customers should use service status commands rather than operation IDs. P
 
 ## 16. Architecture boundary
 
-**Terraform performs all managed changes.**
+**Terraform owns normal DBaaS desired-state changes.**
 
 Python performs orchestration:
 
@@ -865,13 +865,15 @@ Python performs orchestration:
 - formats customer-facing results;
 - records structured and diagnostic logs.
 
-Managed mutations remain Terraform-driven directly or through:
+Normal managed MongoDB, Vault, account, deployment-lock, and persistent-storage changes remain Terraform-driven directly or through:
 
 ```text
 terraform-dbaas/scripts/lifecycle.sh
 ```
 
-Python does not bypass Terraform to directly create/delete MongoDB deployments, users, databases, shards, deployment locks, or persistent storage.
+Python does not directly create or edit managed MongoDB custom resources, managed database users, Vault lifecycle records, deployment locks, or persistent storage.
+
+Deployment teardown has one explicit cross-plane cleanup exception: the per-deployment Ops Manager project and its Operator-created `<PROJECT_ID>-group-secret` are not Terraform desired-state resources. `ops_manager.py` deletes and verifies those artifacts before deployment deletion is allowed to report success.
 
 ---
 
