@@ -7,7 +7,12 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from privateWorkerReplacement import databases, deployment_lock, deployments
+from privateWorkerReplacement import (
+    credential_display,
+    databases,
+    deployment_lock,
+    deployments,
+)
 
 from helpers import FakeVault, deployment_inventory, online_sc_status, topology_lock
 
@@ -253,8 +258,8 @@ class DatabaseLifecycleTests(unittest.TestCase):
         vault = FakeVault(deployment_inventory(with_db=True))
         deployment = vault.inventory["rs1"]
         db = deployment["databases"]["houseinfo"]
-        path = databases._vault_paths(self.config, deployment, db)[0]
-        url = databases._vault_browser_url(self.config, path)
+        path = credential_display.vault_paths(self.config, deployment, db)[0]
+        url = credential_display.vault_browser_url(self.config, path)
         self.assertEqual(
             url,
             "http://127.0.0.1:8200/ui/vault/secrets/secret/show/"
