@@ -23,10 +23,8 @@ from . import kube
 from .common import (
     ControllerError,
     account_resource_name,
-    database_rows,
     iso_utc,
     normalize_database,
-    print_table,
     utc_now,
 )
 from .deployment_lock import protected_database_change, require_no_active_change
@@ -692,72 +690,3 @@ def enable_owner(
         updated_db,
     )[0]
     print(f"Vault URL: {_vault_browser_url(config, owner_path)}")
-
-
-def list_databases(
-    config: dict[str, Any], vault: VaultClient, deployment_name: str | None = None
-) -> None:
-    """List managed databases on one deployment or across all deployments."""
-
-    inventory = vault.load_inventory()
-    rows: list[tuple[str, ...]] = []
-
-    if deployment_name:
-        _, deployment = require_deployment(inventory, deployment_name)
-        deployments = [deployment]
-    else:
-        deployments = [inventory[key] for key in sorted(inventory)]
-
-    for deployment in deployments:
-        for db_key in sorted(deployment["databases"]):
-            rows += database_rows(
-                deployment,
-                deployment["databases"][db_key],
-                config["rotation_days"],
-            )
-
-    if not rows:
-        if deployment_name:
-            print(
-                f"No managed databases exist on "
-                f"{deployment_type_label(deployments[0])} "
-                f"'{deployments[0]['display_name']}'."
-            )
-        else:
-            print("No managed databases exist.")
-        return
-
-    print_table(
-        ("DEPLOYMENT", "DATABASE", "ACCOUNT", "TYPE", "STATUS", "ROTATES IN"),
-        rows,
-    )
-
-
-def list_database(
-    config: dict[str, Any],
-    vault: VaultClient,
-    deployment_or_database: str,
-    database: str | None = None,
-) -> None:
-    """Show one database, its accounts, lifecycle state, and Vault browser URLs."""
-
-    inventory = vault.load_inventory()
-    _, deployment, db_name = _resolve_database_args(
-        config, inventory, deployment_or_database, database
-    )
-    db_key, _ = normalize_database(db_name)
-    if db_key not in deployment["databases"]:
-        raise ControllerError(
-            f"Database '{db_name}' does not exist on "
-            f"{deployment_type_label(deployment)} '{deployment['display_name']}'."
-        )
-    db = deployment["databases"][db_key]
-    print_table(
-        ("DEPLOYMENT", "DATABASE", "ACCOUNT", "TYPE", "STATUS", "ROTATES IN"),
-        database_rows(deployment, db, config["rotation_days"]),
-    )
-    print(f"Deployment type: {deployment_type_label(deployment)}")
-    print(f"Created:         {db['created_at']}")
-    print(f"Last rotated:    {db['rotated_at']}")
-    print()
-    _print_vault_credentials(config, deployment, db)
