@@ -204,6 +204,8 @@ DeleteDatabase
 
 The acknowledgement tells the user what was requested and which normal service-status command to run. It does **not** expose an internal operation ID. Normal follow-up instructions use the friendly `./dev.config` path; detached workers resolve that path internally before running.
 
+Deployment deletion success includes cross-plane cleanup. After the MongoDB resource is absent, the controller deletes the deployment's Ops Manager project, waits for Ops Manager to confirm its removal, and removes the matching `<PROJECT_ID>-group-secret` before the worker can report success.
+
 Examples:
 
 ```bash
