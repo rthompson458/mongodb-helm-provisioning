@@ -146,10 +146,11 @@ Normal DBaaS users should use:
         sp,
         "ListManagedResources",
         "List controller-managed deployment resources and zero-state status.",
-        "Read-only administrator inventory of Vault-backed managed deployments, "
-        "privateWorkerReplacement-managed MongoDB and MongoDBUser custom resources, persistent "
-        "volume claims, persistent volumes, and deployment-lock ConfigMaps. Reports "
-        "CLEAN only when all six categories are empty.",
+        "Read-only authoritative inventory across Vault, Kubernetes, Terraform "
+        "backend state, and Ops Manager. Shows deployment/database/account resources, "
+        "Ops Manager project and group-secret IDs, controller infrastructure, and "
+        "orphan or missing cross-plane artifacts. Permanent controller infrastructure "
+        "is visible but does not prevent CLEAN.",
         "  python3 privateWorkerReplacementAdmin.py ListManagedResources",
     )
 
