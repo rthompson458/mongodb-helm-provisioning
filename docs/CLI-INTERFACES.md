@@ -112,30 +112,43 @@ RecoverDeploymentLock SHARDED_CLUSTER --confirm
 RecoverOrphanedResources --confirm
 ```
 
-`ListManagedResources` is the read-only managed-resource inventory and zero-state check for:
+`ListManagedResources` is the read-only authoritative DBaaS inventory across
+Vault, Kubernetes, Terraform backend state, and Ops Manager. It reports:
 
 ```text
-Vault-backed managed deployments
-managed MongoDB resources
-managed MongoDBUser resources
-managed PVCs
-managed PVs
-deployment locks
+managed ReplicaSets and ShardedClusters
+managed databases and fixed Owner/ReadWrite/Read accounts
+managed MongoDB and MongoDBUser resources
+DBaaS PVCs and PVs
+controller Secrets, ConfigMaps, and deployment locks
+Ops Manager DBaaS projects and group Secrets
+orphan Ops Manager projects and group Secrets
+managed deployments missing an Ops Manager project
+permanent controller/platform infrastructure
 ```
 
-If all six categories are empty, it reports:
+Ops Manager projects and group Secrets include the project/group ID so an
+administrator can correlate a project with its `<PROJECT_ID>-group-secret`.
+
+Permanent controller infrastructure remains visible but does not make zero-state
+dirty. Examples include `tc-ops-manager-projects`, the Terraform backend state
+Secret, and the base `mongodb-development` Ops Manager project.
+
+Status meanings are:
 
 ```text
-Status: CLEAN
+CLEAN
+  No active DBaaS-managed resources and no detected orphan/missing artifacts.
+  Permanent controller/platform infrastructure may still be listed.
+
+MANAGED RESOURCES PRESENT
+  Legitimate active DBaaS-managed resources exist. This is informational.
+
+ATTENTION REQUIRED
+  Cross-plane leftovers or mismatches were detected, such as an orphan Ops
+  Manager project, orphan group Secret, or missing expected Ops Manager project.
 ```
 
-If legitimate controller-managed resources exist, it reports:
-
-```text
-Status: MANAGED RESOURCES PRESENT
-```
-
-That second status is informational. Resource presence alone is not treated as a health failure.
 
 The shorter name `ListResources` is intentionally not supported because it could imply a cluster-wide resource listing.
 
@@ -212,6 +225,7 @@ Both use shared lifecycle/support modules:
   privateWorkerReplacement/deployments.py
   privateWorkerReplacement/databases.py
   privateWorkerReplacement/maintenance.py
+  privateWorkerReplacement/ops_manager.py
   privateWorkerReplacement/deployment_lock.py
   privateWorkerReplacement/terraform_runner.py
   privateWorkerReplacement/async_operations.py
