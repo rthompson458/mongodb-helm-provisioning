@@ -10,6 +10,9 @@ credential details:
 Database status combines Vault-backed desired state, live deployment health,
 and any active asynchronous AddDatabase/DeleteDatabase operation. This lets a
 customer see Creating or Deleting while background work is still in progress.
+
+This module never mutates DBaaS state. Shared Vault path/URL presentation lives
+in credential_display.py so status code does not depend on lifecycle internals.
 """
 
 from __future__ import annotations
@@ -20,7 +23,7 @@ from typing import Any
 from . import kube
 from .async_operations import effective_result, list_operation_records
 from .common import ControllerError, database_rows, normalize_database, print_table
-from .databases import _print_vault_credentials
+from .credential_display import print_vault_credentials
 from .deployments import deployment_type_label, require_deployment, resolve_deployment
 from .vault import VaultClient
 
@@ -256,4 +259,4 @@ def list_database_accounts(
     )
     print(f"Last rotated: {db['rotated_at']}")
     print()
-    _print_vault_credentials(config, deployment, db)
+    print_vault_credentials(config, deployment, db)
