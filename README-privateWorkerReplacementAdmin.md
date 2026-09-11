@@ -4,6 +4,8 @@
 
 Use the customer CLI for normal deployment, shard, database, credential, and service-status work. Use the administrator CLI for operation diagnostics, reconciliation, managed-resource inventory, and exceptional recovery.
 
+Customer and administrator mutations share one controller-wide desired-state serialization boundary on the current private-worker host. This protects the complete Vault-backed Terraform inventory from stale-snapshot/lost-update races while leaving read-only status and diagnostic commands available.
+
 The executable split is an interface boundary, not an authorization boundary. Production must also restrict administrator host access, Kubernetes privileges, Vault policy, and Terraform backend access.
 
 ---
@@ -433,6 +435,7 @@ privateWorkerReplacement/terraform_runner.py
 privateWorkerReplacement/async_operations.py
 privateWorkerReplacement/logging_component.py
 privateWorkerReplacement/runtime_paths.py
+privateWorkerReplacement/mutation_lock.py
 privateWorkerReplacement/kube.py
 privateWorkerReplacement/vault.py
 ```
