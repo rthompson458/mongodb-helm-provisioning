@@ -1,3 +1,6 @@
+# Values are supplied by terraform-dbaas/main.tf; customers do not edit this
+# chart directly. The two connection Secret fields normally reference the
+# hidden controller-admin connection Secret for the selected deployment.
 mongodb:
   name: ""
   image: "mongo:8.0"
@@ -5,5 +8,9 @@ mongodb:
   adminConnectionSecret: ""
   placeholderCollection: "__dbaas_metadata"
 
+# Long-lived desired database inventory. Each entry contains at least a name.
 mongodbDatabases: []
+
+# One-shot management requests such as deleteDatabase. Empty during normal
+# steady-state reconciliation.
 mongodbDatabaseOperations: []
