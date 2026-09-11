@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from privateWorkerReplacement import admin_cli
 
@@ -95,6 +96,17 @@ class AdminCliTests(unittest.TestCase):
             admin_cli._recover_orphans_worker_arguments(args),
             ["RecoverOrphanedResources", "--confirm"],
         )
+
+    def test_admin_mutations_use_controller_state_lock(self) -> None:
+        action = mock.Mock()
+        with mock.patch.object(
+            admin_cli,
+            "controller_state_mutation_lock",
+        ) as lock:
+            admin_cli._run_admin_action({}, "Reconcile", action)
+
+        lock.assert_called_once_with({}, "Reconcile")
+        action.assert_called_once_with()
 
     def test_admin_help_identifies_operator_interface(self) -> None:
         help_text = admin_cli.build_parser().format_help()
