@@ -12,6 +12,7 @@ ATTENTION REQUIRED.
 
 from __future__ import annotations
 
+import textwrap
 from typing import Any
 
 from .maintenance import managed_resource_inventory
@@ -95,27 +96,34 @@ def list_managed_resources(
         status = "CLEAN"
 
     print("privateWorkerReplacement Managed Resource Inventory")
+    print(f"Status: {status}")
     print()
-    label_width = max(len(label) + 1 for label, _ in labels)
 
+    # The count table is the authoritative checklist. Every category always
+    # appears here, including zero-valued categories, so an administrator can
+    # see that nothing was silently skipped.
+    print("Resource counts:")
+    label_width = max(len(label) + 1 for label, _ in labels)
     for label, key in labels:
         print(f"{label + ':':<{label_width}} {len(resources[key])}")
 
+    # Repeat only populated categories in the detail section. Rendering the same
+    # empty categories a second time made the command unnecessarily long and
+    # harder to scan. Long value lists wrap with a hanging indent.
     print()
-    print(f"Status: {status}")
-
-    # Always show every category so an administrator can tell it was checked.
-    # Empty categories stay on one line to keep a clean inventory compact;
-    # categories with entries expand below their heading.
-    print()
-    print("Resource details:")
+    print("Resource details (non-empty categories only):")
     for label, key in labels:
         names = resources[key]
-
         if not names:
-            print(f"{label + ':':<{label_width}} None")
             continue
 
-        print(f"{label}:")
-        for name in names:
-            print(f"  {name}")
+        prefix = f"{label}: "
+        lines = textwrap.wrap(
+            prefix + ", ".join(names),
+            width=100,
+            subsequent_indent=" " * len(prefix),
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        for line in lines:
+            print(line)
