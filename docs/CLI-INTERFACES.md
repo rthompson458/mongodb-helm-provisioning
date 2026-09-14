@@ -126,6 +126,7 @@ Vault, Kubernetes, Terraform backend state, and Ops Manager. It reports:
 managed ReplicaSets and ShardedClusters
 managed databases and fixed Owner/ReadWrite/Read accounts
 managed MongoDB and MongoDBUser resources
+missing/orphan MongoDB resources and MongoDBUser objects
 DBaaS PVCs and PVs
 controller Secrets, ConfigMaps, and deployment locks
 Ops Manager DBaaS projects and group Secrets
@@ -152,9 +153,10 @@ MANAGED RESOURCES PRESENT
   Legitimate active DBaaS-managed resources exist. This is informational.
 
 ATTENTION REQUIRED
-  Cross-plane leftovers or mismatches were detected, such as an orphan Ops
-  Manager project, orphan group Secret, missing expected DBaaS project, or the
-  permanent Ops Manager platform project itself being missing.
+  Cross-plane leftovers or mismatches were detected, such as a missing/orphan
+  MongoDB resource, missing/orphan MongoDBUser, orphan Ops Manager project,
+  orphan group Secret, missing expected DBaaS project, or the permanent Ops
+  Manager platform project itself being missing.
 ```
 
 
@@ -185,6 +187,18 @@ Detached worker
 ```
 
 The public response deliberately hides the operation ID. The acceptance harness is internal engineering tooling, so it correlates the private state entry and polls detailed status through `privateWorkerReplacementAdmin.py ListOperation`.
+
+The same harness has a destructive administrator selection:
+
+```bash
+python3 tests/run_harness.py --admin --allow-changes
+```
+
+That suite starts from a clean DBaaS inventory, deliberately creates runtime
+drift, stranded ShardedCluster locks, and orphaned Terraform state, then proves
+the administrator diagnostics and supported recovery paths return the
+environment to `Status: CLEAN`. The `all` profile includes the complete
+administrator suite automatically.
 
 Database create/delete uses the same model as deployment and shard lifecycle. Moving those requests to a worker changes only how the user waits; it does not change the underlying Terraform-driven lifecycle or safety checks.
 
