@@ -4,9 +4,74 @@ The administrator scenario deliberately creates configuration drift and stranded
 controller state, then proves the supported recovery commands repair it. This is
 engineering-only test code for a disposable development environment.
 
-A successful run starts and ends with a clean DBaaS inventory. Failed runs stop
-at the first unsafe or unexpected condition so the broken state remains
-available for inspection.
+Canonical full-suite test intent:
+39. Verify administrator CLI help renders without starting work.
+40. Verify the asynchronous operation journal is readable.
+41. Verify an unknown operation ID is rejected cleanly.
+42. Require a clean DBaaS inventory before destructive Admin testing starts.
+43. Prove asynchronous Reconcile is a no-op against empty desired state.
+44. Require explicit confirmation before orphan-resource recovery.
+45. Require explicit confirmation before deployment-lock recovery.
+46. Create the ReplicaSet fixture used for Reconcile drift testing.
+47. Verify ListOperation reports the completed ReplicaSet creation.
+48. Verify ListOperations includes that completed lifecycle operation.
+49. Create the database fixture used for account/Reconcile testing.
+50. Verify managed-resource inventory sees the active fixture deployment.
+51. Verify verbose inventory includes the exact test database.
+52. Verify Vault and Kubernetes hold the same readWrite password before drift.
+53. Delete only the managed readWrite MongoDBUser to manufacture drift.
+54. Verify the deliberately deleted MongoDBUser is absent.
+55. Verify its Kubernetes password Secret survives the drift.
+56. Verify compact inventory reports ATTENTION REQUIRED for the missing user.
+57. Verify verbose inventory identifies the exact missing MongoDBUser.
+58. Run asynchronous Reconcile and repair the deleted MongoDBUser.
+59. Verify the recreated readWrite MongoDBUser reaches Updated.
+60. Authenticate all database accounts against MongoDB after Reconcile.
+61. Verify Reconcile did not change the Vault password.
+62. Verify Reconcile did not change the Kubernetes password Secret.
+63. Verify inventory returns to a healthy managed-resource state.
+64. Delete the Reconcile test database.
+65. Delete the Reconcile test ReplicaSet.
+66. Verify Reconcile-test cleanup returns inventory to CLEAN.
+67. Verify configuration permits the two-shard lock-recovery fixture.
+68. Create the two-shard ShardedCluster used for lock recovery.
+69. Create an intentionally mismatched synthetic topology lock.
+70. Verify Reconcile refuses to race an active ShardedCluster lock.
+71. Verify lock recovery refuses a target that disagrees with desired state.
+72. Remove the intentionally invalid synthetic lock.
+73. Create a valid stranded AddShard lock.
+74. Verify verbose inventory exposes the stranded deployment lock.
+75. Verify valid lock recovery still requires explicit confirmation.
+76. Recover the validated stranded AddShard lock asynchronously.
+77. Verify the recovered AddShard lock is absent.
+78. Reduce the test cluster to one shard for DeleteShard recovery.
+79. Create a valid stranded DeleteShard lock.
+80. Recover and validate the completed DeleteShard lock asynchronously.
+81. Verify the recovered DeleteShard lock is absent.
+82. Verify the ShardedCluster remains Running after lock recovery.
+83. Verify Reconcile succeeds after the lock-recovery sequence.
+84. Delete the administrator lock-recovery ShardedCluster.
+85. Verify lock-recovery cleanup returns inventory to CLEAN.
+86. Create the ReplicaSet fixture used for orphan-resource recovery.
+87. Verify orphan recovery refuses nonempty Vault desired-state inventory.
+88. Remove only Vault deployment metadata to manufacture orphaned state.
+89. Verify Vault desired-state inventory is empty.
+90. Verify orphan recovery refuses while a live managed MongoDB CR remains.
+91. Delete the orphan-test MongoDB CR outside the controller.
+92. Verify the orphan-test MongoDB CR is absent.
+93. Delete the orphan-test Ops Manager project and group Secret.
+94. Verify inventory exposes the manufactured orphaned controller resources.
+95. Recover stranded Terraform-managed resources asynchronously.
+96. Verify the administrator suite returns managed-resource inventory to CLEAN.
+97. Verify no administrator-test Kubernetes or orphan Operator/Helm artifacts remain.
+98. Verify no administrator-test Vault folders remain.
+99. Verify the operation journal records administrator orphan recovery.
+100. Verify final asynchronous Reconcile has no desired state left to repair.
+
+A successful full Admin run starts and ends with a clean DBaaS inventory. Failed
+runs stop at the first unsafe or unexpected condition so the broken state remains
+available for inspection. In --testList mode, only requested numbered tests run;
+prerequisite tests are not added automatically.
 """
 
 from __future__ import annotations
