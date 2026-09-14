@@ -15,6 +15,9 @@ kind: Job
 metadata:
   name: {{ $operationName }}
   namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: privateWorkerReplacement
+    dbaas.deployment: {{ .Values.mongodb.name | quote }}
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "-10"
@@ -26,6 +29,9 @@ spec:
   template:
     metadata:
       name: {{ $operationName }}
+      labels:
+        app.kubernetes.io/managed-by: privateWorkerReplacement
+        dbaas.deployment: {{ .Values.mongodb.name | quote }}
 
     spec:
       restartPolicy: Never
