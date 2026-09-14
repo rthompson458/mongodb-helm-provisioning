@@ -395,10 +395,29 @@ def format_duration(seconds: int | float | None) -> str:
 def _interrupted_message(state: dict[str, Any]) -> str:
     """Return actionable administrator guidance for a dead async worker."""
 
-    if state.get("command") in {"AddShard", "DeleteShard"}:
+    command = str(state.get("command", ""))
+
+    if command in {"AddShard", "DeleteShard"}:
         recovery = (
             "The Terraform deployment lock/resume safeguards remain in effect. "
             "Rerun the same shard command with the same count to resume safely."
+        )
+    elif command == "Reconcile":
+        recovery = (
+            "Inspect ListManagedResources and normal service status first. "
+            "Rerun Reconcile only after the resulting state is understood."
+        )
+    elif command == "RecoverDeploymentLock":
+        recovery = (
+            "Inspect ListManagedResources --verbose and ListShards for the target "
+            "ShardedCluster. Rerun RecoverDeploymentLock only if its recovery "
+            "preconditions are still satisfied."
+        )
+    elif command == "RecoverOrphanedResources":
+        recovery = (
+            "Inspect ListManagedResources before retrying. Rerun "
+            "RecoverOrphanedResources only if desired-state inventory is still "
+            "empty and no live managed MongoDB deployment remains."
         )
     else:
         recovery = (
