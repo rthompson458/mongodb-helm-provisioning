@@ -121,7 +121,7 @@ python3 tests/run_harness.py --profile locking --allow-changes
 
 The locking scenario adds 6 checks after preflight. It verifies that the Terraform-created ShardedCluster deployment lock appears during an active topology change, blocks conflicting work, disappears after completion, and leaves the cluster readable before cleanup.
 
-### Administrator recovery suite — 62 total checks
+### Administrator recovery suite — 67 total checks
 
 The administrator suite is selected with a flag rather than a normal lifecycle profile:
 
@@ -129,7 +129,7 @@ The administrator suite is selected with a flag rather than a normal lifecycle p
 python3 tests/run_harness.py --admin --allow-changes
 ```
 
-It runs the 5 read-only preflight checks plus 57 administrator checks. The suite requires a **clean DBaaS starting inventory** because it intentionally damages and repairs the test environment. It verifies:
+It runs the 5 read-only preflight checks plus 62 administrator checks. The suite requires a **clean DBaaS starting inventory** because it intentionally damages and repairs the test environment. It verifies:
 
 - administrator help, operation-journal reads, and unknown-operation handling;
 - zero-state `ListManagedResources` and no-op `Reconcile`;
@@ -158,7 +158,7 @@ python3 tests/run_harness.py --profile replicaset --admin --allow-changes
 
 The `all` profile already includes the full administrator suite, so adding `--admin` to `--profile all` does not duplicate the tests.
 
-### Complete acceptance run — 95 total checks
+### Complete acceptance run — 100 total checks
 
 Run the full gauntlet only when broad end-to-end acceptance is needed:
 
@@ -168,7 +168,7 @@ python3 tests/run_harness.py --profile all --allow-changes
 
 This runs preflight, ReplicaSet, ShardedCluster, locking, and the complete administrator recovery suite.
 
-The harness help derives displayed totals from the scenario `TEST_COUNT` constants. The CLI regression suite verifies the current 5/16/21/11/62/95 totals so documentation drift is caught quickly.
+The harness help derives displayed totals from the scenario `TEST_COUNT` constants. The CLI regression suite verifies the current 5/16/21/11/67/100 totals so documentation drift is caught quickly.
 
 ---
 
@@ -248,7 +248,7 @@ At the end, the harness reports pass/fail totals plus elapsed time for each prof
 A successful complete run ends with:
 
 ```text
-HARNESS SUMMARY: 95 passed / 0 failed
+HARNESS SUMMARY: 100 passed / 0 failed
 ```
 
 ---
@@ -311,7 +311,7 @@ An orphan Ops Manager project, orphan `<PROJECT_ID>-group-secret`, a managed dep
 
 ## 9. Recommended validation workflow after changes
 
-Do not run the complete 95-check harness after every small change.
+Do not run the complete 100-check harness after every small change.
 
 Use this approach:
 
@@ -323,4 +323,4 @@ Use this approach:
 6. For administrator inventory, Reconcile, recovery, or cross-plane consistency changes, run `--admin --allow-changes` from a clean DBaaS starting inventory.
 7. Reserve `--profile all --allow-changes` for broad cross-cutting lifecycle changes, release/demo baselines, or other true acceptance milestones.
 
-This keeps normal feedback fast while preserving the full 95-check run for the occasions when its broad coverage is actually valuable.
+This keeps normal feedback fast while preserving the full 100-check run for the occasions when its broad coverage is actually valuable.
