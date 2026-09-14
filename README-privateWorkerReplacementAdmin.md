@@ -129,6 +129,10 @@ is neutral inventory information, not a health failure.
 leftover that an administrator should investigate, including:
 
 ```text
+managed MongoDB resource missing from Kubernetes
+unexpected/orphan privateWorkerReplacement-managed MongoDB resource
+managed MongoDBUser missing from Kubernetes
+unexpected/orphan privateWorkerReplacement-managed MongoDBUser
 Ops Manager project with no corresponding managed deployment
 <PROJECT_ID>-group-secret with no corresponding live project/deployment
 managed deployment with no corresponding Ops Manager project
