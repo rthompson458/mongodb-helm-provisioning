@@ -906,4 +906,8 @@ or:
 python3 privateWorkerReplacementAdmin.py --help
 ```
 
+Long-running administrator mutations (`Reconcile`, `RecoverDeploymentLock`, and
+`RecoverOrphanedResources`) run as detached background operations and return an
+Operation ID for `ListOperation` monitoring.
+
 See `README-privateWorkerReplacementAdmin.md` for the administrator command reference and recovery rules.
