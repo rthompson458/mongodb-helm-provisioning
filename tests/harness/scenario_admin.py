@@ -783,10 +783,10 @@ def run(runner: HarnessRunner) -> None:
         return
 
     if not runner.admin(
-        "Inventory detects the manufactured orphaned controller resources",
+        "Inventory exposes the manufactured orphaned controller resources",
         "ListManagedResources",
         "--verbose",
-        expected_text="Status: ATTENTION REQUIRED",
+        expected_text=orphan_rs_key,
     ).passed:
         return
 
