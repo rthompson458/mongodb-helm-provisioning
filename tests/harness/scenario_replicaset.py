@@ -1,4 +1,18 @@
-"""End-to-end ReplicaSet lifecycle scenario."""
+"""End-to-end ReplicaSet and database lifecycle scenario.
+
+Canonical full-suite test intent:
+6. Create a temporary managed MongoDB ReplicaSet and wait for readiness.
+7. Verify the new ReplicaSet is visible through the customer status command.
+8. Create a database and its three managed accounts on the ReplicaSet.
+9. Verify database-level status after creation.
+10. Verify Owner, ReadWrite, and Read account status is presented correctly.
+11. Prove an RS cannot be deleted while a managed database still exists.
+12. Rotate all three database credentials through the supported workflow.
+13. Disable the Owner account and verify the policy path completes.
+14. Re-enable the Owner account and verify it becomes usable again.
+15. Delete the managed database and its accounts/credentials.
+16. Delete the now-empty ReplicaSet and complete deployment cleanup.
+"""
 
 from __future__ import annotations
 
