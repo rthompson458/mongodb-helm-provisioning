@@ -886,7 +886,7 @@ terraform-dbaas/scripts/lifecycle.sh
 
 Python does not directly create or edit managed MongoDB custom resources, managed database users, Vault lifecycle records, deployment locks, or persistent storage.
 
-Deployment teardown has one explicit cross-plane cleanup exception: the per-deployment Ops Manager project and its Operator-created `<PROJECT_ID>-group-secret` are not Terraform desired-state resources. `ops_manager.py` deletes and verifies those artifacts before deployment deletion is allowed to report success.
+Deployment teardown has two explicit cleanup exceptions for resources created outside Terraform state. The controller removes the per-deployment Ops Manager project and its Operator-created `<PROJECT_ID>-group-secret`, and it removes MongoDB Operator/Helm runtime artifacts such as `<deployment>-agent-auth-secret` and completed database-management hook Jobs. These cleanups run only after the owning MongoDB resource is absent, and deployment deletion does not report success until they are verified gone.
 
 ---
 
