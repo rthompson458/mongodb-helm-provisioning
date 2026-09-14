@@ -169,8 +169,9 @@ Normal DBaaS users should use:
         "backend state, and Ops Manager. The default view shows compact grouped "
         "counts, health/consistency status, and one row per managed deployment. "
         "Permanent controller infrastructure remains visible without preventing "
-        "CLEAN; orphan or missing cross-plane state reports ATTENTION REQUIRED. "
-        "Use --verbose to append the full object-name inventory for troubleshooting.",
+        "CLEAN; orphan or missing cross-plane state, including MongoDB Operator/Helm "
+        "runtime leftovers, reports ATTENTION REQUIRED. Use --verbose to append the "
+        "full object-name inventory for troubleshooting.",
         "  python3 privateWorkerReplacementAdmin.py ListManagedResources\n"
         "  python3 privateWorkerReplacementAdmin.py ListManagedResources --verbose",
     )
@@ -236,8 +237,9 @@ Normal DBaaS users should use:
         "when Vault-backed managed deployment inventory "
         "is empty AND Kubernetes contains no privateWorkerReplacement-managed MongoDB "
         "custom resources. If both checks pass, Terraform converges the controller "
-        "backend to empty desired state and finishes destroying tracked leftovers. "
-        "Use ListOperation with the returned operation ID to monitor completion.",
+        "backend to empty desired state, then removes deployment-specific MongoDB "
+        "Operator/Helm runtime leftovers that live outside Terraform state. Use "
+        "ListOperation with the returned operation ID to monitor completion.",
         "  python3 privateWorkerReplacementAdmin.py RecoverOrphanedResources --confirm\n"
         "  python3 privateWorkerReplacementAdmin.py ListOperation OPERATION_ID",
     )
