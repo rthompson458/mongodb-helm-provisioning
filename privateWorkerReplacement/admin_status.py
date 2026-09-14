@@ -135,6 +135,7 @@ def list_managed_resources(
         ("Orphan MongoDB resources", "orphan_mongodb_resources"),
         ("Missing MongoDB users", "missing_mongodb_users"),
         ("Orphan MongoDB users", "orphan_mongodb_users"),
+        ("Orphan Operator/Helm artifacts", "orphan_operator_artifacts"),
         ("DBaaS PVCs", "pvcs"),
         ("DBaaS PVs", "pvs"),
         ("Controller Secrets", "controller_secrets"),
@@ -166,6 +167,7 @@ def list_managed_resources(
         "orphan_mongodb_resources",
         "missing_mongodb_users",
         "orphan_mongodb_users",
+        "orphan_operator_artifacts",
         "ops_manager_orphans",
         "orphan_group_secrets",
         "missing_ops_manager_projects",
@@ -266,6 +268,10 @@ def list_managed_resources(
             (
                 "Orphan MongoDB users",
                 str(len(resources["orphan_mongodb_users"])),
+            ),
+            (
+                "Orphan Operator/Helm artifacts",
+                str(len(resources["orphan_operator_artifacts"])),
             ),
             (
                 "Ops Manager orphan projects",

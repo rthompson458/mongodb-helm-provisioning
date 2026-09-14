@@ -127,6 +127,7 @@ managed ReplicaSets and ShardedClusters
 managed databases and fixed Owner/ReadWrite/Read accounts
 managed MongoDB and MongoDBUser resources
 missing/orphan MongoDB resources and MongoDBUser objects
+orphan MongoDB Operator/Helm runtime artifacts
 DBaaS PVCs and PVs
 controller Secrets, ConfigMaps, and deployment locks
 Ops Manager DBaaS projects and group Secrets
@@ -154,9 +155,10 @@ MANAGED RESOURCES PRESENT
 
 ATTENTION REQUIRED
   Cross-plane leftovers or mismatches were detected, such as a missing/orphan
-  MongoDB resource, missing/orphan MongoDBUser, orphan Ops Manager project,
-  orphan group Secret, missing expected DBaaS project, or the permanent Ops
-  Manager platform project itself being missing.
+  MongoDB resource, missing/orphan MongoDBUser, orphan MongoDB Operator/Helm
+  runtime artifact, orphan Ops Manager project, orphan group Secret, missing
+  expected DBaaS project, or the permanent Ops Manager platform project itself
+  being missing.
 ```
 
 
@@ -295,7 +297,7 @@ Both use shared lifecycle/support modules:
   privateWorkerReplacement/vault.py
 ```
 
-This avoids duplicating lifecycle logic and preserves the Terraform-driven mutation boundary. Normal DBaaS desired-state changes remain Terraform-owned. Deployment teardown separately removes the per-deployment Ops Manager project and Operator-created group Secret because those cross-plane artifacts are not Terraform desired-state resources.
+This avoids duplicating lifecycle logic and preserves the Terraform-driven mutation boundary. Normal DBaaS desired-state changes remain Terraform-owned. Deployment teardown separately removes resources created outside Terraform state: the per-deployment Ops Manager project/group Secret and deployment-specific MongoDB Operator/Helm runtime artifacts. Those cleanup actions run only after the owning MongoDB deployment is absent.
 
 ## Security boundary
 

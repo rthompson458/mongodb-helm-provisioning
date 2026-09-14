@@ -153,7 +153,7 @@ It runs the 5 read-only preflight checks plus 62 administrator checks. The suite
 - refusal when Vault inventory is empty but a live managed MongoDB resource still exists;
 - successful asynchronous orphan recovery after both independent safety checks pass;
 - operation-journal polling for every long-running administrator mutation;
-- final Kubernetes/Vault cleanup and a final `Status: CLEAN` inventory.
+- final Kubernetes/Vault cleanup, including Operator auth Secrets and Helm hook Jobs/Pods, and a final `Status: CLEAN` inventory.
 
 The suite stops on the first failure. A failed destructive test may intentionally leave its broken state available for diagnosis. A **passing** administrator run finishes clean.
 
@@ -292,7 +292,7 @@ The daily files are append-only and use a UTC date. The harness reads the state 
 
 ## 8. Cleanup and failed runs
 
-Successful lifecycle profiles delete the temporary resources they create. A successful administrator suite additionally proves its test resources are absent from Kubernetes and Vault and finishes with `ListManagedResources` reporting `Status: CLEAN`.
+Successful lifecycle profiles delete the temporary resources they create. Deployment deletion also verifies non-Terraform MongoDB Operator/Helm artifacts are gone. A successful administrator suite proves its test resources are absent from Kubernetes and Vault—including Operator auth Secrets and database-management hook Jobs/Pods—and finishes with `ListManagedResources` reporting `Status: CLEAN`.
 
 The administrator suite requires a clean DBaaS inventory before it starts. This prevents its destructive recovery tests from adopting or deleting unrelated managed deployments.
 
@@ -312,7 +312,7 @@ Status: CLEAN
 
 An environment with legitimate active DBaaS resources reports `MANAGED RESOURCES PRESENT`; that status alone is not a failure.
 
-An orphan Ops Manager project, orphan `<PROJECT_ID>-group-secret`, a managed deployment missing its expected Ops Manager project, or a missing permanent Ops Manager platform project reports `ATTENTION REQUIRED`. Ops Manager inventory lines include project IDs so cleanup failures can be correlated across Kubernetes and Ops Manager.
+An orphan MongoDB Operator/Helm runtime artifact, orphan Ops Manager project, orphan `<PROJECT_ID>-group-secret`, a managed deployment missing its expected Ops Manager project, or a missing permanent Ops Manager platform project reports `ATTENTION REQUIRED`. Ops Manager inventory lines include project IDs so cleanup failures can be correlated across Kubernetes and Ops Manager.
 
 ---
 

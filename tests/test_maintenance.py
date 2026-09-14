@@ -226,7 +226,7 @@ class MaintenanceTests(unittest.TestCase):
         vault = FakeVault({})
 
         def fake_list(_config, resource, **kwargs):
-            if resource in {"mongodb", "mongodbuser", "pvc", "pv"}:
+            if resource in {"mongodb", "mongodbuser", "pvc", "pv", "job", "pod"}:
                 if resource == "pv":
                     self.assertFalse(kwargs.get("namespaced", True))
                 return []
@@ -280,7 +280,7 @@ class MaintenanceTests(unittest.TestCase):
         vault = FakeVault({})
 
         def fake_list(_config, resource, **_kwargs):
-            if resource in {"mongodb", "mongodbuser", "pvc", "pv", "configmap", "secret"}:
+            if resource in {"mongodb", "mongodbuser", "pvc", "pv", "configmap", "secret", "job", "pod"}:
                 return []
             raise AssertionError(resource)
 
@@ -314,7 +314,7 @@ class MaintenanceTests(unittest.TestCase):
         )
 
         def fake_list(_config, resource, **_kwargs):
-            if resource in {"mongodb", "mongodbuser", "pvc", "pv", "configmap", "secret"}:
+            if resource in {"mongodb", "mongodbuser", "pvc", "pv", "configmap", "secret", "job", "pod"}:
                 return []
             raise AssertionError(resource)
 
@@ -364,7 +364,7 @@ class MaintenanceTests(unittest.TestCase):
                     {"metadata": {"name": readwrite}},
                     {"metadata": {"name": read}},
                 ]
-            if resource in {"pvc", "pv", "configmap", "secret"}:
+            if resource in {"pvc", "pv", "configmap", "secret", "job", "pod"}:
                 return []
             raise AssertionError(resource)
 
@@ -399,7 +399,7 @@ class MaintenanceTests(unittest.TestCase):
                 return [{"metadata": {"name": "stale-rs"}}]
             if resource == "mongodbuser":
                 return [{"metadata": {"name": "tc-stale-rs-admin"}}]
-            if resource in {"pvc", "pv", "configmap", "secret"}:
+            if resource in {"pvc", "pv", "configmap", "secret", "job", "pod"}:
                 return []
             raise AssertionError(resource)
 
@@ -523,13 +523,24 @@ class MaintenanceTests(unittest.TestCase):
 
         with (
             patch.object(maintenance.kube, "list_json", return_value=[]),
+            patch.object(
+                maintenance,
+                "discover_managed_deployment_keys",
+                return_value=["rs1"],
+            ) as discover_mock,
+            patch.object(
+                maintenance,
+                "cleanup_deployment_operator_artifacts",
+            ) as cleanup_mock,
             patch.object(maintenance, "apply_inventory") as apply_mock,
         ):
             maintenance.recover_orphaned_resources(
                 self.config, vault, confirmed=True
             )
 
+        discover_mock.assert_called_once_with(self.config)
         apply_mock.assert_called_once_with(self.config, {})
+        cleanup_mock.assert_called_once_with(self.config, "rs1")
 
     def test_recover_orphaned_resources_refuses_nonempty_vault_inventory(self) -> None:
         vault = FakeVault(

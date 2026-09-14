@@ -30,6 +30,11 @@ from .deployment_lock import (
 from .deployments import deployment_type_label, require_deployment
 from .logging_component import log_event
 from .ops_manager import list_projects as list_ops_manager_projects
+from .operator_artifacts import (
+    cleanup_deployment_operator_artifacts,
+    discover_managed_deployment_keys,
+    list_orphan_operator_artifacts,
+)
 from .terraform_runner import apply_inventory
 from .vault import VaultClient
 
@@ -149,6 +154,15 @@ def managed_resource_inventory(
     )
     orphan_mongodb_users = sorted(
         actual_mongodb_users - expected_mongodb_users
+    )
+
+    # MongoDB Operator auth Secrets and Helm hook Jobs/Pods are created outside
+    # Terraform state. They are healthy while their deployment exists, but a
+    # leftover with neither desired state nor a live MongoDB CR is actionable
+    # cleanup drift and must prevent a false CLEAN report.
+    orphan_operator_artifacts = list_orphan_operator_artifacts(
+        config,
+        expected_mongodb_resources,
     )
 
     pvcs = kube.list_json(
@@ -321,6 +335,7 @@ def managed_resource_inventory(
         "orphan_mongodb_resources": orphan_mongodb_resources,
         "missing_mongodb_users": missing_mongodb_users,
         "orphan_mongodb_users": orphan_mongodb_users,
+        "orphan_operator_artifacts": orphan_operator_artifacts,
         "pvcs": _kubernetes_names(pvcs),
         "pvs": _kubernetes_names(pvs),
         "controller_secrets": controller_secrets,
@@ -601,7 +616,15 @@ def recover_orphaned_resources(
             f"{names}."
         )
 
-    log_event("orphaned_resources.recovery.requested")
+    # Capture deployment keys before Terraform destroys the remaining labelled
+    # objects. A previous partial cleanup may also leave only Operator/Helm
+    # artifacts; discover_managed_deployment_keys() handles that recovery case.
+    cleanup_keys = discover_managed_deployment_keys(config)
+
+    log_event(
+        "orphaned_resources.recovery.requested",
+        artifact_cleanup_deployments=len(cleanup_keys),
+    )
     print(
         "Vault inventory is empty and no live privateWorkerReplacement-managed "
         "MongoDB deployments exist."
@@ -620,7 +643,13 @@ def recover_orphaned_resources(
             "Terraform cleanup completed, but a managed MongoDB resource is still present."
         )
 
-    log_event("orphaned_resources.recovery.succeeded")
+    for deployment_key in cleanup_keys:
+        cleanup_deployment_operator_artifacts(config, deployment_key)
+
+    log_event(
+        "orphaned_resources.recovery.succeeded",
+        artifact_cleanup_deployments=len(cleanup_keys),
+    )
     print("\nOrphaned privateWorkerReplacement resources were successfully reconciled.")
     print("Managed deployments: 0")
     print("Status:              Clean")

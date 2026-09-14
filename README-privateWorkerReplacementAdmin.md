@@ -139,6 +139,7 @@ managed MongoDB resource missing from Kubernetes
 unexpected/orphan privateWorkerReplacement-managed MongoDB resource
 managed MongoDBUser missing from Kubernetes
 unexpected/orphan privateWorkerReplacement-managed MongoDBUser
+orphan MongoDB Operator/Helm runtime artifacts
 Ops Manager project with no corresponding managed deployment
 <PROJECT_ID>-group-secret with no corresponding live project/deployment
 managed deployment with no corresponding Ops Manager project
@@ -344,7 +345,7 @@ Live privateWorkerReplacement-managed MongoDB CRs = none
 
 If either check fails, recovery stops.
 
-When both checks pass, Terraform receives empty desired state and finishes converging tracked resources toward zero. Existing storage safeguards remain active: ownership checks, live-pod/PVC-use checks, bounded waits, and refusal instead of unsafe force deletion.
+When both checks pass, Terraform receives empty desired state and finishes converging tracked resources toward zero. The recovery then removes known deployment-specific artifacts created outside Terraform state, including MongoDB Operator `*-agent-auth-secret` Secrets and MongoDB-management Helm hook Jobs/Pods. Existing storage safeguards remain active: ownership checks, live-pod/PVC-use checks, bounded waits, and refusal instead of unsafe force deletion.
 
 `RecoverOrphanedResources` is asynchronous, matching `Reconcile` and
 `RecoverDeploymentLock`. A successful submission prints the internal operation
@@ -463,7 +464,7 @@ privateWorkerReplacement/kube.py
 privateWorkerReplacement/vault.py
 ```
 
-Normal managed DBaaS desired-state mutations remain Terraform-driven. The Python controller validates, coordinates, waits, reports, and logs. Deployment teardown explicitly removes the per-deployment Ops Manager project and Operator-created group Secret because those cross-plane artifacts are not Terraform desired-state resources.
+Normal managed DBaaS desired-state mutations remain Terraform-driven. The Python controller validates, coordinates, waits, reports, and logs. Deployment teardown has narrow cleanup exceptions for resources created outside Terraform state: the per-deployment Ops Manager project/group Secret and deployment-specific MongoDB Operator/Helm runtime artifacts. Cleanup is allowed only after the owning MongoDB deployment is absent.
 
 ---
 
@@ -495,8 +496,8 @@ journal instead of holding the interactive shell open. It intentionally:
 - proves orphan recovery is blocked while desired state still exists;
 - proves it is also blocked when desired state is empty but a live managed MongoDB resource remains;
 - runs `RecoverOrphanedResources` only after both independent safety conditions are met;
-- verifies Kubernetes and Vault test artifacts are gone; and
-- finishes with `ListManagedResources` reporting `Status: CLEAN`.
+- verifies Kubernetes, Vault, MongoDB Operator, and Helm hook test artifacts are gone; and
+- finishes with `ListManagedResources` reporting `Status: CLEAN`, including zero orphan Operator/Helm artifacts.
 
 The complete lifecycle gauntlet automatically includes all administrator tests:
 

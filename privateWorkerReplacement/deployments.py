@@ -20,6 +20,7 @@ from .common import ControllerError, iso_utc, normalize_deployment, utc_now
 from .deployment_lock import require_no_active_change
 from .logging_component import log_event
 from .ops_manager import delete_project as delete_ops_manager_project
+from .operator_artifacts import cleanup_deployment_operator_artifacts
 from .terraform_runner import apply_inventory
 from .vault import VaultClient
 
@@ -428,6 +429,11 @@ def _delete_deployment(
         else config["rs_ready_timeout"]
     )
     kube.wait_absent(config, "mongodb", key, timeout)
+
+    # MongoDB Operator and Helm hook artifacts are created outside Terraform
+    # state. Remove them only after the owning MongoDB resource is gone so a
+    # successful delete leaves no deployment-specific Kubernetes debris.
+    cleanup_deployment_operator_artifacts(config, key)
 
     # Each deployment gets its own Ops Manager project. Teardown is not complete
     # until the project and its Operator-created <PROJECT_ID>-group-secret are
