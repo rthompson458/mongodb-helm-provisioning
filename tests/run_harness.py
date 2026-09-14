@@ -69,18 +69,20 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
-Profiles:
+Profiles and administrator suite:
   preflight   {totals['preflight']:2d} read-only checks. Creates, changes, and deletes nothing.
   replicaset  {totals['replicaset']:2d} checks total. Tests ReplicaSet + database lifecycle.
   sharded     {totals['sharded']:2d} checks total. Tests ShardedCluster + shard + database lifecycle.
   locking     {totals['locking']:2d} checks total. Tests ShardedCluster mutation locking.
-  all         {totals['all']:2d} checks total. Runs the complete live acceptance gauntlet.
+  --admin     {totals['admin']:2d} checks total when run alone. Tests administrator diagnostics/recovery.
+  all         {totals['all']:2d} checks total. Runs every lifecycle and administrator test.
 
 Safety:
-  Lifecycle profiles (replicaset, sharded, locking, all) require --allow-changes.
-  This explicitly allows the harness to create, modify, and delete temporary
-  test resources in the configured environment. Preflight is read-only and does
-  not require --allow-changes.
+  Lifecycle profiles and --admin require --allow-changes.
+  The administrator suite deliberately creates drift, stranded locks, and
+  orphaned Terraform state, then proves supported recovery returns the
+  environment to CLEAN. It requires a clean DBaaS starting inventory.
+  Preflight is read-only and does not require --allow-changes.
 
 Common commands:
   Read-only preflight:
@@ -94,6 +96,9 @@ Common commands:
 
   Locking/concurrency only:
     python3 tests/run_harness.py --profile locking --allow-changes
+
+  Full administrator diagnostics/recovery suite:
+    python3 tests/run_harness.py --admin --allow-changes
 
   FULL GAUNTLET - all {totals['all']} live acceptance checks:
     python3 tests/run_harness.py --profile all --allow-changes
@@ -135,8 +140,9 @@ Configuration:
         "--allow-changes",
         action="store_true",
         help=(
-            "Required for lifecycle profiles. Allows the harness to create, modify, "
-            "and delete temporary test resources in the configured environment."
+            "Required for every mutating selection, including --admin. Allows the "
+            "harness to create, modify, deliberately damage, recover, and delete "
+            "temporary test resources in the configured environment."
         ),
     )
     parser.add_argument(
