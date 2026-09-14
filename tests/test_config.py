@@ -40,6 +40,7 @@ storage_size = 16Gi
 
 [Sharding]
 default_shards = 3
+max_shards_per_cluster = 5
 default_members_per_shard = 3
 default_mongos = 2
 default_config_servers = 3
@@ -76,6 +77,7 @@ class ConfigTests(unittest.TestCase):
         config, config_dir, config_path = self._load(VALID_CONFIG)
 
         self.assertEqual(config["default_shards"], 3)
+        self.assertEqual(config["max_shards_per_cluster"], 5)
         self.assertEqual(config["default_members_per_shard"], 3)
         self.assertTrue(config["persistent"])
         self.assertEqual(Path(config["config_path"]), config_path)
@@ -101,6 +103,25 @@ class ConfigTests(unittest.TestCase):
         )
         with self.assertRaises(ControllerError):
             self._load(text)
+
+    def test_max_shards_cannot_be_zero(self) -> None:
+        text = VALID_CONFIG.replace(
+            "max_shards_per_cluster = 5",
+            "max_shards_per_cluster = 0",
+        )
+        with self.assertRaises(ControllerError):
+            self._load(text)
+
+    def test_default_shards_cannot_exceed_maximum(self) -> None:
+        text = VALID_CONFIG.replace(
+            "max_shards_per_cluster = 5",
+            "max_shards_per_cluster = 2",
+        )
+        with self.assertRaises(ControllerError) as ctx:
+            self._load(text)
+
+        self.assertIn("cannot exceed", str(ctx.exception))
+        self.assertIn("max_shards_per_cluster", str(ctx.exception))
 
     def test_static_local_storage_requires_node_name(self) -> None:
         text = VALID_CONFIG.replace("node_name = node-0", "node_name =")
