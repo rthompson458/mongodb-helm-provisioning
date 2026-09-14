@@ -33,6 +33,7 @@ from .ops_manager import list_projects as list_ops_manager_projects
 from .operator_artifacts import (
     cleanup_deployment_operator_artifacts,
     discover_managed_deployment_keys,
+    list_orphan_operator_artifacts,
 )
 from .terraform_runner import apply_inventory
 from .vault import VaultClient
@@ -153,6 +154,15 @@ def managed_resource_inventory(
     )
     orphan_mongodb_users = sorted(
         actual_mongodb_users - expected_mongodb_users
+    )
+
+    # MongoDB Operator auth Secrets and Helm hook Jobs/Pods are created outside
+    # Terraform state. They are healthy while their deployment exists, but a
+    # leftover with neither desired state nor a live MongoDB CR is actionable
+    # cleanup drift and must prevent a false CLEAN report.
+    orphan_operator_artifacts = list_orphan_operator_artifacts(
+        config,
+        expected_mongodb_resources,
     )
 
     pvcs = kube.list_json(
@@ -325,6 +335,7 @@ def managed_resource_inventory(
         "orphan_mongodb_resources": orphan_mongodb_resources,
         "missing_mongodb_users": missing_mongodb_users,
         "orphan_mongodb_users": orphan_mongodb_users,
+        "orphan_operator_artifacts": orphan_operator_artifacts,
         "pvcs": _kubernetes_names(pvcs),
         "pvs": _kubernetes_names(pvs),
         "controller_secrets": controller_secrets,
