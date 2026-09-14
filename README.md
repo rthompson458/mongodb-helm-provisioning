@@ -409,7 +409,8 @@ preflight    5
 replicaset  16
 sharded     21
 locking     11
-all         38
+admin       67
+all        100
 ```
 
 Safe read-only live preflight:
@@ -420,13 +421,25 @@ python3 tests/run_harness.py --profile preflight
 
 Lifecycle profiles that create, modify, or delete temporary test resources require the explicit `--allow-changes` safety acknowledgement.
 
+Run only specific canonical full-suite tests when validating a narrow fix:
+
+```bash
+python3 tests/run_harness.py --testList 97-100 --allow-changes
+python3 tests/run_harness.py --testList 56,58-67 --allow-changes
+```
+
+`--testList` uses the numbering from the complete 100-test run. The list must
+contain no spaces. Ranges must be ascending, and `--testList` cannot be used
+with `--profile` or `--admin`. Selective mode runs only the requested tests;
+it does not automatically run prerequisite tests.
+
 Complete live acceptance run:
 
 ```bash
 python3 tests/run_harness.py --profile all --allow-changes
 ```
 
-The complete live harness covers ReplicaSet lifecycle, ShardedCluster lifecycle, database/account lifecycle, password rotation, Owner disable/re-enable, shard expansion/contraction, the one-shard minimum, storage cleanup, asynchronous request polling, and deployment-lock concurrency. It is fail-fast and cleans successful temporary scenarios.
+The complete live harness covers ReplicaSet lifecycle, ShardedCluster lifecycle, database/account lifecycle, password rotation, Owner disable/re-enable, shard expansion/contraction, the one-shard minimum, storage cleanup, asynchronous request polling, deployment-lock concurrency, and administrator recovery/cleanup. It is fail-fast and cleans successful temporary scenarios.
 
 See `tests/README.md` for profile-by-profile details.
 
