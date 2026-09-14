@@ -499,6 +499,18 @@ journal instead of holding the interactive shell open. It intentionally:
 - verifies Kubernetes, Vault, MongoDB Operator, and Helm hook test artifacts are gone; and
 - finishes with `ListManagedResources` reporting `Status: CLEAN`, including zero orphan Operator/Helm artifacts.
 
+For a focused retest, the harness can execute exact canonical test numbers from
+the 100-test full-suite order. For example, the final administrator cleanup
+checks are 97 through 100:
+
+```bash
+python3 tests/run_harness.py --testList 97-100 --allow-changes
+```
+
+Selective mode runs only the requested tests and does not add their normal
+prerequisites. It is intended for targeted engineering verification when the
+required starting state is already known.
+
 The complete lifecycle gauntlet automatically includes all administrator tests:
 
 ```bash

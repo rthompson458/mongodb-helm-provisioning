@@ -1,4 +1,23 @@
-"""End-to-end ShardedCluster and multi-shard lifecycle scenario."""
+"""End-to-end ShardedCluster and multi-shard lifecycle scenario.
+
+Canonical full-suite test intent:
+17. Reject ShardedCluster creation above the configured shard maximum.
+18. Create the initial temporary ShardedCluster and wait for every component.
+19. Verify targeted shard status reports the expected shard.
+20. Verify global shard status includes the temporary cluster.
+21. Add the allowed number of shards without exceeding the configured maximum.
+22. Verify the expanded topology is online.
+23. Reject an AddShard request whose resulting topology exceeds the maximum.
+24. Create a managed database and accounts on the ShardedCluster.
+25. Remove one shard while the database exists, preserving supported service.
+26. Rotate all three ShardedCluster database credentials.
+27. Disable the database Owner account.
+28. Re-enable the database Owner account.
+29. Delete the ShardedCluster database and managed accounts.
+30. Reduce the cluster to one remaining shard.
+31. Prove the final shard cannot be deleted.
+32. Delete the temporary ShardedCluster and complete cleanup.
+"""
 
 from __future__ import annotations
 

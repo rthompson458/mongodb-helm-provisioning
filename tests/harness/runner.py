@@ -29,6 +29,7 @@ class HarnessRunner:
         self.started_at = time.monotonic()
         self.profile_times: dict[str, float] = {}
         self._profile_started: dict[str, float] = {}
+        self._canonical_candidate = 0
 
     def start_profile(self, name: str) -> None:
         """Start timing one major scenario group."""
@@ -42,24 +43,77 @@ class HarnessRunner:
         if started is not None:
             self.profile_times[name] = time.monotonic() - started
 
-    def _next_number(self) -> int:
-        return len(self.results) + 1
+    @property
+    def selective(self) -> bool:
+        """Return True when --testList selected canonical full-suite test IDs."""
 
-    def _announce(self, name: str) -> None:
+        return self.context.selected_tests is not None
+
+    def set_canonical_position(self, previous_test_number: int) -> None:
+        """Set the full-suite test number immediately before the next scenario."""
+
+        if self.selective:
+            self._canonical_candidate = previous_test_number
+
+    def is_test_selected(self, number: int) -> bool:
+        """Return whether one canonical test should execute in this run."""
+
+        if not self.selective:
+            return True
+        selected = self.context.selected_tests or frozenset()
+        return number in selected
+
+    def any_test_selected(self, start: int, end: int) -> bool:
+        """Return whether any selected test falls in an inclusive canonical range."""
+
+        if not self.selective:
+            return True
+        selected = self.context.selected_tests or frozenset()
+        return any(start <= number <= end for number in selected)
+
+    def _begin_test(self, name: str) -> tuple[int, bool]:
+        """Reserve one test number and decide whether its action should execute."""
+
+        if self.selective:
+            self._canonical_candidate += 1
+            number = self._canonical_candidate
+            return number, self.is_test_selected(number)
+        return len(self.results) + 1, True
+
+    def _display_total(self) -> int:
+        """Return the denominator printed beside a test number."""
+
+        if self.selective:
+            return int(self.context.canonical_total_tests or self.context.total_tests)
+        return self.context.total_tests
+
+    def _announce(self, name: str, number: int) -> None:
         """Print which numbered test is starting before a long wait begins."""
 
-        print(
-            f"[RUN ] Test {self._next_number()} of {self.context.total_tests} - {name}"
+        print(f"[RUN ] Test {number} of {self._display_total()} - {name}")
+
+    @staticmethod
+    def _skipped_result(name: str) -> StepResult:
+        """Return an unrecorded success placeholder for an unselected test."""
+
+        return StepResult(
+            name=name,
+            passed=True,
+            note="Not selected by --testList.",
         )
 
-    def _record(self, result: StepResult) -> StepResult:
+    def _record(
+        self,
+        result: StepResult,
+        number: int | None = None,
+    ) -> StepResult:
         """Store a result and print a numbered human-readable status line."""
 
         self.results.append(result)
-        number = len(self.results)
+        display_number = number if number is not None else len(self.results)
         label = "PASS" if result.passed else "FAIL"
         print(
-            f"[{label}] Test {number} of {self.context.total_tests} - "
+            f"[{label}] Test {display_number} of {self._display_total()} - "
             f"{result.name} ({_duration(result.elapsed_seconds)})"
         )
         if result.note:
@@ -87,14 +141,19 @@ class HarnessRunner:
     ) -> StepResult:
         """Record a check that does not map directly to one foreground command."""
 
-        self._announce(name)
+        number, execute = self._begin_test(name)
+        if not execute:
+            return self._skipped_result(name)
+
+        self._announce(name, number)
         return self._record(
             StepResult(
                 name=name,
                 passed=passed,
                 note=note,
                 elapsed_seconds=elapsed_seconds,
-            )
+            ),
+            number,
         )
 
     def run(
@@ -110,8 +169,13 @@ class HarnessRunner:
     ) -> StepResult:
         """Run a command and verify its exit code and optional output text."""
 
+        number: int | None = None
         if announce:
-            self._announce(name)
+            number, execute = self._begin_test(name)
+            if not execute:
+                return self._skipped_result(name)
+            self._announce(name, number)
+
         started = time.monotonic()
         cmd = list(command)
         try:
@@ -134,7 +198,8 @@ class HarnessRunner:
                     stderr=exc.stderr or "",
                     note=f"Timed out after {timeout} seconds.",
                     elapsed_seconds=time.monotonic() - started,
-                )
+                ),
+                number,
             )
 
         exit_ok = (
@@ -166,7 +231,8 @@ class HarnessRunner:
                 stderr=completed.stderr,
                 note=" ".join(note_parts),
                 elapsed_seconds=time.monotonic() - started,
-            )
+            ),
+            number,
         )
 
     def controller(
@@ -336,11 +402,16 @@ class HarnessRunner:
         expected_text: str | None = None,
         announce: bool = True,
         started_at: float | None = None,
+        test_number: int | None = None,
     ) -> StepResult:
         """Poll the administrator operation journal until a terminal result appears."""
 
+        number = test_number
         if announce:
-            self._announce(name)
+            number, execute = self._begin_test(name)
+            if not execute:
+                return self._skipped_result(name)
+            self._announce(name, number)
         started = started_at if started_at is not None else time.monotonic()
 
         if not operation.operation_id:
@@ -353,7 +424,8 @@ class HarnessRunner:
                     stderr=operation.stderr,
                     note="Async command did not create a correlatable operation journal entry.",
                     elapsed_seconds=time.monotonic() - started,
-                )
+                ),
+                number,
             )
 
         status_command = [
@@ -406,13 +478,15 @@ class HarnessRunner:
                         stderr=operation.stderr + "\n" + last_stderr,
                         note=" ".join(note_parts),
                         elapsed_seconds=time.monotonic() - started,
-                    )
+                    ),
+                    number,
                 )
 
             now = time.monotonic()
             if now >= next_wait_report:
+                wait_number = number if number is not None else len(self.results) + 1
                 print(
-                    f"[WAIT] Test {self._next_number()} of {self.context.total_tests} - "
+                    f"[WAIT] Test {wait_number} of {self._display_total()} - "
                     f"{name} - elapsed {_duration(now - started)} - "
                     f"operation {operation.operation_id} still In Progress"
                 )
@@ -432,7 +506,8 @@ class HarnessRunner:
                     f"result within {timeout} seconds."
                 ),
                 elapsed_seconds=time.monotonic() - started,
-            )
+            ),
+            number,
         )
 
     def controller_async(
@@ -445,7 +520,11 @@ class HarnessRunner:
     ) -> StepResult:
         """Submit an async command, then poll its operation result for this test."""
 
-        self._announce(name)
+        number, execute = self._begin_test(name)
+        if not execute:
+            return self._skipped_result(name)
+
+        self._announce(name, number)
         started = time.monotonic()
         operation = self.start_async_controller(*arguments)
         if operation.operation_id:
@@ -461,6 +540,7 @@ class HarnessRunner:
             expected_text=expected_text,
             announce=False,
             started_at=started,
+            test_number=number,
         )
 
     def admin_async(
@@ -473,7 +553,11 @@ class HarnessRunner:
     ) -> StepResult:
         """Submit an async administrator command and wait for its journal result."""
 
-        self._announce(name)
+        number, execute = self._begin_test(name)
+        if not execute:
+            return self._skipped_result(name)
+
+        self._announce(name, number)
         started = time.monotonic()
         operation = self.start_async_admin(*arguments)
         if operation.operation_id:
@@ -489,6 +573,7 @@ class HarnessRunner:
             expected_text=expected_text,
             announce=False,
             started_at=started,
+            test_number=number,
         )
 
     def summary(self) -> int:
@@ -501,6 +586,12 @@ class HarnessRunner:
         print()
         print("=" * 68)
         print(f"HARNESS SUMMARY: {passed} passed / {failed} failed")
+        if self.selective:
+            selected = ",".join(
+                str(number)
+                for number in sorted(self.context.selected_tests or frozenset())
+            )
+            print(f"Selected tests:     {selected}")
         for name, seconds in self.profile_times.items():
             print(f"{name + ':':18} {_duration(seconds)}")
         print(f"{'Total elapsed:':18} {_duration(total_elapsed)}")

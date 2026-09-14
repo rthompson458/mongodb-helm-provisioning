@@ -1,4 +1,13 @@
-"""Live concurrency test for ShardedCluster mutation protection."""
+"""Live concurrency test for ShardedCluster mutation protection.
+
+Canonical full-suite test intent:
+33. Create a one-shard cluster used only for concurrency/locking validation.
+34. Observe the Terraform-created deployment lock while AddShard is active.
+35. Prove a conflicting AddDatabase request is blocked during AddShard.
+36. Wait for the background AddShard operation to complete successfully.
+37. Verify the cluster is readable and no active change remains.
+38. Delete the lock-test ShardedCluster and clean up its resources.
+"""
 
 from __future__ import annotations
 
@@ -89,11 +98,17 @@ def run(runner: HarnessRunner) -> None:
     if not created.passed:
         return
 
-    # start_async_controller correlates the private Operation ID for the harness;
-    # the public customer output itself still hides that identifier.
-    operation = runner.start_async_controller("AddShard", sc, "1")
-    lock_started = time.monotonic()
-    lock_seen = _wait_for_lock(runner, sc.lower(), operation)
+    # Tests 34-36 share one background AddShard operation. Start it only when
+    # at least one of those canonical tests was explicitly selected. This keeps
+    # --testList from launching hidden setup work for unrelated locking tests.
+    if runner.any_test_selected(34, 36):
+        operation = runner.start_async_controller("AddShard", sc, "1")
+        lock_started = time.monotonic()
+        lock_seen = _wait_for_lock(runner, sc.lower(), operation)
+    else:
+        operation = AsyncOperation(operation_id="", command=[])
+        lock_started = time.monotonic()
+        lock_seen = False
     runner.check(
         "Observe Terraform-created deployment lock",
         lock_seen,
@@ -113,6 +128,16 @@ def run(runner: HarnessRunner) -> None:
             db,
             expect_success=False,
             expected_text="already has a controller operation in progress",
+        )
+    else:
+        # Always consume canonical Test 35 so later test IDs never shift. In a
+        # normal run this records a secondary failure explaining why the
+        # concurrency assertion could not be exercised.
+        runner.check(
+            "Concurrent AddDatabase request is blocked during AddShard",
+            False,
+            "Cannot test the conflicting request because the deployment lock "
+            "was not observed.",
         )
 
     runner.wait_async(
