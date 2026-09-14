@@ -165,6 +165,43 @@ def _artifact_deployment_key(resource: str, item: dict[str, Any]) -> str:
     return ""
 
 
+def list_orphan_operator_artifacts(
+    config: dict[str, Any],
+    managed_deployment_keys: set[str],
+) -> list[str]:
+    """Return stale Operator/Helm artifacts with no desired or live deployment.
+
+    A runtime artifact is considered orphaned only when:
+    - its name/labels identify a deployment key;
+    - that key is not in the controller desired-state inventory; and
+    - no live MongoDB custom resource exists with that key.
+
+    This prevents active deployments, including unrelated MongoDB resources in
+    the same namespace, from being classified as cleanup debris.
+    """
+
+    artifacts: list[str] = []
+    live_cache: dict[str, bool] = {}
+
+    for resource in ("job", "pod", "secret"):
+        for item in kube.list_json(config, resource):
+            key = _artifact_deployment_key(resource, item)
+            if not key or key in managed_deployment_keys:
+                continue
+
+            if key not in live_cache:
+                live_cache[key] = (
+                    kube.get_json(config, "mongodb", key) is not None
+                )
+            if live_cache[key]:
+                continue
+
+            name = str(item.get("metadata", {}).get("name", "<unknown>"))
+            artifacts.append(f"{resource}/{name}")
+
+    return sorted(set(artifacts))
+
+
 def discover_managed_deployment_keys(config: dict[str, Any]) -> list[str]:
     """Discover keys needed for safe post-Terraform artifact cleanup.
 
