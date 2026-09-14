@@ -127,16 +127,49 @@ def cleanup_deployment_operator_artifacts(
             )
 
 
+def _artifact_deployment_key(resource: str, item: dict[str, Any]) -> str:
+    """Return a deployment key encoded in one known runtime artifact."""
+
+    metadata = item.get("metadata", {}) or {}
+    name = str(metadata.get("name", ""))
+
+    if resource == "secret" and name.endswith("-agent-auth-secret"):
+        return name.removesuffix("-agent-auth-secret")
+
+    if resource == "job":
+        for suffix in (
+            "-mongodb-management-database-provisioner",
+            "-mongodb-management-database-operation",
+        ):
+            if name.endswith(suffix):
+                return name.removesuffix(suffix)
+
+    if resource == "pod":
+        labels = metadata.get("labels", {}) or {}
+        job_name = str(labels.get("job-name", ""))
+        for suffix in (
+            "-mongodb-management-database-provisioner",
+            "-mongodb-management-database-operation",
+        ):
+            if job_name.endswith(suffix):
+                return job_name.removesuffix(suffix)
+
+    return ""
+
+
 def discover_managed_deployment_keys(config: dict[str, Any]) -> list[str]:
-    """Discover deployment keys from still-live Terraform-managed K8s objects.
+    """Discover keys needed for safe post-Terraform artifact cleanup.
 
     RecoverOrphanedResources intentionally runs after Vault inventory is empty.
-    Before Terraform destroys its remaining objects, their labels provide the
-    safest available record of which deployment-specific Operator artifacts are
-    ours to clean afterward.
+    Normally the still-live Terraform-managed objects carry deployment labels.
+    A previous partial cleanup may already have removed all Terraform objects,
+    leaving only MongoDB Operator auth Secrets or Helm hook Jobs/Pods. Those
+    artifact names also encode the deployment key, so include them as a recovery
+    fallback.
 
-    Only objects carrying privateWorkerReplacement's managed-by label are used.
-    Unrelated MongoDB resources in the namespace are ignored.
+    Cleanup still refuses to touch a key while a MongoDB CR with that name is
+    live. That guard prevents stale-artifact recovery from deleting credentials
+    belonging to an active deployment.
     """
 
     keys: set[str] = set()
@@ -160,5 +193,13 @@ def discover_managed_deployment_keys(config: dict[str, Any]) -> list[str]:
                 value = str(labels.get(label, "")).strip()
                 if value:
                     keys.add(value)
+
+    # Recovery fallback for a prior run that already destroyed every
+    # Terraform-managed object but left Operator/Helm artifacts behind.
+    for resource in ("job", "pod", "secret"):
+        for item in kube.list_json(config, resource):
+            key = _artifact_deployment_key(resource, item)
+            if key:
+                keys.add(key)
 
     return sorted(keys)
