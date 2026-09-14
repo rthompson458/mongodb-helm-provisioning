@@ -27,6 +27,7 @@ def _resources(**overrides: list[str]) -> dict[str, list[str]]:
         "orphan_mongodb_resources": [],
         "missing_mongodb_users": [],
         "orphan_mongodb_users": [],
+        "orphan_operator_artifacts": [],
         "pvcs": [],
         "pvs": [],
         "controller_secrets": [],
@@ -105,6 +106,10 @@ class AdminStatusTests(unittest.TestCase):
         self.assertRegex(text, r"(?m)^Orphan MongoDB resources:\s+0$")
         self.assertRegex(text, r"(?m)^Missing MongoDB users:\s+0$")
         self.assertRegex(text, r"(?m)^Orphan MongoDB users:\s+0$")
+        self.assertRegex(
+            text,
+            r"(?m)^Orphan Operator/Helm artifacts:\s+0$",
+        )
         self.assertRegex(text, r"(?m)^Ops Manager orphan projects:\s+0$")
         self.assertRegex(text, r"(?m)^Orphan group secrets:\s+0$")
         self.assertNotIn("Full Resource Details", text)
@@ -222,6 +227,25 @@ class AdminStatusTests(unittest.TestCase):
         self.assertIn("Status: ATTENTION REQUIRED", text)
         self.assertRegex(text, r"(?m)^Missing MongoDB users:\s+1$")
         self.assertIn("tc-rs7-houseinfo-readwrite-9814ae", text)
+
+    def test_orphan_operator_artifact_requires_attention(self) -> None:
+        """A stranded Operator/Helm object must prevent a false CLEAN report."""
+
+        text = self._capture(
+            _resources(
+                orphan_operator_artifacts=[
+                    "secret/rs7-agent-auth-secret",
+                ],
+            ),
+            verbose=True,
+        )
+
+        self.assertIn("Status: ATTENTION REQUIRED", text)
+        self.assertRegex(
+            text,
+            r"(?m)^Orphan Operator/Helm artifacts:\s+1$",
+        )
+        self.assertIn("secret/rs7-agent-auth-secret", text)
 
     def test_orphan_ops_manager_project_requires_attention(self) -> None:
         """An orphan project must raise attention in the compact health section."""
