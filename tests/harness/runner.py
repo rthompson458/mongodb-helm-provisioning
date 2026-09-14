@@ -6,7 +6,7 @@ import re
 import subprocess
 import time
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from privateWorkerReplacement.async_operations import list_operation_records
 
@@ -106,6 +106,7 @@ class HarnessRunner:
         expected_text: str | None = None,
         timeout: int | None = None,
         announce: bool = True,
+        env: Mapping[str, str] | None = None,
     ) -> StepResult:
         """Run a command and verify its exit code and optional output text."""
 
@@ -121,6 +122,7 @@ class HarnessRunner:
                 capture_output=True,
                 timeout=timeout,
                 check=False,
+                env=dict(env) if env is not None else None,
             )
         except subprocess.TimeoutExpired as exc:
             return self._record(
@@ -192,6 +194,31 @@ class HarnessRunner:
             timeout=timeout,
         )
 
+    def admin(
+        self,
+        name: str,
+        *arguments: str,
+        expect_success: bool = True,
+        expected_text: str | None = None,
+        timeout: int | None = None,
+    ) -> StepResult:
+        """Run a synchronous privateWorkerReplacementAdmin.py command."""
+
+        command = [
+            self.context.python,
+            "privateWorkerReplacementAdmin.py",
+            "--config",
+            str(self.context.config_path),
+            *arguments,
+        ]
+        return self.run(
+            name,
+            command,
+            expect_success=expect_success,
+            expected_text=expected_text,
+            timeout=timeout,
+        )
+
     def start_async_controller(self, *arguments: str) -> AsyncOperation:
         """Submit one public async command and correlate its private journal entry.
 
@@ -209,6 +236,54 @@ class HarnessRunner:
         command = [
             self.context.python,
             "privateWorkerReplacement.py",
+            "--config",
+            str(self.context.config_path),
+            *arguments,
+        ]
+        completed = subprocess.run(
+            command,
+            cwd=self.context.repo_root,
+            text=True,
+            capture_output=True,
+            timeout=120,
+            check=False,
+        )
+
+        operation_id = ""
+        if completed.returncode == 0 and arguments:
+            command_name = str(arguments[0])
+            candidates = [
+                item
+                for item in list_operation_records(self.context.config_path)
+                if str(item.get("operation_id", "")) not in before_ids
+                and str(item.get("command", "")) == command_name
+            ]
+            if candidates:
+                operation_id = str(candidates[0].get("operation_id", ""))
+
+        return AsyncOperation(
+            operation_id=operation_id,
+            command=command,
+            stdout=completed.stdout,
+            stderr=(
+                completed.stderr
+                if completed.returncode == 0
+                else completed.stderr
+                + f"\nAsync submission exit code: {completed.returncode}"
+            ),
+        )
+
+    def start_async_admin(self, *arguments: str) -> AsyncOperation:
+        """Submit one asynchronous administrator command and correlate its journal."""
+
+        before_ids = {
+            str(item.get("operation_id", ""))
+            for item in list_operation_records(self.context.config_path)
+        }
+
+        command = [
+            self.context.python,
+            "privateWorkerReplacementAdmin.py",
             "--config",
             str(self.context.config_path),
             *arguments,
@@ -368,6 +443,34 @@ class HarnessRunner:
         self._announce(name)
         started = time.monotonic()
         operation = self.start_async_controller(*arguments)
+        if operation.operation_id:
+            print(
+                f"       Operation {operation.operation_id} accepted; "
+                "polling for completion."
+            )
+        return self.wait_async(
+            name,
+            operation,
+            timeout=timeout,
+            expect_success=expect_success,
+            expected_text=expected_text,
+            announce=False,
+            started_at=started,
+        )
+
+    def admin_async(
+        self,
+        name: str,
+        *arguments: str,
+        timeout: int,
+        expect_success: bool = True,
+        expected_text: str | None = None,
+    ) -> StepResult:
+        """Submit an async administrator command and wait for its journal result."""
+
+        self._announce(name)
+        started = time.monotonic()
+        operation = self.start_async_admin(*arguments)
         if operation.operation_id:
             print(
                 f"       Operation {operation.operation_id} accepted; "
