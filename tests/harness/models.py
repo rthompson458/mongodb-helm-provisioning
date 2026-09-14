@@ -39,6 +39,8 @@ class HarnessContext:
     run_id: str
     verbose: bool
     total_tests: int
+    selected_tests: frozenset[int] | None = None
+    canonical_total_tests: int | None = None
 
     @property
     def replica_set(self) -> str:
