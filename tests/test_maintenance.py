@@ -226,7 +226,7 @@ class MaintenanceTests(unittest.TestCase):
         vault = FakeVault({})
 
         def fake_list(_config, resource, **kwargs):
-            if resource in {"mongodb", "mongodbuser", "pvc", "pv"}:
+            if resource in {"mongodb", "mongodbuser", "pvc", "pv", "job", "pod"}:
                 if resource == "pv":
                     self.assertFalse(kwargs.get("namespaced", True))
                 return []
@@ -280,7 +280,7 @@ class MaintenanceTests(unittest.TestCase):
         vault = FakeVault({})
 
         def fake_list(_config, resource, **_kwargs):
-            if resource in {"mongodb", "mongodbuser", "pvc", "pv", "configmap", "secret"}:
+            if resource in {"mongodb", "mongodbuser", "pvc", "pv", "configmap", "secret", "job", "pod"}:
                 return []
             raise AssertionError(resource)
 
@@ -314,7 +314,7 @@ class MaintenanceTests(unittest.TestCase):
         )
 
         def fake_list(_config, resource, **_kwargs):
-            if resource in {"mongodb", "mongodbuser", "pvc", "pv", "configmap", "secret"}:
+            if resource in {"mongodb", "mongodbuser", "pvc", "pv", "configmap", "secret", "job", "pod"}:
                 return []
             raise AssertionError(resource)
 
@@ -364,7 +364,7 @@ class MaintenanceTests(unittest.TestCase):
                     {"metadata": {"name": readwrite}},
                     {"metadata": {"name": read}},
                 ]
-            if resource in {"pvc", "pv", "configmap", "secret"}:
+            if resource in {"pvc", "pv", "configmap", "secret", "job", "pod"}:
                 return []
             raise AssertionError(resource)
 
@@ -399,7 +399,7 @@ class MaintenanceTests(unittest.TestCase):
                 return [{"metadata": {"name": "stale-rs"}}]
             if resource == "mongodbuser":
                 return [{"metadata": {"name": "tc-stale-rs-admin"}}]
-            if resource in {"pvc", "pv", "configmap", "secret"}:
+            if resource in {"pvc", "pv", "configmap", "secret", "job", "pod"}:
                 return []
             raise AssertionError(resource)
 
