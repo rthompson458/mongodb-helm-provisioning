@@ -7,6 +7,13 @@ platform diagnostics, repair, reconciliation, and guarded recovery belong here.
 The executable split improves clarity but is not an authorization boundary.
 Production must still restrict host, Kubernetes, Vault, and Terraform access to
 authorized administrators.
+
+Maintainer note:
+  build_parser() defines only the operator-facing command contract. Read-only
+  inventory formatting lives in admin_status.py; reconciliation/recovery logic
+  lives in maintenance.py; detached-operation plumbing lives in
+  async_operations.py. Keeping those responsibilities separate prevents this
+  CLI module from becoming a second copy of administrator business logic.
 """
 
 from __future__ import annotations
@@ -161,6 +168,9 @@ Normal DBaaS users should use:
 
     sp = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
 
+    # ------------------------------------------------------------------
+    # Read-only diagnostics
+    # ------------------------------------------------------------------
     x = _sub(
         sp,
         "ListManagedResources",
@@ -207,6 +217,9 @@ Normal DBaaS users should use:
         "  python3 privateWorkerReplacementAdmin.py ListOperations",
     )
 
+    # ------------------------------------------------------------------
+    # Guarded asynchronous reconciliation and recovery
+    # ------------------------------------------------------------------
     x = _sub(
         sp,
         "RecoverDeploymentLock",
@@ -261,6 +274,10 @@ Normal DBaaS users should use:
 
     return parser
 
+
+# ---------------------------------------------------------------------------
+# Detached-worker normalization and execution dispatch
+# ---------------------------------------------------------------------------
 
 def _admin_worker_arguments(args: argparse.Namespace) -> list[str]:
     """Rebuild one administrator mutation for its detached worker.
