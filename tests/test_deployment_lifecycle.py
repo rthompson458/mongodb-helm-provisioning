@@ -123,6 +123,10 @@ class DeploymentLifecycleTests(unittest.TestCase):
                 deployments,
                 "delete_ops_manager_project",
             ) as project_delete_mock,
+            patch.object(
+                deployments,
+                "cleanup_deployment_operator_artifacts",
+            ) as artifact_cleanup_mock,
         ):
             deployments.delete_replica_set(
                 self.config,
@@ -138,6 +142,7 @@ class DeploymentLifecycleTests(unittest.TestCase):
             "rs1",
             self.config["rs_ready_timeout"],
         )
+        artifact_cleanup_mock.assert_called_once_with(self.config, "rs1")
         project_delete_mock.assert_called_once_with(
             self.config,
             "RS1",
@@ -162,6 +167,10 @@ class DeploymentLifecycleTests(unittest.TestCase):
                 deployments,
                 "delete_ops_manager_project",
             ) as project_delete_mock,
+            patch.object(
+                deployments,
+                "cleanup_deployment_operator_artifacts",
+            ) as artifact_cleanup_mock,
         ):
             deployments.delete_sharded_cluster(
                 self.config,
@@ -177,6 +186,7 @@ class DeploymentLifecycleTests(unittest.TestCase):
             "sc9",
             self.config["sc_ready_timeout"],
         )
+        artifact_cleanup_mock.assert_called_once_with(self.config, "sc9")
         project_delete_mock.assert_called_once_with(
             self.config,
             "SC9",
