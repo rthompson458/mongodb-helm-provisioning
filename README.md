@@ -2,6 +2,22 @@
 
 Terraform-driven MongoDB Database as a Service proof of concept for ReplicaSet and ShardedCluster deployments managed through the MongoDB Kubernetes Operator, Ops Manager, Vault, Kubernetes, Terraform, and an integrated Helm database-management chart.
 
+## Documentation map
+
+Use the guide that matches the question:
+
+| Need | Read |
+| --- | --- |
+| Customer/service commands | `README-privateWorkerReplacement.md` |
+| Administrator diagnostics/recovery | `README-privateWorkerReplacementAdmin.md` |
+| Code ownership, architecture, and reviewer rationale | `docs/MAINTAINER-GUIDE.md` |
+| Customer vs administrator interface boundary | `docs/CLI-INTERFACES.md` |
+| Unit/regression and 100-check live harness | `tests/README.md` |
+| Terraform file/resource ownership | `terraform-dbaas/README.md` |
+
+A maintainer or reviewer who wants to understand **where a behavior lives and why
+it is designed that way should start with `docs/MAINTAINER-GUIDE.md`**.
+
 ## Start here
 
 Normal DBaaS users can run either form to show the full public help screen:
