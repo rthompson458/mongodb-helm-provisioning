@@ -7,6 +7,7 @@ from pathlib import Path
 
 from privateWorkerReplacement import admin_cli, cli
 from harness import (
+    scenario_admin,
     scenario_locking,
     scenario_preflight,
     scenario_replicaset,
@@ -68,11 +69,13 @@ class DocumentationConsistencyTests(unittest.TestCase):
             "ReplicaSet": preflight + scenario_replicaset.TEST_COUNT,
             "ShardedCluster": preflight + scenario_sharded.TEST_COUNT,
             "Locking": preflight + scenario_locking.TEST_COUNT,
+            "Administrator recovery suite": preflight + scenario_admin.TEST_COUNT,
             "Complete acceptance run": (
                 preflight
                 + scenario_replicaset.TEST_COUNT
                 + scenario_sharded.TEST_COUNT
                 + scenario_locking.TEST_COUNT
+                + scenario_admin.TEST_COUNT
             ),
         }
 

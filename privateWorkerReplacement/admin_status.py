@@ -131,6 +131,10 @@ def list_managed_resources(
         ("Managed accounts", "managed_accounts"),
         ("MongoDB resources", "mongodb_resources"),
         ("MongoDB users", "mongodb_users"),
+        ("Missing MongoDB resources", "missing_mongodb_resources"),
+        ("Orphan MongoDB resources", "orphan_mongodb_resources"),
+        ("Missing MongoDB users", "missing_mongodb_users"),
+        ("Orphan MongoDB users", "orphan_mongodb_users"),
         ("DBaaS PVCs", "pvcs"),
         ("DBaaS PVs", "pvs"),
         ("Controller Secrets", "controller_secrets"),
@@ -158,6 +162,10 @@ def list_managed_resources(
     ]
 
     attention_keys = {
+        "missing_mongodb_resources",
+        "orphan_mongodb_resources",
+        "missing_mongodb_users",
+        "orphan_mongodb_users",
         "ops_manager_orphans",
         "orphan_group_secrets",
         "missing_ops_manager_projects",
@@ -243,6 +251,22 @@ def list_managed_resources(
     _print_summary_section(
         "Health / Consistency",
         [
+            (
+                "Missing MongoDB resources",
+                str(len(resources["missing_mongodb_resources"])),
+            ),
+            (
+                "Orphan MongoDB resources",
+                str(len(resources["orphan_mongodb_resources"])),
+            ),
+            (
+                "Missing MongoDB users",
+                str(len(resources["missing_mongodb_users"])),
+            ),
+            (
+                "Orphan MongoDB users",
+                str(len(resources["orphan_mongodb_users"])),
+            ),
             (
                 "Ops Manager orphan projects",
                 str(len(resources["ops_manager_orphans"])),

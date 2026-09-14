@@ -23,6 +23,10 @@ def _resources(**overrides: list[str]) -> dict[str, list[str]]:
         "managed_accounts": [],
         "mongodb_resources": [],
         "mongodb_users": [],
+        "missing_mongodb_resources": [],
+        "orphan_mongodb_resources": [],
+        "missing_mongodb_users": [],
+        "orphan_mongodb_users": [],
         "pvcs": [],
         "pvs": [],
         "controller_secrets": [],
@@ -97,6 +101,10 @@ class AdminStatusTests(unittest.TestCase):
         self.assertRegex(text, r"(?m)^  ReplicaSets:\s+0$")
         self.assertRegex(text, r"(?m)^  ShardedClusters:\s+0$")
         self.assertRegex(text, r"(?m)^Databases:\s+0$")
+        self.assertRegex(text, r"(?m)^Missing MongoDB resources:\s+0$")
+        self.assertRegex(text, r"(?m)^Orphan MongoDB resources:\s+0$")
+        self.assertRegex(text, r"(?m)^Missing MongoDB users:\s+0$")
+        self.assertRegex(text, r"(?m)^Orphan MongoDB users:\s+0$")
         self.assertRegex(text, r"(?m)^Ops Manager orphan projects:\s+0$")
         self.assertRegex(text, r"(?m)^Orphan group secrets:\s+0$")
         self.assertNotIn("Full Resource Details", text)
@@ -197,6 +205,23 @@ class AdminStatusTests(unittest.TestCase):
         self.assertIn("DBaaS PVs: rs7-0", text)
         self.assertIn("RS7 (Project ID: rs7-id)", text)
         self.assertIn("mongodb-development (Project ID: base-id)", text)
+
+    def test_missing_mongodb_user_requires_attention(self) -> None:
+        """A desired MongoDBUser missing from Kubernetes is actionable drift."""
+
+        text = self._capture(
+            _resources(
+                managed_deployments=["RS7"],
+                replica_sets=["RS7"],
+                mongodb_resources=["rs7"],
+                missing_mongodb_users=["tc-rs7-houseinfo-readwrite-9814ae"],
+            ),
+            verbose=True,
+        )
+
+        self.assertIn("Status: ATTENTION REQUIRED", text)
+        self.assertRegex(text, r"(?m)^Missing MongoDB users:\s+1$")
+        self.assertIn("tc-rs7-houseinfo-readwrite-9814ae", text)
 
     def test_orphan_ops_manager_project_requires_attention(self) -> None:
         """An orphan project must raise attention in the compact health section."""

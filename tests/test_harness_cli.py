@@ -31,6 +31,7 @@ class HarnessCliTests(unittest.TestCase):
         self.assertIn("usage:", result.stdout)
         self.assertIn("FULL GAUNTLET", result.stdout)
         self.assertIn("--profile", result.stdout)
+        self.assertIn("--admin", result.stdout)
         self.assertEqual(result.stderr, "")
         self.assertNotIn("privateWorkerReplacement Live Test Harness\n=", result.stdout)
 
@@ -42,8 +43,9 @@ class HarnessCliTests(unittest.TestCase):
         self.assertIn("replicaset  16 checks total", result.stdout)
         self.assertIn("sharded     21 checks total", result.stdout)
         self.assertIn("locking     11 checks total", result.stdout)
-        self.assertIn("all         38 checks total", result.stdout)
-        self.assertIn("FULL GAUNTLET - all 38 live acceptance checks", result.stdout)
+        self.assertIn("--admin     67 checks total when run alone", result.stdout)
+        self.assertIn("all         100 checks total", result.stdout)
+        self.assertIn("FULL GAUNTLET - all 100 live acceptance checks", result.stdout)
         self.assertIn("--allow-changes", result.stdout)
         self.assertNotIn("--allow-mutations", result.stdout)
         self.assertNotIn("--allow-destructive", result.stdout)
@@ -60,18 +62,40 @@ class HarnessCliTests(unittest.TestCase):
         self.assertNotIn("--python", result.stdout)
         self.assertNotIn("--suffix", result.stdout)
 
-    def test_profile_is_required_for_an_actual_run(self) -> None:
+    def test_profile_or_admin_selection_is_required_for_an_actual_run(self) -> None:
         result = self._run("--verbose")
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("--profile", result.stderr)
+        self.assertIn("Choose --profile", result.stderr)
+        self.assertIn("and/or --admin", result.stderr)
 
     def test_lifecycle_profile_requires_allow_changes(self) -> None:
         result = self._run("--profile", "replicaset")
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("create, modify, and delete temporary test resources", result.stderr)
+        self.assertIn("create, modify, deliberately damage", result.stderr)
         self.assertIn("--allow-changes", result.stderr)
+
+    def test_admin_suite_requires_allow_changes(self) -> None:
+        result = self._run("--admin")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("deliberately damage", result.stderr)
+        self.assertIn("--allow-changes", result.stderr)
+
+    def test_help_documents_admin_command_and_clean_start_requirement(self) -> None:
+        result = self._run("--help")
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn(
+            "python3 tests/run_harness.py --admin --allow-changes",
+            result.stdout,
+        )
+        self.assertIn("requires a clean DBaaS starting inventory", result.stdout)
+        self.assertIn(
+            "all         100 checks total. Runs every lifecycle and administrator test",
+            result.stdout,
+        )
 
     def test_old_dual_safety_flags_are_rejected(self) -> None:
         result = self._run(

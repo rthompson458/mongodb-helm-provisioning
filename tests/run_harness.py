@@ -25,6 +25,7 @@ if str(REPO_ROOT) not in sys.path:
 from harness.models import HarnessContext
 from harness.runner import HarnessRunner
 from harness import (
+    scenario_admin,
     scenario_locking,
     scenario_preflight,
     scenario_replicaset,
@@ -46,11 +47,13 @@ def _profile_totals() -> dict[str, int]:
         "replicaset": preflight + scenario_replicaset.TEST_COUNT,
         "sharded": preflight + scenario_sharded.TEST_COUNT,
         "locking": preflight + scenario_locking.TEST_COUNT,
+        "admin": preflight + scenario_admin.TEST_COUNT,
         "all": (
             preflight
             + scenario_replicaset.TEST_COUNT
             + scenario_sharded.TEST_COUNT
             + scenario_locking.TEST_COUNT
+            + scenario_admin.TEST_COUNT
         ),
     }
 
@@ -62,22 +65,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Live end-to-end test harness for privateWorkerReplacement. "
-            "Choose a profile explicitly before running tests."
+            "Choose a profile and/or the destructive administrator suite explicitly."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
-Profiles:
+Profiles and administrator suite:
   preflight   {totals['preflight']:2d} read-only checks. Creates, changes, and deletes nothing.
   replicaset  {totals['replicaset']:2d} checks total. Tests ReplicaSet + database lifecycle.
   sharded     {totals['sharded']:2d} checks total. Tests ShardedCluster + shard + database lifecycle.
   locking     {totals['locking']:2d} checks total. Tests ShardedCluster mutation locking.
-  all         {totals['all']:2d} checks total. Runs the complete live acceptance gauntlet.
+  --admin     {totals['admin']:2d} checks total when run alone. Tests administrator diagnostics/recovery.
+  all         {totals['all']:2d} checks total. Runs every lifecycle and administrator test.
 
 Safety:
-  Lifecycle profiles (replicaset, sharded, locking, all) require --allow-changes.
-  This explicitly allows the harness to create, modify, and delete temporary
-  test resources in the configured environment. Preflight is read-only and does
-  not require --allow-changes.
+  Lifecycle profiles and --admin require --allow-changes.
+  The administrator suite deliberately creates drift, stranded locks, and
+  orphaned Terraform state, then proves supported recovery returns the
+  environment to CLEAN. It requires a clean DBaaS starting inventory.
+  Preflight is read-only and does not require --allow-changes.
 
 Common commands:
   Read-only preflight:
@@ -92,6 +97,9 @@ Common commands:
   Locking/concurrency only:
     python3 tests/run_harness.py --profile locking --allow-changes
 
+  Full administrator diagnostics/recovery suite:
+    python3 tests/run_harness.py --admin --allow-changes
+
   FULL GAUNTLET - all {totals['all']} live acceptance checks:
     python3 tests/run_harness.py --profile all --allow-changes
 
@@ -103,11 +111,20 @@ Configuration:
     parser.add_argument(
         "--profile",
         choices=("preflight", "replicaset", "sharded", "locking", "all"),
-        required=True,
+        required=False,
         help=(
-            "Test group to run. Every profile starts with the read-only preflight "
-            f"checks. Use 'all' only for the complete {totals['all']}-check live "
-            "acceptance run."
+            "Optional customer/lifecycle test group. Every actual run starts with "
+            "the read-only preflight checks. 'all' also runs the complete "
+            "administrator suite."
+        ),
+    )
+    parser.add_argument(
+        "--admin",
+        action="store_true",
+        help=(
+            "Run the complete destructive administrator diagnostics/recovery suite. "
+            "May be used alone or added to a non-'all' profile. The 'all' profile "
+            "already includes every administrator test."
         ),
     )
     parser.add_argument(
@@ -123,8 +140,9 @@ Configuration:
         "--allow-changes",
         action="store_true",
         help=(
-            "Required for lifecycle profiles. Allows the harness to create, modify, "
-            "and delete temporary test resources in the configured environment."
+            "Required for every mutating selection, including --admin. Allows the "
+            "harness to create, modify, deliberately damage, recover, and delete "
+            "temporary test resources in the configured environment."
         ),
     )
     parser.add_argument(
@@ -138,23 +156,60 @@ Configuration:
     return parser
 
 
-def _require_live_opt_in(args: argparse.Namespace) -> None:
-    """Reject lifecycle profiles unless the change acknowledgement is supplied."""
+def _require_selection(args: argparse.Namespace) -> None:
+    """Require an explicit profile and/or the administrator suite."""
 
-    if args.profile == "preflight":
+    if args.profile or args.admin:
+        return
+    raise SystemExit(
+        "ERROR: Choose --profile {preflight,replicaset,sharded,locking,all} "
+        "and/or --admin."
+    )
+
+
+def _require_live_opt_in(args: argparse.Namespace) -> None:
+    """Reject every mutating selection unless the change acknowledgement is supplied."""
+
+    mutating = args.admin or args.profile in {
+        "replicaset",
+        "sharded",
+        "locking",
+        "all",
+    }
+    if not mutating:
         return
 
     if not args.allow_changes:
         raise SystemExit(
-            "ERROR: Live lifecycle profiles create, modify, and delete temporary "
-            "test resources. Re-run with --allow-changes."
+            "ERROR: Selected live tests create, modify, deliberately damage, and "
+            "delete temporary test resources. Re-run with --allow-changes."
         )
 
 
-def _total_tests(profile: str) -> int:
-    """Return the exact number of PASS/FAIL checks for the selected profile."""
+def _total_tests(profile: str | None, admin: bool) -> int:
+    """Return the exact number of PASS/FAIL checks for this combined selection."""
 
-    return _profile_totals()[profile]
+    total = scenario_preflight.TEST_COUNT
+    if profile in {"replicaset", "all"}:
+        total += scenario_replicaset.TEST_COUNT
+    if profile in {"sharded", "all"}:
+        total += scenario_sharded.TEST_COUNT
+    if profile in {"locking", "all"}:
+        total += scenario_locking.TEST_COUNT
+    if admin or profile == "all":
+        total += scenario_admin.TEST_COUNT
+    return total
+
+
+def _selection_label(profile: str | None, admin: bool) -> str:
+    """Return a concise label for the requested harness work."""
+
+    parts: list[str] = []
+    if profile:
+        parts.append(profile)
+    if admin and profile != "all":
+        parts.append("admin")
+    return " + ".join(parts)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -167,6 +222,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     args = parser.parse_args(raw_argv)
+    _require_selection(args)
     _require_live_opt_in(args)
 
     config_display = args.config
@@ -184,13 +240,13 @@ def main(argv: list[str] | None = None) -> int:
         python=sys.executable,
         run_id=run_id,
         verbose=args.verbose,
-        total_tests=_total_tests(args.profile),
+        total_tests=_total_tests(args.profile, args.admin),
     )
     runner = HarnessRunner(context)
 
     print("privateWorkerReplacement Live Test Harness")
     print("=" * 68)
-    print(f"Profile: {args.profile}")
+    print(f"Selection: {_selection_label(args.profile, args.admin)}")
     print(f"Config:  {config_display}")
     print(f"Run ID:  {run_id}")
     print(f"Tests:   {context.total_tests}")
@@ -222,6 +278,13 @@ def main(argv: list[str] | None = None) -> int:
         runner.start_profile("Locking")
         scenario_locking.run(runner)
         runner.finish_profile("Locking")
+        if any(not result.passed for result in runner.results):
+            return runner.summary()
+
+    if args.admin or args.profile == "all":
+        runner.start_profile("Admin")
+        scenario_admin.run(runner)
+        runner.finish_profile("Admin")
 
     return runner.summary()
 

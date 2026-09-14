@@ -129,6 +129,10 @@ is neutral inventory information, not a health failure.
 leftover that an administrator should investigate, including:
 
 ```text
+managed MongoDB resource missing from Kubernetes
+unexpected/orphan privateWorkerReplacement-managed MongoDB resource
+managed MongoDBUser missing from Kubernetes
+unexpected/orphan privateWorkerReplacement-managed MongoDBUser
 Ops Manager project with no corresponding managed deployment
 <PROJECT_ID>-group-secret with no corresponding live project/deployment
 managed deployment with no corresponding Ops Manager project
@@ -439,7 +443,48 @@ Normal managed DBaaS desired-state mutations remain Terraform-driven. The Python
 
 ---
 
-## 12. Production hardening considerations
+## 12. Live administrator acceptance testing
+
+The live engineering harness includes a destructive administrator suite:
+
+```bash
+python3 tests/run_harness.py --admin --allow-changes
+```
+
+The standalone administrator selection runs 5 read-only preflight checks plus
+62 live administrator checks, for 67 checks total.
+
+The suite requires a **clean DBaaS starting inventory**. It intentionally:
+
+- creates a real ReplicaSet and database;
+- deletes one managed `MongoDBUser` outside the controller;
+- verifies `ListManagedResources` reports the drift;
+- runs `Reconcile` and proves the user is recreated;
+- proves the existing Vault/Kubernetes password is preserved;
+- performs real MongoDB authentication after recovery;
+- creates invalid and valid stranded ShardedCluster topology locks;
+- proves unsafe lock recovery is refused;
+- proves completed AddShard and DeleteShard locks can both be recovered;
+- creates a real partial-destroy/orphan condition;
+- proves orphan recovery is blocked while desired state still exists;
+- proves it is also blocked when desired state is empty but a live managed MongoDB resource remains;
+- runs `RecoverOrphanedResources` only after both independent safety conditions are met;
+- verifies Kubernetes and Vault test artifacts are gone; and
+- finishes with `ListManagedResources` reporting `Status: CLEAN`.
+
+The complete lifecycle gauntlet automatically includes all administrator tests:
+
+```bash
+python3 tests/run_harness.py --profile all --allow-changes
+```
+
+A passing full run currently contains 100 live checks. A failed destructive
+administrator run stops at the first failed prerequisite so the broken state is
+available for investigation rather than being silently hidden by cleanup.
+
+---
+
+## 13. Production hardening considerations
 
 This proof of concept establishes a clear interface and recovery model. A production implementation should additionally define:
 

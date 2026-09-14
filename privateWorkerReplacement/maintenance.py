@@ -87,8 +87,13 @@ def managed_resource_inventory(
 
     databases: list[str] = []
     accounts: list[str] = []
+    expected_mongodb_resources = set(inventory)
+    expected_mongodb_users: set[str] = set()
+
     for key, deployment in inventory.items():
         deployment_name = str(deployment.get("display_name", key))
+        expected_mongodb_users.add(kube.controller_user(key))
+
         for db_key, db in deployment.get("databases", {}).items():
             db_name = str(db.get("display_name", db_key))
             databases.append(f"{deployment_name}/{db_name}")
@@ -96,6 +101,20 @@ def managed_resource_inventory(
                 accounts.append(
                     f"{deployment_name}/{db_name}/{db_name}_{suffix}"
                 )
+
+            # A disabled Owner credential remains managed in Vault, but the
+            # corresponding MongoDBUser is intentionally absent. ReadWrite and
+            # Read must always exist for a managed database.
+            if not db.get("owner_disabled", False):
+                expected_mongodb_users.add(
+                    account_resource_name(key, db_key, "owner")
+                )
+            expected_mongodb_users.add(
+                account_resource_name(key, db_key, "readwrite")
+            )
+            expected_mongodb_users.add(
+                account_resource_name(key, db_key, "read")
+            )
 
     # Label selectors keep customer-unrelated Kubernetes objects out of the
     # DBaaS inventory. Secrets/ConfigMaps need separate name-based handling
@@ -110,6 +129,28 @@ def managed_resource_inventory(
         "mongodbuser",
         label_selector=MANAGED_BY_SELECTOR,
     )
+
+    mongodb_resource_names = _kubernetes_names(mongodb_resources)
+    mongodb_user_names = _kubernetes_names(mongodb_users)
+    actual_mongodb_resources = set(mongodb_resource_names)
+    actual_mongodb_users = set(mongodb_user_names)
+
+    # Compare Vault desired state to the live controller-labelled runtime
+    # objects. These checks make ListManagedResources useful for real drift,
+    # not only Ops Manager project mismatches.
+    missing_mongodb_resources = sorted(
+        expected_mongodb_resources - actual_mongodb_resources
+    )
+    orphan_mongodb_resources = sorted(
+        actual_mongodb_resources - expected_mongodb_resources
+    )
+    missing_mongodb_users = sorted(
+        expected_mongodb_users - actual_mongodb_users
+    )
+    orphan_mongodb_users = sorted(
+        actual_mongodb_users - expected_mongodb_users
+    )
+
     pvcs = kube.list_json(
         config,
         "pvc",
@@ -274,8 +315,12 @@ def managed_resource_inventory(
         "sharded_clusters": sharded_clusters,
         "databases": sorted(databases),
         "managed_accounts": sorted(accounts),
-        "mongodb_resources": _kubernetes_names(mongodb_resources),
-        "mongodb_users": _kubernetes_names(mongodb_users),
+        "mongodb_resources": mongodb_resource_names,
+        "mongodb_users": mongodb_user_names,
+        "missing_mongodb_resources": missing_mongodb_resources,
+        "orphan_mongodb_resources": orphan_mongodb_resources,
+        "missing_mongodb_users": missing_mongodb_users,
+        "orphan_mongodb_users": orphan_mongodb_users,
         "pvcs": _kubernetes_names(pvcs),
         "pvs": _kubernetes_names(pvs),
         "controller_secrets": controller_secrets,
