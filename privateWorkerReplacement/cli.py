@@ -9,6 +9,12 @@ Public-interface rules:
   2. Long-running deployment, topology, and database create/delete work is async.
   3. Database status and database-account details are separate commands.
   4. Terraform/Git/Kubernetes internals do not belong on the customer terminal.
+
+Maintainer note:
+  build_parser() is intentionally declarative and keeps the complete customer
+  command/help contract together. Lifecycle behavior does NOT live there; after
+  parsing, execution dispatches into focused deployment/shard/database modules.
+  Section comments below separate deployment, topology, and database commands.
 """
 
 from __future__ import annotations
@@ -280,6 +286,9 @@ Inventory across all managed deployments:
     )
     sp = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
 
+    # ------------------------------------------------------------------
+    # Deployment lifecycle and deployment status
+    # ------------------------------------------------------------------
     x = _sub(
         sp,
         "AddReplicaSet",
@@ -379,6 +388,9 @@ Inventory across all managed deployments:
     )
     _deployment(x, "SHARDED_CLUSTER")
 
+    # ------------------------------------------------------------------
+    # ShardedCluster topology lifecycle and status
+    # ------------------------------------------------------------------
     x = _sub(
         sp,
         "ListShards",
@@ -431,6 +443,10 @@ Inventory across all managed deployments:
     )
     _confirm(x)
 
+    # ------------------------------------------------------------------
+    # Database and database-account lifecycle
+    # Shared by ReplicaSets and ShardedClusters.
+    # ------------------------------------------------------------------
     x = _sub(
         sp,
         "AddDatabase",
@@ -512,6 +528,10 @@ Inventory across all managed deployments:
 
     return parser
 
+
+# ---------------------------------------------------------------------------
+# Parsed-command normalization, async submission, and execution dispatch
+# ---------------------------------------------------------------------------
 
 def _database_values(args: argparse.Namespace) -> tuple[str, str]:
     """Return (explicit deployment or blank, database) from parsed DB arguments."""
