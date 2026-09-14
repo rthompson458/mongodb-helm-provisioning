@@ -219,7 +219,7 @@ DeleteDatabase
 
 The acknowledgement tells the user what was requested and which normal service-status command to run. It does **not** expose an internal operation ID. Normal follow-up instructions use the friendly `./dev.config` path; detached workers resolve that path internally before running.
 
-Deployment deletion success includes cross-plane cleanup. After the MongoDB resource is absent, the controller deletes the deployment's Ops Manager project, waits for Ops Manager to confirm its removal, and removes the matching `<PROJECT_ID>-group-secret` before the worker can report success.
+Deployment deletion success includes cross-plane cleanup. After the MongoDB resource is absent, the controller deletes the deployment's Ops Manager project and matching `<PROJECT_ID>-group-secret`, then removes deployment-specific MongoDB Operator/Helm leftovers such as `*-agent-auth-secret` and completed database-management hook Jobs/Pods before the worker can report success.
 
 Examples:
 
@@ -364,7 +364,7 @@ After testing, cleanup, or a recovery operation, an administrator can inspect th
 python3 privateWorkerReplacementAdmin.py ListManagedResources
 ```
 
-The command reports active ReplicaSets/ShardedClusters, databases, managed accounts, MongoDB/MongoDBUser resources, DBaaS PVCs/PVs, controller Secrets/ConfigMaps, deployment locks, Ops Manager DBaaS projects and group Secrets, orphan/missing Ops Manager artifacts, and permanent controller infrastructure.
+The command reports active ReplicaSets/ShardedClusters, databases, managed accounts, MongoDB/MongoDBUser resources, DBaaS PVCs/PVs, controller Secrets/ConfigMaps, deployment locks, Ops Manager DBaaS projects and group Secrets, orphan MongoDB Operator/Helm runtime artifacts, orphan/missing Ops Manager artifacts, and permanent controller infrastructure.
 
 Ops Manager entries include the project/group ID so an administrator can match a project to its `<PROJECT_ID>-group-secret`.
 
@@ -380,7 +380,7 @@ Legitimate active DBaaS resources report:
 Status: MANAGED RESOURCES PRESENT
 ```
 
-Cross-plane leftovers or mismatches—including orphan Ops Manager projects, orphan group Secrets, managed deployments missing an Ops Manager project, **or the permanent Ops Manager platform project itself being missing**—report:
+Cross-plane leftovers or mismatches—including orphan MongoDB Operator/Helm runtime artifacts, orphan Ops Manager projects, orphan group Secrets, managed deployments missing an Ops Manager project, **or the permanent Ops Manager platform project itself being missing**—report:
 
 ```text
 Status: ATTENTION REQUIRED
@@ -440,7 +440,7 @@ Python parses/validates requests, reconstructs desired state from Vault, reads l
 terraform-dbaas/scripts/lifecycle.sh
 ```
 
-Deployment teardown has one deliberate cross-plane cleanup exception: Python removes the per-deployment Ops Manager project and verifies deletion of its Operator-created `<PROJECT_ID>-group-secret`. Those artifacts are created outside Terraform desired state, so teardown must explicitly retire them before reporting success.
+Deployment teardown has narrow cross-plane cleanup exceptions for resources created outside Terraform state. Python removes the per-deployment Ops Manager project and Operator-created `<PROJECT_ID>-group-secret`, and it removes deployment-specific MongoDB Operator/Helm runtime artifacts after the MongoDB CR is gone. These are cleanup-only exceptions; normal DBaaS desired-state mutations remain Terraform-owned.
 
 Logical database materialization/deletion is invoked by Terraform through the integrated Helm chart in:
 
