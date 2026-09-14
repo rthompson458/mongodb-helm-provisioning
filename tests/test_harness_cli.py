@@ -5,6 +5,8 @@ from __future__ import annotations
 import subprocess
 import sys
 import unittest
+
+import run_harness as harness_cli
 from pathlib import Path
 
 
@@ -32,6 +34,7 @@ class HarnessCliTests(unittest.TestCase):
         self.assertIn("FULL GAUNTLET", result.stdout)
         self.assertIn("--profile", result.stdout)
         self.assertIn("--admin", result.stdout)
+        self.assertIn("--testList", result.stdout)
         self.assertEqual(result.stderr, "")
         self.assertNotIn("privateWorkerReplacement Live Test Harness\n=", result.stdout)
 
@@ -54,6 +57,12 @@ class HarnessCliTests(unittest.TestCase):
             "python3 tests/run_harness.py --profile all --allow-changes",
             result.stdout,
         )
+        self.assertIn(
+            "python3 tests/run_harness.py --testList 97-100 --allow-changes",
+            result.stdout,
+        )
+        self.assertIn("56,58-67", result.stdout)
+        self.assertIn("no spaces", result.stdout)
 
     def test_engineering_only_python_and_suffix_options_are_not_public(self) -> None:
         result = self._run("--help")
@@ -96,6 +105,59 @@ class HarnessCliTests(unittest.TestCase):
             "all         100 checks total. Runs every lifecycle and administrator test",
             result.stdout,
         )
+
+    def test_test_list_parser_accepts_single_tests_and_ranges(self) -> None:
+        self.assertEqual(
+            harness_cli._parse_test_list("56,58-67", 100),
+            (56, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67),
+        )
+        self.assertEqual(
+            harness_cli._parse_test_list("97-100", 100),
+            (97, 98, 99, 100),
+        )
+        self.assertEqual(
+            harness_cli._parse_test_list("58-58", 100),
+            (58,),
+        )
+
+    def test_test_list_parser_rejects_spaces_descending_and_out_of_range(self) -> None:
+        with self.assertRaises(harness_cli.argparse.ArgumentTypeError):
+            harness_cli._parse_test_list("56, 58-67", 100)
+        with self.assertRaises(harness_cli.argparse.ArgumentTypeError):
+            harness_cli._parse_test_list("67-58", 100)
+        with self.assertRaises(harness_cli.argparse.ArgumentTypeError):
+            harness_cli._parse_test_list("0", 100)
+        with self.assertRaises(harness_cli.argparse.ArgumentTypeError):
+            harness_cli._parse_test_list("101", 100)
+
+    def test_profile_and_test_list_are_mutually_exclusive(self) -> None:
+        result = self._run(
+            "--profile",
+            "all",
+            "--testList",
+            "97-100",
+            "--allow-changes",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not allowed with argument", result.stderr)
+
+    def test_admin_and_test_list_are_rejected_together(self) -> None:
+        result = self._run(
+            "--testList",
+            "97-100",
+            "--admin",
+            "--allow-changes",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--testList cannot be combined with --admin", result.stderr)
+
+    def test_test_list_requires_allow_changes(self) -> None:
+        result = self._run("--testList", "97-100")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--allow-changes", result.stderr)
 
     def test_old_dual_safety_flags_are_rejected(self) -> None:
         result = self._run(
