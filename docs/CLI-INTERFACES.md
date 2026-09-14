@@ -15,6 +15,11 @@ Running either executable with no command prints that interface's full help scre
 
 ## Customer interface
 
+ReplicaSets and ShardedClusters use the same database lifecycle and account-status
+commands. Only ShardedClusters add shard-topology commands such as `AddShard`,
+`DeleteShard`, and `ListShards`. The public help repeats the shared database
+steps under both typical workflows so either path can be followed end to end.
+
 The public interface exposes:
 
 ```text
