@@ -92,6 +92,11 @@ A ShardedCluster is managed as one deployment even though MongoDB implements eac
 
 ## 3. Quick-start workflows
 
+Database commands are shared by ReplicaSets and ShardedClusters. The workflows
+below intentionally repeat the same database and account-status steps so a user
+can follow either deployment type from creation through normal database use
+without switching sections.
+
 ### ReplicaSet workflow
 
 Request a ReplicaSet:
