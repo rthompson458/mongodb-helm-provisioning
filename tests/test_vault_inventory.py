@@ -32,10 +32,26 @@ class VaultInventoryTests(unittest.TestCase):
         with patch.dict(os.environ, {"TEST_VAULT_TOKEN": "test-token"}):
             return VaultClient(CONFIG)
 
-    def test_missing_token_is_rejected(self) -> None:
+    def test_missing_token_is_rejected_with_exact_setup_commands(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
-            with self.assertRaises(ControllerError):
+            with self.assertRaises(ControllerError) as ctx:
                 VaultClient(CONFIG)
+
+        message = str(ctx.exception)
+        self.assertIn(
+            "Vault token environment variable 'TEST_VAULT_TOKEN' is not set.",
+            message,
+        )
+        self.assertIn(
+            "export TEST_VAULT_TOKEN=\"$(kubectl exec -n vault vault-0 -- sh -c "
+            "'printf %s \\\"$VAULT_DEV_ROOT_TOKEN_ID\\\"')\"",
+            message,
+        )
+        self.assertIn(
+            'test -n "$TEST_VAULT_TOKEN" && echo "TEST_VAULT_TOKEN is set"',
+            message,
+        )
+        self.assertIn("same shell", message)
 
     def test_sharded_metadata_builds_complete_deployment(self) -> None:
         client = self._client()
