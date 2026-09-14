@@ -290,13 +290,17 @@ class HarnessRunner:
             timeout=timeout,
         )
 
-    def start_async_controller(self, *arguments: str) -> AsyncOperation:
-        """Submit one public async command and correlate its private journal entry.
+    def _start_async(
+        self,
+        entrypoint: str,
+        *arguments: str,
+    ) -> AsyncOperation:
+        """Submit one async CLI command and correlate its new journal entry.
 
-        The customer CLI intentionally does not print Operation IDs. The live
-        acceptance harness is an internal engineering tool, so it reads the
-        private operation journal directly to correlate the newly submitted
-        request before polling it through privateWorkerReplacementAdmin.py.
+        Both customer and administrator CLIs use the same detached-operation
+        journal. The only difference is which executable receives the request.
+        Keeping correlation here prevents two copies of subtle operation-ID
+        matching logic from drifting apart.
         """
 
         before_ids = {
@@ -306,7 +310,7 @@ class HarnessRunner:
 
         command = [
             self.context.python,
-            "privateWorkerReplacement.py",
+            entrypoint,
             "--config",
             str(self.context.config_path),
             *arguments,
@@ -332,65 +336,31 @@ class HarnessRunner:
             if candidates:
                 operation_id = str(candidates[0].get("operation_id", ""))
 
+        stderr = completed.stderr
+        if completed.returncode != 0:
+            stderr += f"\nAsync submission exit code: {completed.returncode}"
+
         return AsyncOperation(
             operation_id=operation_id,
             command=command,
             stdout=completed.stdout,
-            stderr=(
-                completed.stderr
-                if completed.returncode == 0
-                else completed.stderr
-                + f"\nAsync submission exit code: {completed.returncode}"
-            ),
+            stderr=stderr,
         )
+
+    def start_async_controller(self, *arguments: str) -> AsyncOperation:
+        """Submit a customer async command and correlate its private journal entry.
+
+        The customer CLI intentionally hides Operation IDs. The live acceptance
+        harness is engineering tooling, so it reads the private journal only to
+        correlate the request before polling through the administrator CLI.
+        """
+
+        return self._start_async("privateWorkerReplacement.py", *arguments)
 
     def start_async_admin(self, *arguments: str) -> AsyncOperation:
-        """Submit one asynchronous administrator command and correlate its journal."""
+        """Submit an administrator async command and correlate its journal entry."""
 
-        before_ids = {
-            str(item.get("operation_id", ""))
-            for item in list_operation_records(self.context.config_path)
-        }
-
-        command = [
-            self.context.python,
-            "privateWorkerReplacementAdmin.py",
-            "--config",
-            str(self.context.config_path),
-            *arguments,
-        ]
-        completed = subprocess.run(
-            command,
-            cwd=self.context.repo_root,
-            text=True,
-            capture_output=True,
-            timeout=120,
-            check=False,
-        )
-
-        operation_id = ""
-        if completed.returncode == 0 and arguments:
-            command_name = str(arguments[0])
-            candidates = [
-                item
-                for item in list_operation_records(self.context.config_path)
-                if str(item.get("operation_id", "")) not in before_ids
-                and str(item.get("command", "")) == command_name
-            ]
-            if candidates:
-                operation_id = str(candidates[0].get("operation_id", ""))
-
-        return AsyncOperation(
-            operation_id=operation_id,
-            command=command,
-            stdout=completed.stdout,
-            stderr=(
-                completed.stderr
-                if completed.returncode == 0
-                else completed.stderr
-                + f"\nAsync submission exit code: {completed.returncode}"
-            ),
-        )
+        return self._start_async("privateWorkerReplacementAdmin.py", *arguments)
 
     def wait_async(
         self,
@@ -510,15 +480,17 @@ class HarnessRunner:
             number,
         )
 
-    def controller_async(
+    def _run_async_test(
         self,
         name: str,
-        *arguments: str,
+        submitter,
+        arguments: tuple[str, ...],
+        *,
         timeout: int,
-        expect_success: bool = True,
-        expected_text: str | None = None,
+        expect_success: bool,
+        expected_text: str | None,
     ) -> StepResult:
-        """Submit an async command, then poll its operation result for this test."""
+        """Run one numbered async test using a supplied CLI submission function."""
 
         number, execute = self._begin_test(name)
         if not execute:
@@ -526,12 +498,13 @@ class HarnessRunner:
 
         self._announce(name, number)
         started = time.monotonic()
-        operation = self.start_async_controller(*arguments)
+        operation = submitter(*arguments)
         if operation.operation_id:
             print(
                 f"       Operation {operation.operation_id} accepted; "
                 "polling for completion."
             )
+
         return self.wait_async(
             name,
             operation,
@@ -543,6 +516,25 @@ class HarnessRunner:
             test_number=number,
         )
 
+    def controller_async(
+        self,
+        name: str,
+        *arguments: str,
+        timeout: int,
+        expect_success: bool = True,
+        expected_text: str | None = None,
+    ) -> StepResult:
+        """Submit a customer async command and poll its terminal result."""
+
+        return self._run_async_test(
+            name,
+            self.start_async_controller,
+            arguments,
+            timeout=timeout,
+            expect_success=expect_success,
+            expected_text=expected_text,
+        )
+
     def admin_async(
         self,
         name: str,
@@ -551,29 +543,15 @@ class HarnessRunner:
         expect_success: bool = True,
         expected_text: str | None = None,
     ) -> StepResult:
-        """Submit an async administrator command and wait for its journal result."""
+        """Submit an administrator async command and poll its terminal result."""
 
-        number, execute = self._begin_test(name)
-        if not execute:
-            return self._skipped_result(name)
-
-        self._announce(name, number)
-        started = time.monotonic()
-        operation = self.start_async_admin(*arguments)
-        if operation.operation_id:
-            print(
-                f"       Operation {operation.operation_id} accepted; "
-                "polling for completion."
-            )
-        return self.wait_async(
+        return self._run_async_test(
             name,
-            operation,
+            self.start_async_admin,
+            arguments,
             timeout=timeout,
             expect_success=expect_success,
             expected_text=expected_text,
-            announce=False,
-            started_at=started,
-            test_number=number,
         )
 
     def summary(self) -> int:
