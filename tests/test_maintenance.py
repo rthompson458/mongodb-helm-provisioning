@@ -303,6 +303,42 @@ class MaintenanceTests(unittest.TestCase):
             ["mongodb-development"],
         )
 
+    def test_inventory_flags_missing_managed_mongodb_runtime_objects(self) -> None:
+        """Vault desired state must be compared with live MongoDB CR/User state."""
+
+        vault = FakeVault(
+            deployment_inventory(
+                deployment_type="ReplicaSet",
+                name="RS1",
+            )
+        )
+
+        def fake_list(_config, resource, **_kwargs):
+            if resource in {"mongodb", "mongodbuser", "pvc", "pv", "configmap", "secret"}:
+                return []
+            raise AssertionError(resource)
+
+        with (
+            patch.object(maintenance.kube, "list_json", side_effect=fake_list),
+            patch.object(
+                maintenance,
+                "list_ops_manager_projects",
+                return_value=(
+                    "mongodb-development",
+                    [
+                        {"id": "base-id", "name": "mongodb-development"},
+                        {"id": "rs1-id", "name": "RS1"},
+                    ],
+                ),
+            ),
+        ):
+            resources = maintenance.managed_resource_inventory(self.config, vault)
+
+        self.assertEqual(resources["missing_mongodb_resources"], ["rs1"])
+        self.assertEqual(resources["orphan_mongodb_resources"], [])
+        self.assertEqual(resources["missing_mongodb_users"], ["tc-rs1-admin"])
+        self.assertEqual(resources["orphan_mongodb_users"], [])
+
     def test_reconcile_with_no_inventory_is_noop(self) -> None:
         vault = FakeVault({})
         with patch.object(maintenance, "apply_inventory") as apply_mock:
