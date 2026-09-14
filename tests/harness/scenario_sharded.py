@@ -37,6 +37,9 @@ def run(runner: HarnessRunner) -> None:
     maximum_shards = int(load_config(ctx.config_path)["max_shards_per_cluster"])
     initial_shards = min(3, maximum_shards)
 
+    # TEST 17 - Reject ShardedCluster creation above the configured shard maximum.
+    # WHY: Enforces the service limit before Terraform can create an unsupported topology.
+    # PASS: AddShardedCluster is rejected with the configured maximum in the error.
     blocked_create = runner.controller(
         "Block ShardedCluster creation above configured maximum",
         "AddShardedCluster",
@@ -50,6 +53,9 @@ def run(runner: HarnessRunner) -> None:
     if not blocked_create.passed:
         return
 
+    # TEST 18 - Create the temporary ShardedCluster.
+    # WHY: Proves mongos, config servers, shards, storage, and controller setup can converge together.
+    # PASS: The asynchronous AddShardedCluster operation completes successfully.
     created = runner.controller_async(
         f"Create {initial_shards}-shard test cluster",
         "AddShardedCluster",
@@ -61,6 +67,9 @@ def run(runner: HarnessRunner) -> None:
     if not created.passed:
         return
 
+    # TEST 19 - Read shard status for one ShardedCluster.
+    # WHY: Proves the targeted status path can identify the expected shard members.
+    # PASS: ListShards for the test cluster includes the expected shard name.
     targeted_status = runner.controller(
         "Targeted shard status works",
         "ListShards",
@@ -70,6 +79,9 @@ def run(runner: HarnessRunner) -> None:
     if not targeted_status.passed:
         return
 
+    # TEST 20 - Read global shard status after cluster creation.
+    # WHY: Proves the all-cluster view discovers the newly managed ShardedCluster.
+    # PASS: Global ListShards output includes the test cluster.
     global_status = runner.controller(
         "Global shard status includes test cluster",
         "ListShards",
@@ -78,6 +90,9 @@ def run(runner: HarnessRunner) -> None:
     if not global_status.passed:
         return
 
+    # TEST 21 - Add shards without exceeding the configured maximum.
+    # WHY: Proves supported scale-out works while respecting the service shard ceiling.
+    # PASS: AddShard succeeds, or the test records that the cluster already started at the maximum.
     add_count = min(2, maximum_shards - initial_shards)
     if add_count > 0:
         added = runner.controller_async(
@@ -99,6 +114,9 @@ def run(runner: HarnessRunner) -> None:
     if not added.passed:
         return
 
+    # TEST 22 - Verify the expanded ShardedCluster is online.
+    # WHY: A successful AddShard request is not enough; the resulting topology must be usable.
+    # PASS: ListShards reports the highest expected shard after expansion.
     current_shards = initial_shards + add_count
     expanded_status = runner.controller(
         "Expanded cluster reports online",
@@ -109,6 +127,9 @@ def run(runner: HarnessRunner) -> None:
     if not expanded_status.passed:
         return
 
+    # TEST 23 - Reject an AddShard request that would exceed the maximum.
+    # WHY: Prevents an existing cluster from being scaled past its configured service limit.
+    # PASS: AddShard is rejected before an unsupported target topology is applied.
     blocked_add_count = maximum_shards - current_shards + 1
     blocked_add = runner.controller_async(
         "Block AddShard target above configured maximum",
@@ -122,6 +143,9 @@ def run(runner: HarnessRunner) -> None:
     if not blocked_add.passed:
         return
 
+    # TEST 24 - Create a database on the ShardedCluster.
+    # WHY: Proves normal database service works on a fully ready sharded deployment.
+    # PASS: The asynchronous AddDatabase operation completes successfully.
     # Database create/delete are customer-asynchronous just like the surrounding
     # deployment/topology work. Polling here proves the lifecycle finished, not
     # merely that the public request was accepted.
@@ -135,6 +159,9 @@ def run(runner: HarnessRunner) -> None:
     if not created_db.passed:
         return
 
+    # TEST 25 - Remove one shard while a managed database exists.
+    # WHY: Proves supported shard contraction preserves database service instead of requiring an empty cluster.
+    # PASS: DeleteShard succeeds, or the test records that only one shard was available.
     if current_shards > 1:
         deleted_one = runner.controller_async(
             "Delete a shard while database exists",
@@ -154,6 +181,9 @@ def run(runner: HarnessRunner) -> None:
     if not deleted_one.passed:
         return
 
+    # TEST 26 - Rotate all ShardedCluster database credentials.
+    # WHY: Proves credential rotation works through the sharded deployment path.
+    # PASS: RotatePasswords reports that all three passwords were rotated.
     rotated = runner.controller(
         "Rotate ShardedCluster database credentials",
         "RotatePasswords",
@@ -165,6 +195,9 @@ def run(runner: HarnessRunner) -> None:
     if not rotated.passed:
         return
 
+    # TEST 27 - Disable the ShardedCluster database Owner account.
+    # WHY: Proves Owner access can be disabled without removing the database or other accounts.
+    # PASS: DisableOwner reports the Owner account as Disabled.
     disabled = runner.controller(
         "Disable ShardedCluster Owner",
         "DisableOwner",
@@ -177,6 +210,9 @@ def run(runner: HarnessRunner) -> None:
     if not disabled.passed:
         return
 
+    # TEST 28 - Re-enable the ShardedCluster database Owner account.
+    # WHY: Proves Owner access can be restored through the supported workflow.
+    # PASS: EnableOwner reports the Owner account as Enabled.
     enabled = runner.controller(
         "Re-enable ShardedCluster Owner",
         "EnableOwner",
@@ -188,6 +224,9 @@ def run(runner: HarnessRunner) -> None:
     if not enabled.passed:
         return
 
+    # TEST 29 - Delete the managed ShardedCluster database.
+    # WHY: Proves database teardown and account cleanup work on a sharded deployment.
+    # PASS: The asynchronous DeleteDatabase operation completes successfully.
     deleted_db = runner.controller_async(
         "Delete ShardedCluster database",
         "DeleteDatabase",
@@ -199,6 +238,9 @@ def run(runner: HarnessRunner) -> None:
     if not deleted_db.passed:
         return
 
+    # TEST 30 - Reduce the ShardedCluster to one remaining shard.
+    # WHY: Prepares the minimum-topology boundary and proves multi-shard contraction can complete.
+    # PASS: DeleteShard leaves exactly one shard, or no action is needed because one already remains.
     remaining_to_delete = current_shards - 1
     if remaining_to_delete > 0:
         reduced = runner.controller_async(
@@ -218,6 +260,9 @@ def run(runner: HarnessRunner) -> None:
     if not reduced.passed:
         return
 
+    # TEST 31 - Refuse deletion of the final shard.
+    # WHY: A ShardedCluster cannot remain valid with zero shards.
+    # PASS: DeleteShard is rejected because at least one shard must remain.
     blocked_final = runner.controller_async(
         "Block deletion of final shard",
         "DeleteShard",
@@ -231,6 +276,9 @@ def run(runner: HarnessRunner) -> None:
     if not blocked_final.passed:
         return
 
+    # TEST 32 - Delete the temporary ShardedCluster.
+    # WHY: Proves complete sharded deployment teardown succeeds after database cleanup.
+    # PASS: The asynchronous DeleteShardedCluster operation completes successfully.
     runner.controller_async(
         "Delete temporary ShardedCluster",
         "DeleteShardedCluster",
