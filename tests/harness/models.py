@@ -44,16 +44,24 @@ class HarnessContext:
 
     @property
     def replica_set(self) -> str:
+        """Return the generated ReplicaSet fixture name for this harness run."""
+
         return f"RSTest-{self.run_id}"
 
     @property
     def sharded_cluster(self) -> str:
+        """Return the generated ShardedCluster fixture name for this run."""
+
         return f"SCTest-{self.run_id}"
 
     @property
     def lock_cluster(self) -> str:
+        """Return the generated locking/concurrency fixture name."""
+
         return f"LockTest-{self.run_id}"
 
     @property
     def database(self) -> str:
+        """Return the generated database fixture name for this harness run."""
+
         return f"DBTest_{self.run_id}"
