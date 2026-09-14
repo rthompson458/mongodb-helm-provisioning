@@ -101,6 +101,16 @@ def _configured_default_shards(config_path: Path) -> int | None:
         return None
 
 
+def _configured_max_shards(config_path: Path) -> int | None:
+    """Read the configured per-ShardedCluster shard ceiling for help text."""
+
+    try:
+        return int(load_config(config_path)["max_shards_per_cluster"])
+    except (ControllerError, OSError, KeyError, TypeError, ValueError):
+        # Help should remain usable even when configuration is broken.
+        return None
+
+
 def _confirm(parser: argparse.ArgumentParser) -> None:
     """Add the shared explicit-confirmation flag used by destructive commands."""
 
@@ -163,10 +173,21 @@ def build_parser(config_path: Path | None = None) -> argparse.ArgumentParser:
 
     help_config_path = (config_path or DEFAULT_CONFIG).expanduser()
     configured_default_shards = _configured_default_shards(help_config_path)
+    configured_maximum_shards = _configured_max_shards(help_config_path)
     configured_shards_text = (
         str(configured_default_shards)
         if configured_default_shards is not None
         else "configured value unavailable"
+    )
+    configured_maximum_text = (
+        str(configured_maximum_shards)
+        if configured_maximum_shards is not None
+        else "configured value unavailable"
+    )
+    configured_maximum_example = (
+        str(configured_maximum_shards)
+        if configured_maximum_shards is not None
+        else "N"
     )
 
     parser = argparse.ArgumentParser(
@@ -205,6 +226,8 @@ Configured defaults:
   Configuration file                 = ./dev.config
   AddShardedCluster initial shards   = {configured_shards_text}
     (read from controller configuration)
+  Maximum shards per ShardedCluster  = {configured_maximum_text}
+    (hard limit from controller configuration)
   AddShard count                     = 1
   DeleteShard count                  = 1
 
@@ -257,8 +280,8 @@ Inventory:
         sp,
         "AddShardedCluster",
         "Create an empty managed ShardedCluster.",
-        "Requests creation of a MongoDB ShardedCluster and returns promptly while provisioning continues in the background.",
-        f"  python3 privateWorkerReplacement.py AddShardedCluster SC9\n  python3 privateWorkerReplacement.py AddShardedCluster SC9 --shards 5    # configured default: {configured_shards_text}",
+        f"Requests creation of a MongoDB ShardedCluster and returns promptly while provisioning continues in the background. Initial shards cannot exceed the configured maximum of {configured_maximum_text}.",
+        f"  python3 privateWorkerReplacement.py AddShardedCluster SC9\n  python3 privateWorkerReplacement.py AddShardedCluster SC9 --shards {configured_maximum_example}    # configured maximum",
     )
     _deployment(x, "SHARDED_CLUSTER")
     x.add_argument(
@@ -267,7 +290,8 @@ Inventory:
         metavar="N",
         help=(
             f"Initial shard count. Optional. Default: {configured_shards_text} "
-            "(read from controller configuration). Use --shards N to override."
+            "(read from controller configuration). "
+            f"Maximum: {configured_maximum_text}. Use --shards N to override."
         ),
     )
 
@@ -360,7 +384,7 @@ Inventory:
         sp,
         "AddShard",
         "Add one or more shards to a Running ShardedCluster.",
-        "COUNT defaults to 1. The request runs in the background; use ListShards to monitor readiness.",
+        f"COUNT defaults to 1. The resulting shard count cannot exceed the configured maximum of {configured_maximum_text}. The request runs in the background; use ListShards to monitor readiness.",
         "  python3 privateWorkerReplacement.py AddShard SC9\n  python3 privateWorkerReplacement.py AddShard SC9 2",
     )
     _deployment(x, "SHARDED_CLUSTER")
@@ -370,7 +394,10 @@ Inventory:
         nargs="?",
         type=int,
         default=1,
-        help="Number of shards to add. Optional. Default: 1.",
+        help=(
+            "Number of shards to add. Optional. Default: 1. "
+            f"The resulting total cannot exceed {configured_maximum_text}."
+        ),
     )
 
     x = _sub(
@@ -523,7 +550,10 @@ def _async_worker_arguments(args: argparse.Namespace) -> list[str]:
     )
 
 
-def _validate_async_submission(args: argparse.Namespace) -> None:
+def _validate_async_submission(
+    args: argparse.Namespace,
+    config: dict[str, object] | None = None,
+) -> None:
     """Reject obvious invalid async requests before assigning an operation ID."""
 
     if args.command in {
@@ -538,6 +568,19 @@ def _validate_async_submission(args: argparse.Namespace) -> None:
         raise ControllerError("Shard COUNT must be at least 1.")
     if args.command == "AddShardedCluster" and args.shards is not None and int(args.shards) < 1:
         raise ControllerError("--shards must be at least 1.")
+
+    if args.command == "AddShardedCluster" and config is not None:
+        requested = int(
+            args.shards
+            if args.shards is not None
+            else config["default_shards"]
+        )
+        maximum = int(config["max_shards_per_cluster"])
+        if requested > maximum:
+            raise ControllerError(
+                f"--shards cannot exceed configured maximum of {maximum} "
+                "shards (Sharding.max_shards_per_cluster)."
+            )
 
 
 def _async_deployment(args: argparse.Namespace) -> str:
@@ -624,7 +667,7 @@ def main(argv: list[str] | None = None) -> int:
         log_event("command.started", command=args.command)
 
         if args.command in ASYNC_COMMANDS and not operation_id:
-            _validate_async_submission(args)
+            _validate_async_submission(args, config)
             state = launch_operation(
                 config_path,
                 REPO_ROOT,
