@@ -24,6 +24,72 @@ from .maintenance import managed_resource_inventory
 from .vault import VaultClient
 
 
+# Keep the inventory taxonomy in one place. The same keys drive compact status
+# classification and the optional verbose object-name dump.
+RESOURCE_LABELS = [
+    ("Managed deployments", "managed_deployments"),
+    ("ReplicaSets", "replica_sets"),
+    ("ShardedClusters", "sharded_clusters"),
+    ("Databases", "databases"),
+    ("Managed accounts", "managed_accounts"),
+    ("MongoDB resources", "mongodb_resources"),
+    ("MongoDB users", "mongodb_users"),
+    ("Missing MongoDB resources", "missing_mongodb_resources"),
+    ("Orphan MongoDB resources", "orphan_mongodb_resources"),
+    ("Missing MongoDB users", "missing_mongodb_users"),
+    ("Orphan MongoDB users", "orphan_mongodb_users"),
+    ("Orphan Operator/Helm artifacts", "orphan_operator_artifacts"),
+    ("DBaaS PVCs", "pvcs"),
+    ("DBaaS PVs", "pvs"),
+    ("Controller Secrets", "controller_secrets"),
+    ("Controller ConfigMaps", "controller_configmaps"),
+    ("Deployment locks", "deployment_locks"),
+    ("Ops Manager DBaaS projects", "ops_manager_projects"),
+    ("Ops Manager group secrets", "ops_manager_group_secrets"),
+    ("Ops Manager orphan projects", "ops_manager_orphans"),
+    ("Orphan group secrets", "orphan_group_secrets"),
+    ("Missing Ops Manager projects", "missing_ops_manager_projects"),
+    (
+        "Missing Ops Manager platform project",
+        "missing_ops_manager_platform_project",
+    ),
+    (
+        "Controller infrastructure ConfigMaps",
+        "controller_infrastructure_configmaps",
+    ),
+    ("Terraform backend states", "terraform_states"),
+    ("Ops Manager platform project", "ops_manager_platform_project"),
+    (
+        "Ops Manager platform group secrets",
+        "ops_manager_platform_group_secrets",
+    ),
+]
+
+ATTENTION_KEYS = {
+    "missing_mongodb_resources",
+    "orphan_mongodb_resources",
+    "missing_mongodb_users",
+    "orphan_mongodb_users",
+    "orphan_operator_artifacts",
+    "ops_manager_orphans",
+    "orphan_group_secrets",
+    "missing_ops_manager_projects",
+    "missing_ops_manager_platform_project",
+}
+
+INFRASTRUCTURE_KEYS = {
+    "controller_infrastructure_configmaps",
+    "terraform_states",
+    "ops_manager_platform_project",
+    "ops_manager_platform_group_secrets",
+}
+
+MANAGED_KEYS = {
+    key
+    for _, key in RESOURCE_LABELS
+    if key not in ATTENTION_KEYS | INFRASTRUCTURE_KEYS
+}
+
 def _print_summary_section(
     title: str,
     rows: list[tuple[str, str]],
@@ -114,6 +180,114 @@ def _print_verbose_details(
             print(line)
 
 
+def _inventory_status(resources: dict[str, list[str]]) -> str:
+    """Return the operator-facing health classification for one inventory."""
+
+    if any(resources[key] for key in ATTENTION_KEYS):
+        return "ATTENTION REQUIRED"
+    if any(resources[key] for key in MANAGED_KEYS):
+        return "MANAGED RESOURCES PRESENT"
+    return "CLEAN"
+
+
+def _managed_summary_rows(
+    resources: dict[str, list[str]],
+) -> list[tuple[str, str]]:
+    """Return compact counts for customer-managed DBaaS resources."""
+
+    return [
+        ("Deployments", str(len(resources["managed_deployments"]))),
+        ("  ReplicaSets", str(len(resources["replica_sets"]))),
+        ("  ShardedClusters", str(len(resources["sharded_clusters"]))),
+        ("Databases", str(len(resources["databases"]))),
+        ("Managed accounts", str(len(resources["managed_accounts"]))),
+        ("MongoDB resources", str(len(resources["mongodb_resources"]))),
+        ("MongoDB users", str(len(resources["mongodb_users"]))),
+        (
+            "DBaaS PVCs / PVs",
+            f"{len(resources['pvcs'])} / {len(resources['pvs'])}",
+        ),
+    ]
+
+
+def _platform_summary_rows(
+    resources: dict[str, list[str]],
+) -> list[tuple[str, str]]:
+    """Return compact counts for controller/platform support resources."""
+
+    return [
+        ("Controller Secrets", str(len(resources["controller_secrets"]))),
+        ("Controller ConfigMaps", str(len(resources["controller_configmaps"]))),
+        ("Deployment locks", str(len(resources["deployment_locks"]))),
+        (
+            "Ops Manager DBaaS projects",
+            str(len(resources["ops_manager_projects"])),
+        ),
+        (
+            "Ops Manager group secrets",
+            str(len(resources["ops_manager_group_secrets"])),
+        ),
+        (
+            "Controller infrastructure ConfigMaps",
+            str(len(resources["controller_infrastructure_configmaps"])),
+        ),
+        ("Terraform backend states", str(len(resources["terraform_states"]))),
+        (
+            "Ops Manager platform project",
+            str(len(resources["ops_manager_platform_project"])),
+        ),
+        (
+            "Ops Manager platform group secrets",
+            str(len(resources["ops_manager_platform_group_secrets"])),
+        ),
+    ]
+
+
+def _health_summary_rows(
+    resources: dict[str, list[str]],
+) -> list[tuple[str, str]]:
+    """Return counts for every condition that can require operator attention."""
+
+    return [
+        (
+            "Missing MongoDB resources",
+            str(len(resources["missing_mongodb_resources"])),
+        ),
+        (
+            "Orphan MongoDB resources",
+            str(len(resources["orphan_mongodb_resources"])),
+        ),
+        (
+            "Missing MongoDB users",
+            str(len(resources["missing_mongodb_users"])),
+        ),
+        (
+            "Orphan MongoDB users",
+            str(len(resources["orphan_mongodb_users"])),
+        ),
+        (
+            "Orphan Operator/Helm artifacts",
+            str(len(resources["orphan_operator_artifacts"])),
+        ),
+        (
+            "Ops Manager orphan projects",
+            str(len(resources["ops_manager_orphans"])),
+        ),
+        (
+            "Orphan group secrets",
+            str(len(resources["orphan_group_secrets"])),
+        ),
+        (
+            "Missing Ops Manager projects",
+            str(len(resources["missing_ops_manager_projects"])),
+        ),
+        (
+            "Missing Ops Manager platform project",
+            str(len(resources["missing_ops_manager_platform_project"])),
+        ),
+    ]
+
+
 def list_managed_resources(
     config: dict[str, Any],
     vault: VaultClient,
@@ -122,175 +296,17 @@ def list_managed_resources(
     """Print the authoritative DBaaS inventory in compact or verbose form."""
 
     resources = managed_resource_inventory(config, vault)
-
-    labels = [
-        ("Managed deployments", "managed_deployments"),
-        ("ReplicaSets", "replica_sets"),
-        ("ShardedClusters", "sharded_clusters"),
-        ("Databases", "databases"),
-        ("Managed accounts", "managed_accounts"),
-        ("MongoDB resources", "mongodb_resources"),
-        ("MongoDB users", "mongodb_users"),
-        ("Missing MongoDB resources", "missing_mongodb_resources"),
-        ("Orphan MongoDB resources", "orphan_mongodb_resources"),
-        ("Missing MongoDB users", "missing_mongodb_users"),
-        ("Orphan MongoDB users", "orphan_mongodb_users"),
-        ("Orphan Operator/Helm artifacts", "orphan_operator_artifacts"),
-        ("DBaaS PVCs", "pvcs"),
-        ("DBaaS PVs", "pvs"),
-        ("Controller Secrets", "controller_secrets"),
-        ("Controller ConfigMaps", "controller_configmaps"),
-        ("Deployment locks", "deployment_locks"),
-        ("Ops Manager DBaaS projects", "ops_manager_projects"),
-        ("Ops Manager group secrets", "ops_manager_group_secrets"),
-        ("Ops Manager orphan projects", "ops_manager_orphans"),
-        ("Orphan group secrets", "orphan_group_secrets"),
-        ("Missing Ops Manager projects", "missing_ops_manager_projects"),
-        (
-            "Missing Ops Manager platform project",
-            "missing_ops_manager_platform_project",
-        ),
-        (
-            "Controller infrastructure ConfigMaps",
-            "controller_infrastructure_configmaps",
-        ),
-        ("Terraform backend states", "terraform_states"),
-        ("Ops Manager platform project", "ops_manager_platform_project"),
-        (
-            "Ops Manager platform group secrets",
-            "ops_manager_platform_group_secrets",
-        ),
-    ]
-
-    attention_keys = {
-        "missing_mongodb_resources",
-        "orphan_mongodb_resources",
-        "missing_mongodb_users",
-        "orphan_mongodb_users",
-        "orphan_operator_artifacts",
-        "ops_manager_orphans",
-        "orphan_group_secrets",
-        "missing_ops_manager_projects",
-        "missing_ops_manager_platform_project",
-    }
-
-    infrastructure_keys = {
-        "controller_infrastructure_configmaps",
-        "terraform_states",
-        "ops_manager_platform_project",
-        "ops_manager_platform_group_secrets",
-    }
-
-    managed_keys = {
-        key
-        for _, key in labels
-        if key not in attention_keys | infrastructure_keys
-    }
-
-    attention = any(resources[key] for key in attention_keys)
-    managed_present = any(resources[key] for key in managed_keys)
-
-    if attention:
-        status = "ATTENTION REQUIRED"
-    elif managed_present:
-        status = "MANAGED RESOURCES PRESENT"
-    else:
-        status = "CLEAN"
+    status = _inventory_status(resources)
 
     print("privateWorkerReplacement Managed Resource Inventory")
     print(f"Status: {status}")
     print()
 
-    _print_summary_section(
-        "Managed Resources",
-        [
-            ("Deployments", str(len(resources["managed_deployments"]))),
-            ("  ReplicaSets", str(len(resources["replica_sets"]))),
-            ("  ShardedClusters", str(len(resources["sharded_clusters"]))),
-            ("Databases", str(len(resources["databases"]))),
-            ("Managed accounts", str(len(resources["managed_accounts"]))),
-            ("MongoDB resources", str(len(resources["mongodb_resources"]))),
-            ("MongoDB users", str(len(resources["mongodb_users"]))),
-            (
-                "DBaaS PVCs / PVs",
-                f"{len(resources['pvcs'])} / {len(resources['pvs'])}",
-            ),
-        ],
-    )
+    _print_summary_section("Managed Resources", _managed_summary_rows(resources))
     print()
-
-    _print_summary_section(
-        "Platform Resources",
-        [
-            ("Controller Secrets", str(len(resources["controller_secrets"]))),
-            ("Controller ConfigMaps", str(len(resources["controller_configmaps"]))),
-            ("Deployment locks", str(len(resources["deployment_locks"]))),
-            (
-                "Ops Manager DBaaS projects",
-                str(len(resources["ops_manager_projects"])),
-            ),
-            (
-                "Ops Manager group secrets",
-                str(len(resources["ops_manager_group_secrets"])),
-            ),
-            (
-                "Controller infrastructure ConfigMaps",
-                str(len(resources["controller_infrastructure_configmaps"])),
-            ),
-            ("Terraform backend states", str(len(resources["terraform_states"]))),
-            (
-                "Ops Manager platform project",
-                str(len(resources["ops_manager_platform_project"])),
-            ),
-            (
-                "Ops Manager platform group secrets",
-                str(len(resources["ops_manager_platform_group_secrets"])),
-            ),
-        ],
-    )
+    _print_summary_section("Platform Resources", _platform_summary_rows(resources))
     print()
-
-    _print_summary_section(
-        "Health / Consistency",
-        [
-            (
-                "Missing MongoDB resources",
-                str(len(resources["missing_mongodb_resources"])),
-            ),
-            (
-                "Orphan MongoDB resources",
-                str(len(resources["orphan_mongodb_resources"])),
-            ),
-            (
-                "Missing MongoDB users",
-                str(len(resources["missing_mongodb_users"])),
-            ),
-            (
-                "Orphan MongoDB users",
-                str(len(resources["orphan_mongodb_users"])),
-            ),
-            (
-                "Orphan Operator/Helm artifacts",
-                str(len(resources["orphan_operator_artifacts"])),
-            ),
-            (
-                "Ops Manager orphan projects",
-                str(len(resources["ops_manager_orphans"])),
-            ),
-            (
-                "Orphan group secrets",
-                str(len(resources["orphan_group_secrets"])),
-            ),
-            (
-                "Missing Ops Manager projects",
-                str(len(resources["missing_ops_manager_projects"])),
-            ),
-            (
-                "Missing Ops Manager platform project",
-                str(len(resources["missing_ops_manager_platform_project"])),
-            ),
-        ],
-    )
+    _print_summary_section("Health / Consistency", _health_summary_rows(resources))
 
     rows = _deployment_rows(resources)
     if rows:
@@ -304,4 +320,5 @@ def list_managed_resources(
 
     if verbose:
         print()
-        _print_verbose_details(labels, resources)
+        _print_verbose_details(RESOURCE_LABELS, resources)
+
