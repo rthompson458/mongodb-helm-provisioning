@@ -431,7 +431,9 @@ python3 tests/run_harness.py --testList 56,58-67 --allow-changes
 `--testList` uses the numbering from the complete 100-test run. The list must
 contain no spaces. Ranges must be ascending, and `--testList` cannot be used
 with `--profile` or `--admin`. Selective mode runs only the requested tests;
-it does not automatically run prerequisite tests.
+it does not automatically run prerequisite tests. When possible, it reuses the
+newest prior harness Run ID from the operation journal so a focused rerun can
+address the same surviving fixture left by an interrupted run.
 
 Complete live acceptance run:
 
