@@ -54,7 +54,13 @@ class VaultClient:
         self.token = os.getenv(env_name, "")
         if not self.token:
             raise ControllerError(
-                f"Vault token environment variable '{env_name}' is not set."
+                f"Vault token environment variable '{env_name}' is not set.\n\n"
+                "Prepare this shell before rerunning:\n"
+                f"  export {env_name}=\"$(kubectl exec -n vault vault-0 -- sh -c "
+                "'printf %s \"$VAULT_DEV_ROOT_TOKEN_ID\"')\"\n"
+                f"  test -n \"${env_name}\" && echo \"{env_name} is set\"\n\n"
+                "Run those commands in the same shell that will launch "
+                "privateWorkerReplacement or the live test harness."
             )
 
     def _request(
