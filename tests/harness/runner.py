@@ -29,6 +29,7 @@ class HarnessRunner:
         self.started_at = time.monotonic()
         self.profile_times: dict[str, float] = {}
         self._profile_started: dict[str, float] = {}
+        self._canonical_candidate = 0
 
     def start_profile(self, name: str) -> None:
         """Start timing one major scenario group."""
@@ -42,24 +43,77 @@ class HarnessRunner:
         if started is not None:
             self.profile_times[name] = time.monotonic() - started
 
-    def _next_number(self) -> int:
-        return len(self.results) + 1
+    @property
+    def selective(self) -> bool:
+        """Return True when --testList selected canonical full-suite test IDs."""
 
-    def _announce(self, name: str) -> None:
+        return self.context.selected_tests is not None
+
+    def set_canonical_position(self, previous_test_number: int) -> None:
+        """Set the full-suite test number immediately before the next scenario."""
+
+        if self.selective:
+            self._canonical_candidate = previous_test_number
+
+    def is_test_selected(self, number: int) -> bool:
+        """Return whether one canonical test should execute in this run."""
+
+        if not self.selective:
+            return True
+        selected = self.context.selected_tests or frozenset()
+        return number in selected
+
+    def any_test_selected(self, start: int, end: int) -> bool:
+        """Return whether any selected test falls in an inclusive canonical range."""
+
+        if not self.selective:
+            return True
+        selected = self.context.selected_tests or frozenset()
+        return any(start <= number <= end for number in selected)
+
+    def _begin_test(self, name: str) -> tuple[int, bool]:
+        """Reserve one test number and decide whether its action should execute."""
+
+        if self.selective:
+            self._canonical_candidate += 1
+            number = self._canonical_candidate
+            return number, self.is_test_selected(number)
+        return len(self.results) + 1, True
+
+    def _display_total(self) -> int:
+        """Return the denominator printed beside a test number."""
+
+        if self.selective:
+            return int(self.context.canonical_total_tests or self.context.total_tests)
+        return self.context.total_tests
+
+    def _announce(self, name: str, number: int) -> None:
         """Print which numbered test is starting before a long wait begins."""
 
-        print(
-            f"[RUN ] Test {self._next_number()} of {self.context.total_tests} - {name}"
+        print(f"[RUN ] Test {number} of {self._display_total()} - {name}")
+
+    @staticmethod
+    def _skipped_result(name: str) -> StepResult:
+        """Return an unrecorded success placeholder for an unselected test."""
+
+        return StepResult(
+            name=name,
+            passed=True,
+            note="Not selected by --testList.",
         )
 
-    def _record(self, result: StepResult) -> StepResult:
+    def _record(
+        self,
+        result: StepResult,
+        number: int | None = None,
+    ) -> StepResult:
         """Store a result and print a numbered human-readable status line."""
 
         self.results.append(result)
-        number = len(self.results)
+        display_number = number if number is not None else len(self.results)
         label = "PASS" if result.passed else "FAIL"
         print(
-            f"[{label}] Test {number} of {self.context.total_tests} - "
+            f"[{label}] Test {display_number} of {self._display_total()} - "
             f"{result.name} ({_duration(result.elapsed_seconds)})"
         )
         if result.note:
