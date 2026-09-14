@@ -230,7 +230,11 @@ python3 privateWorkerReplacement.py ListDatabases RS1
 
 ## ShardedCluster defaults and safety
 
-`AddShardedCluster` uses the configured initial shard count when `--shards` is omitted. The current `dev.config` uses **3 shards**.
+`AddShardedCluster` uses the configured initial shard count when `--shards` is omitted. The current `dev.config` uses **3 initial shards** and sets `max_shards_per_cluster = 5`.
+
+The maximum is a hard service-level ceiling for one ShardedCluster. A new cluster cannot be created above it, and `AddShard` cannot raise an existing cluster above it. A target exactly equal to the maximum is allowed. The configured `default_shards` value must not be greater than `max_shards_per_cluster`.
+
+If the maximum is later lowered below the size of an existing cluster, the controller does not shrink that cluster automatically. It refuses further `AddShard` requests until the cluster is back at or below the configured maximum.
 
 ```bash
 python3 privateWorkerReplacement.py AddShardedCluster SC9
@@ -398,9 +402,9 @@ Current live profile totals are derived from scenario definitions and protected 
 ```text
 preflight    5
 replicaset  16
-sharded     19
+sharded     21
 locking     11
-all         36
+all         38
 ```
 
 Safe read-only live preflight:

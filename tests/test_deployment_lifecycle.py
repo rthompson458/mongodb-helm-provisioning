@@ -25,6 +25,7 @@ class DeploymentLifecycleTests(unittest.TestCase):
             "storage_base_path": "/tmp/mongodb",
             "storage_node_name": "node-0",
             "default_shards": 3,
+            "max_shards_per_cluster": 5,
             "default_members_per_shard": 3,
             "default_mongos": 2,
             "default_config_servers": 3,
@@ -93,6 +94,17 @@ class DeploymentLifecycleTests(unittest.TestCase):
         self.assertEqual(sc["deployment_type"], "ShardedCluster")
         self.assertEqual(sc["shard_count"], 4)
         self.assertEqual(sc["storage_shard_count"], 4)
+
+    def test_add_sharded_cluster_rejects_above_configured_maximum(self) -> None:
+        """Creation must fail before Terraform when initial shards exceed the limit."""
+
+        vault = FakeVault({})
+        with patch.object(deployments, "apply_inventory") as apply_mock:
+            with self.assertRaises(deployments.ControllerError) as ctx:
+                deployments.add_sharded_cluster(self.config, vault, "SC9", 6)
+
+        self.assertIn("configured maximum of 5", str(ctx.exception))
+        apply_mock.assert_not_called()
 
     def test_delete_replica_set_removes_ops_manager_project(self) -> None:
         vault = FakeVault(

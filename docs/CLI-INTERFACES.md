@@ -99,6 +99,8 @@ The customer receives a concise acknowledgement and a normal resource-status com
 
 `ListDatabaseAccounts` provides the complete Vault browser URLs for each managed credential, along with the logical Vault paths.
 
+ShardedCluster topology is constrained by controller configuration. The `[Sharding] max_shards_per_cluster` value limits both the initial `AddShardedCluster --shards` request and the resulting target of later `AddShard` requests. Requests that would exceed the configured ceiling are refused.
+
 ## Administrator interface
 
 The administrator interface exposes:

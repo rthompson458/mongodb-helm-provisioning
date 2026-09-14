@@ -87,6 +87,17 @@ class CliTests(unittest.TestCase):
         with self.assertRaises(cli.ControllerError):
             cli._validate_async_submission(args)
 
+    def test_async_submission_rejects_sharded_cluster_above_maximum(self) -> None:
+        args = cli.build_parser().parse_args(
+            ["AddShardedCluster", "SC9", "--shards", "6"]
+        )
+        config = {"default_shards": 3, "max_shards_per_cluster": 5}
+
+        with self.assertRaises(cli.ControllerError) as ctx:
+            cli._validate_async_submission(args, config)
+
+        self.assertIn("configured maximum of 5", str(ctx.exception))
+
     def test_public_parser_does_not_expose_administrator_commands(self) -> None:
         parser = cli.build_parser()
         admin_commands = {
@@ -152,18 +163,28 @@ class CliTests(unittest.TestCase):
 
     def test_public_help_shows_live_configured_shard_default(self) -> None:
         configured = cli._configured_default_shards(cli.DEFAULT_CONFIG)
+        maximum = cli._configured_max_shards(cli.DEFAULT_CONFIG)
         self.assertIsNotNone(configured)
+        self.assertIsNotNone(maximum)
         help_text = cli.build_parser(cli.DEFAULT_CONFIG).format_help()
         self.assertIn(
             f"AddShardedCluster initial shards   = {configured}",
             help_text,
         )
+        self.assertIn(
+            f"Maximum shards per ShardedCluster  = {maximum}",
+            help_text,
+        )
         self.assertIn("(read from controller configuration)", help_text)
+        self.assertIn("(hard limit from controller configuration)", help_text)
         self.assertIn("AddShard count                     = 1", help_text)
         self.assertIn("DeleteShard count                  = 1", help_text)
 
     def test_add_sharded_cluster_help_labels_configured_default(self) -> None:
-        with mock.patch.object(cli, "_configured_default_shards", return_value=7):
+        with (
+            mock.patch.object(cli, "_configured_default_shards", return_value=7),
+            mock.patch.object(cli, "_configured_max_shards", return_value=9),
+        ):
             parser = cli.build_parser(cli.DEFAULT_CONFIG)
 
         subparsers = next(
@@ -178,7 +199,8 @@ class CliTests(unittest.TestCase):
             "Default: 7 (read from controller configuration)",
             normalized_help,
         )
-        self.assertIn("configured default: 7", normalized_help)
+        self.assertIn("Maximum: 9", normalized_help)
+        self.assertIn("configured maximum of 9", normalized_help)
 
     def test_config_path_prescan_honors_custom_config(self) -> None:
         selected = cli._config_path_from_argv(
@@ -197,6 +219,7 @@ class CliTests(unittest.TestCase):
         add_help = subparsers.choices["AddShard"].format_help()
         delete_help = subparsers.choices["DeleteShard"].format_help()
         self.assertIn("Optional. Default: 1.", add_help)
+        self.assertIn("resulting total cannot exceed", add_help)
         self.assertIn("Optional. Default: 1.", delete_help)
 
     def test_mutating_actions_use_controller_state_lock(self) -> None:

@@ -40,6 +40,24 @@ def _require_positive_shard_count(count: int) -> None:
         raise ControllerError("Shard COUNT must be at least 1.")
 
 
+def _require_target_within_maximum(
+    config: dict[str, Any],
+    item: dict[str, Any],
+    count: int,
+    target: int,
+) -> None:
+    """Reject AddShard when its resulting topology would exceed the limit."""
+
+    maximum = int(config["max_shards_per_cluster"])
+    if target > maximum:
+        raise ControllerError(
+            f"Cannot add {count} shard(s) to ShardedCluster "
+            f"'{item['display_name']}'. Target shard count {target} exceeds "
+            f"configured maximum of {maximum} shards "
+            "(Sharding.max_shards_per_cluster). No change was attempted."
+        )
+
+
 def _resume_or_acquire_lock(
     config: dict[str, Any],
     inventory: dict[str, dict[str, Any]],
@@ -121,6 +139,7 @@ def add_shard(
         validate_topology_resume(item, existing, "AddShard", count)
         target = int(existing["target_shards"])
         start = int(existing["start_shards"])
+        _require_target_within_maximum(config, item, count, target)
         lock = existing
         print(
             f"Resuming AddShard on ShardedCluster '{item['display_name']}' "
@@ -129,6 +148,7 @@ def add_shard(
     else:
         start = int(item["shard_count"])
         target = start + count
+        _require_target_within_maximum(config, item, count, target)
         lock = _resume_or_acquire_lock(
             config,
             inventory,

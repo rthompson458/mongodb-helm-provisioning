@@ -2,7 +2,7 @@
 
 The configuration file contains environment-specific values needed to operate
 the MongoDB DBaaS service: Vault, Terraform, Kubernetes, MongoDB defaults,
-sharding defaults, storage, rotation, and runtime timeouts.
+sharding defaults and limits, storage, rotation, and runtime timeouts.
 
 Logging is intentionally *not* configurable here.  The controller always uses
 predictable daily append-only files under ``logs/`` beside this config file.
@@ -88,6 +88,7 @@ def load_config(path: Path) -> dict[str, Any]:
         ],
         "Sharding": [
             "default_shards",
+            "max_shards_per_cluster",
             "default_members_per_shard",
             "default_mongos",
             "default_config_servers",
@@ -111,9 +112,17 @@ def load_config(path: Path) -> dict[str, Any]:
 
     members = _integer(p, "MongoDB", "default_members", 1)
     default_shards = _integer(p, "Sharding", "default_shards", 1)
+    max_shards_per_cluster = _integer(
+        p, "Sharding", "max_shards_per_cluster", 1
+    )
     members_per_shard = _integer(p, "Sharding", "default_members_per_shard", 1)
     default_mongos = _integer(p, "Sharding", "default_mongos", 1)
     default_config_servers = _integer(p, "Sharding", "default_config_servers", 1)
+    if default_shards > max_shards_per_cluster:
+        raise ControllerError(
+            "'default_shards' in [Sharding] cannot exceed "
+            "'max_shards_per_cluster'."
+        )
     rotation = _integer(p, "Rotation", "days", 1)
     job_timeout = _integer(p, "Runtime", "job_timeout_seconds", 30)
     rs_ready_timeout = _integer(p, "Runtime", "replica_set_ready_timeout_seconds", 30)
@@ -167,6 +176,7 @@ def load_config(path: Path) -> dict[str, Any]:
         "storage_class": p.get("MongoDB", "storage_class").strip(),
         "storage_size": p.get("MongoDB", "storage_size").strip(),
         "default_shards": default_shards,
+        "max_shards_per_cluster": max_shards_per_cluster,
         "default_members_per_shard": members_per_shard,
         "default_mongos": default_mongos,
         "default_config_servers": default_config_servers,

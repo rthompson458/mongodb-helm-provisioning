@@ -289,12 +289,22 @@ def add_sharded_cluster(
     """Create one empty managed ShardedCluster and wait for every component."""
 
     key, display = normalize_deployment(name)
-    inventory = vault.load_inventory()
-    _check_new_name(config, inventory, key, display, "ShardedCluster")
-
     shard_count = int(shards if shards is not None else config["default_shards"])
     if shard_count < 1:
         raise ControllerError("--shards must be at least 1.")
+
+    # Enforce the service-level topology ceiling before reading or changing
+    # managed inventory. Reaching the configured maximum is allowed; exceeding
+    # it is not.
+    maximum_shards = int(config["max_shards_per_cluster"])
+    if shard_count > maximum_shards:
+        raise ControllerError(
+            f"--shards cannot exceed configured maximum of {maximum_shards} "
+            "shards (Sharding.max_shards_per_cluster)."
+        )
+
+    inventory = vault.load_inventory()
+    _check_new_name(config, inventory, key, display, "ShardedCluster")
 
     item = _new_common(config, display, "ShardedCluster")
     item.update(

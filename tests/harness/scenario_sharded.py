@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from privateWorkerReplacement.config import load_config
+
 from .runner import HarnessRunner
 
-TEST_COUNT = 14
+TEST_COUNT = 16
 
 
 def run(runner: HarnessRunner) -> None:
@@ -13,13 +15,28 @@ def run(runner: HarnessRunner) -> None:
     ctx = runner.context
     sc = ctx.sharded_cluster
     db = ctx.database
+    maximum_shards = int(load_config(ctx.config_path)["max_shards_per_cluster"])
+    initial_shards = min(3, maximum_shards)
+
+    blocked_create = runner.controller(
+        "Block ShardedCluster creation above configured maximum",
+        "AddShardedCluster",
+        f"{sc}-over-limit",
+        "--shards",
+        str(maximum_shards + 1),
+        expect_success=False,
+        expected_text=f"configured maximum of {maximum_shards}",
+        timeout=300,
+    )
+    if not blocked_create.passed:
+        return
 
     created = runner.controller_async(
-        "Create three-shard test cluster",
+        f"Create {initial_shards}-shard test cluster",
         "AddShardedCluster",
         sc,
         "--shards",
-        "3",
+        str(initial_shards),
         timeout=2400,
     )
     if not created.passed:
@@ -29,7 +46,7 @@ def run(runner: HarnessRunner) -> None:
         "Targeted shard status works",
         "ListShards",
         sc,
-        expected_text=f"{sc.lower()}-0",
+        expected_text=f"{sc.lower()}-{initial_shards - 1}",
     )
     if not targeted_status.passed:
         return
@@ -42,23 +59,48 @@ def run(runner: HarnessRunner) -> None:
     if not global_status.passed:
         return
 
-    added = runner.controller_async(
-        "Add two shards in one command",
-        "AddShard",
-        sc,
-        "2",
-        timeout=2400,
-    )
+    add_count = min(2, maximum_shards - initial_shards)
+    if add_count > 0:
+        added = runner.controller_async(
+            f"Add {add_count} shard(s) without exceeding configured maximum",
+            "AddShard",
+            sc,
+            str(add_count),
+            timeout=2400,
+        )
+    else:
+        added = runner.check(
+            "Configured maximum leaves no room for allowed shard expansion",
+            True,
+            note=(
+                f"Cluster started at the configured maximum of {maximum_shards}; "
+                "no successful AddShard request is possible."
+            ),
+        )
     if not added.passed:
         return
 
-    five_shard_status = runner.controller(
-        "Five-shard cluster reports online",
+    current_shards = initial_shards + add_count
+    expanded_status = runner.controller(
+        "Expanded cluster reports online",
         "ListShards",
         sc,
-        expected_text=f"{sc.lower()}-4",
+        expected_text=f"{sc.lower()}-{current_shards - 1}",
     )
-    if not five_shard_status.passed:
+    if not expanded_status.passed:
+        return
+
+    blocked_add_count = maximum_shards - current_shards + 1
+    blocked_add = runner.controller_async(
+        "Block AddShard target above configured maximum",
+        "AddShard",
+        sc,
+        str(blocked_add_count),
+        expect_success=False,
+        expected_text=f"configured maximum of {maximum_shards}",
+        timeout=300,
+    )
+    if not blocked_add.passed:
         return
 
     # Database create/delete are customer-asynchronous just like the surrounding
@@ -74,14 +116,22 @@ def run(runner: HarnessRunner) -> None:
     if not created_db.passed:
         return
 
-    deleted_one = runner.controller_async(
-        "Delete a shard while database exists",
-        "DeleteShard",
-        sc,
-        "1",
-        "--confirm",
-        timeout=2400,
-    )
+    if current_shards > 1:
+        deleted_one = runner.controller_async(
+            "Delete a shard while database exists",
+            "DeleteShard",
+            sc,
+            "1",
+            "--confirm",
+            timeout=2400,
+        )
+        current_shards -= 1
+    else:
+        deleted_one = runner.check(
+            "One-shard maximum leaves no shard to delete while database exists",
+            True,
+            note="Final-shard protection is tested separately.",
+        )
     if not deleted_one.passed:
         return
 
@@ -130,14 +180,22 @@ def run(runner: HarnessRunner) -> None:
     if not deleted_db.passed:
         return
 
-    reduced = runner.controller_async(
-        "Delete three more shards in one command and leave one",
-        "DeleteShard",
-        sc,
-        "3",
-        "--confirm",
-        timeout=2400,
-    )
+    remaining_to_delete = current_shards - 1
+    if remaining_to_delete > 0:
+        reduced = runner.controller_async(
+            f"Delete {remaining_to_delete} shard(s) and leave one",
+            "DeleteShard",
+            sc,
+            str(remaining_to_delete),
+            "--confirm",
+            timeout=2400,
+        )
+    else:
+        reduced = runner.check(
+            "Cluster already has one shard after database lifecycle",
+            True,
+            note="No additional contraction is required before final-shard protection.",
+        )
     if not reduced.passed:
         return
 

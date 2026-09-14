@@ -27,6 +27,7 @@ class ShardLifecycleTests(unittest.TestCase):
             "storage_base_path": "/tmp/mongodb",
             "storage_node_name": "node-0",
             "default_shards": 3,
+            "max_shards_per_cluster": 5,
             "default_members_per_shard": 3,
             "default_mongos": 2,
             "default_config_servers": 3,
@@ -68,6 +69,26 @@ class ShardLifecycleTests(unittest.TestCase):
         self.assertEqual(calls[0]["storage_shard_count"], 5)
         self.assertEqual(calls[0]["shard_count"], 3)
         self.assertEqual(calls[1]["shard_count"], 5)
+
+    def test_add_shard_rejects_target_above_configured_maximum(self) -> None:
+        """Scale-up must fail before locking or Terraform when target exceeds max."""
+
+        vault = FakeVault(
+            deployment_inventory(deployment_type="ShardedCluster", name="SC9")
+        )
+
+        with (
+            patch.object(shards, "read_deployment_lock", return_value=None),
+            patch.object(shards, "acquire_deployment_lock") as lock_mock,
+            patch.object(shards, "apply_inventory") as apply_mock,
+        ):
+            with self.assertRaises(shards.ControllerError) as ctx:
+                shards.add_shard(self.config, vault, "SC9", 3)
+
+        self.assertIn("Target shard count 6", str(ctx.exception))
+        self.assertIn("configured maximum of 5", str(ctx.exception))
+        lock_mock.assert_not_called()
+        apply_mock.assert_not_called()
 
     def test_delete_shard_allowed_when_managed_database_exists(self) -> None:
         """Shard contraction must preserve managed databases on the cluster."""
