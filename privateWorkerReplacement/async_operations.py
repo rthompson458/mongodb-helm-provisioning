@@ -1,10 +1,10 @@
 """Detached long-running operation support for privateWorkerReplacement.
 
-Customer requests that can take meaningful time return control to the shell
-while a detached worker runs the normal Terraform-driven lifecycle. This
-module owns the small operation journal used by administrators and the test
-harness to determine whether that worker is queued, running, succeeded, failed,
-or was interrupted.
+Controller requests that can take meaningful time return control to the shell
+while a detached worker runs the normal Terraform-driven lifecycle or
+administrator recovery action. This module owns the small operation journal
+used by administrators and the test harness to determine whether that worker
+is queued, running, succeeded, failed, or was interrupted.
 
 Runtime files are intentionally easy to find:
 
@@ -49,7 +49,9 @@ ASYNC_COMMANDS = {
     "DeleteShard",
     "AddDatabase",
     "DeleteDatabase",
+    "RecoverDeploymentLock",
     "RecoverOrphanedResources",
+    "Reconcile",
 }
 
 TERMINAL_RESULTS = {"Succeeded", "Failed", "Interrupted"}
