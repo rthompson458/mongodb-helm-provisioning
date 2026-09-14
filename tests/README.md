@@ -103,13 +103,13 @@ python3 tests/run_harness.py --profile replicaset --allow-changes
 
 The ReplicaSet scenario adds 11 lifecycle checks after preflight. It creates a temporary ReplicaSet and database, verifies database/account status, verifies blocked deletion while the database exists, rotates credentials, disables and re-enables Owner, deletes the database, and deletes the temporary ReplicaSet.
 
-### ShardedCluster — 19 total checks
+### ShardedCluster — 21 total checks
 
 ```bash
 python3 tests/run_harness.py --profile sharded --allow-changes
 ```
 
-The ShardedCluster scenario adds 14 lifecycle checks after preflight. It exercises cluster creation, shard status, shard expansion, database creation, shard contraction, password rotation, Owner disable/re-enable, database deletion, final-shard protection, and cluster deletion.
+The ShardedCluster scenario adds 16 lifecycle checks after preflight. It also verifies the configured `max_shards_per_cluster` safety ceiling: cluster creation above the maximum is refused, and `AddShard` is refused when the resulting shard count would exceed the maximum. The remaining checks exercise cluster creation, shard status, allowed shard expansion, database creation, shard contraction, password rotation, Owner disable/re-enable, database deletion, final-shard protection, and cluster deletion.
 
 ### Locking — 11 total checks
 
@@ -119,7 +119,7 @@ python3 tests/run_harness.py --profile locking --allow-changes
 
 The locking scenario adds 6 checks after preflight. It verifies that the Terraform-created ShardedCluster deployment lock appears during an active topology change, blocks conflicting work, disappears after completion, and leaves the cluster readable before cleanup.
 
-### Complete acceptance run — 36 total checks
+### Complete acceptance run — 38 total checks
 
 Run the full gauntlet only when broad end-to-end acceptance is needed:
 
@@ -129,7 +129,7 @@ python3 tests/run_harness.py --profile all --allow-changes
 
 This runs preflight, ReplicaSet, ShardedCluster, and locking scenarios.
 
-The harness help derives these displayed totals from the scenario `TEST_COUNT` constants, and the CLI regression suite verifies the current 5/16/19/11/36 profile totals so documentation drift is caught quickly.
+The harness help derives these displayed totals from the scenario `TEST_COUNT` constants, and the CLI regression suite verifies the current 5/16/21/11/38 profile totals so documentation drift is caught quickly.
 
 ---
 
@@ -205,7 +205,7 @@ At the end, the harness reports pass/fail totals plus elapsed time for each prof
 A successful complete run ends with:
 
 ```text
-HARNESS SUMMARY: 36 passed / 0 failed
+HARNESS SUMMARY: 38 passed / 0 failed
 ```
 
 ---
@@ -266,7 +266,7 @@ An orphan Ops Manager project, orphan `<PROJECT_ID>-group-secret`, a managed dep
 
 ## 9. Recommended validation workflow after changes
 
-Do not run the complete 36-check harness after every small change.
+Do not run the complete 38-check harness after every small change.
 
 Use this approach:
 
@@ -277,4 +277,4 @@ Use this approach:
 5. For deployment-lock/concurrency changes, run `--profile locking --allow-changes`.
 6. Reserve `--profile all --allow-changes` for broad cross-cutting lifecycle changes, release/demo baselines, or other true acceptance milestones.
 
-This keeps normal feedback fast while preserving the full 36-check run for the occasions when its broad coverage is actually valuable.
+This keeps normal feedback fast while preserving the full 38-check run for the occasions when its broad coverage is actually valuable.
