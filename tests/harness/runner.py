@@ -402,11 +402,16 @@ class HarnessRunner:
         expected_text: str | None = None,
         announce: bool = True,
         started_at: float | None = None,
+        test_number: int | None = None,
     ) -> StepResult:
         """Poll the administrator operation journal until a terminal result appears."""
 
+        number = test_number
         if announce:
-            self._announce(name)
+            number, execute = self._begin_test(name)
+            if not execute:
+                return self._skipped_result(name)
+            self._announce(name, number)
         started = started_at if started_at is not None else time.monotonic()
 
         if not operation.operation_id:
@@ -419,7 +424,8 @@ class HarnessRunner:
                     stderr=operation.stderr,
                     note="Async command did not create a correlatable operation journal entry.",
                     elapsed_seconds=time.monotonic() - started,
-                )
+                ),
+                number,
             )
 
         status_command = [
@@ -472,13 +478,15 @@ class HarnessRunner:
                         stderr=operation.stderr + "\n" + last_stderr,
                         note=" ".join(note_parts),
                         elapsed_seconds=time.monotonic() - started,
-                    )
+                    ),
+                    number,
                 )
 
             now = time.monotonic()
             if now >= next_wait_report:
+                wait_number = number if number is not None else len(self.results) + 1
                 print(
-                    f"[WAIT] Test {self._next_number()} of {self.context.total_tests} - "
+                    f"[WAIT] Test {wait_number} of {self._display_total()} - "
                     f"{name} - elapsed {_duration(now - started)} - "
                     f"operation {operation.operation_id} still In Progress"
                 )
@@ -498,7 +506,8 @@ class HarnessRunner:
                     f"result within {timeout} seconds."
                 ),
                 elapsed_seconds=time.monotonic() - started,
-            )
+            ),
+            number,
         )
 
     def controller_async(
@@ -511,7 +520,11 @@ class HarnessRunner:
     ) -> StepResult:
         """Submit an async command, then poll its operation result for this test."""
 
-        self._announce(name)
+        number, execute = self._begin_test(name)
+        if not execute:
+            return self._skipped_result(name)
+
+        self._announce(name, number)
         started = time.monotonic()
         operation = self.start_async_controller(*arguments)
         if operation.operation_id:
@@ -527,6 +540,7 @@ class HarnessRunner:
             expected_text=expected_text,
             announce=False,
             started_at=started,
+            test_number=number,
         )
 
     def admin_async(
@@ -539,7 +553,11 @@ class HarnessRunner:
     ) -> StepResult:
         """Submit an async administrator command and wait for its journal result."""
 
-        self._announce(name)
+        number, execute = self._begin_test(name)
+        if not execute:
+            return self._skipped_result(name)
+
+        self._announce(name, number)
         started = time.monotonic()
         operation = self.start_async_admin(*arguments)
         if operation.operation_id:
@@ -555,6 +573,7 @@ class HarnessRunner:
             expected_text=expected_text,
             announce=False,
             started_at=started,
+            test_number=number,
         )
 
     def summary(self) -> int:
@@ -567,6 +586,12 @@ class HarnessRunner:
         print()
         print("=" * 68)
         print(f"HARNESS SUMMARY: {passed} passed / {failed} failed")
+        if self.selective:
+            selected = ",".join(
+                str(number)
+                for number in sorted(self.context.selected_tests or frozenset())
+            )
+            print(f"Selected tests:     {selected}")
         for name, seconds in self.profile_times.items():
             print(f"{name + ':':18} {_duration(seconds)}")
         print(f"{'Total elapsed:':18} {_duration(total_elapsed)}")
