@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 import run_harness as harness_cli
 from pathlib import Path
@@ -130,6 +131,48 @@ class HarnessCliTests(unittest.TestCase):
             harness_cli._parse_test_list("0", 100)
         with self.assertRaises(harness_cli.argparse.ArgumentTypeError):
             harness_cli._parse_test_list("101", 100)
+
+    def test_selective_retest_reuses_latest_harness_run_id(self) -> None:
+        records = [
+            {
+                "deployment": "controller-state",
+                "submitted_at": "2026-09-14T17:04:00+00:00",
+            },
+            {
+                "deployment": "AdminRSTest-0914160201",
+                "submitted_at": "2026-09-14T16:02:01+00:00",
+            },
+        ]
+
+        with mock.patch.object(
+            harness_cli,
+            "list_operation_records",
+            return_value=records,
+        ):
+            run_id, reused = harness_cli._select_run_id(
+                Path("/tmp/dev.config"),
+                frozenset({97, 98, 99, 100}),
+            )
+
+        self.assertTrue(reused)
+        self.assertEqual(run_id, "0914160201")
+
+    def test_selective_fixture_creation_uses_fresh_run_id(self) -> None:
+        with mock.patch.object(
+            harness_cli,
+            "list_operation_records",
+            return_value=[
+                {"deployment": "AdminRSTest-0914160201"},
+            ],
+        ):
+            run_id, reused = harness_cli._select_run_id(
+                Path("/tmp/dev.config"),
+                frozenset({46}),
+            )
+
+        self.assertFalse(reused)
+        self.assertRegex(run_id, r"^\d{10}$")
+        self.assertNotEqual(run_id, "0914160201")
 
     def test_profile_and_test_list_are_mutually_exclusive(self) -> None:
         result = self._run(

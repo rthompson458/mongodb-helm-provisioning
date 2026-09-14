@@ -23,6 +23,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from privateWorkerReplacement.async_operations import list_operation_records
+
 from harness.models import HarnessContext
 from harness.runner import HarnessRunner
 from harness import (
@@ -114,6 +116,55 @@ def _parse_test_list(value: str, maximum: int) -> tuple[int, ...]:
     return tuple(sorted(selected))
 
 
+HARNESS_RUN_ID_PATTERN = re.compile(
+    r"^(?:RSTest|SCTest|LockTest|AdminRSTest|AdminSCTest|OrphanRSTest)-(\d{10})$",
+    re.IGNORECASE,
+)
+
+# These tests create the top-level deployment fixture for their scenario. When
+# one is explicitly selected, a fresh run ID is safer than reusing an interrupted
+# prior run. Later state-dependent tests instead reuse the newest harness run ID
+# when one can be recovered from the operation journal.
+TOP_LEVEL_FIXTURE_TESTS = frozenset({6, 18, 33, 46, 68, 86})
+
+
+def _latest_harness_run_id(config_path: Path) -> str | None:
+    """Return the newest prior harness run ID recorded in async operations."""
+
+    for record in list_operation_records(config_path):
+        deployment = str(record.get("deployment", ""))
+        match = HARNESS_RUN_ID_PATTERN.fullmatch(deployment)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _select_run_id(
+    config_path: Path,
+    selected_tests: frozenset[int] | None,
+) -> tuple[str, bool]:
+    """Choose a fresh or reusable harness run ID for this invocation.
+
+    Normal profile runs always receive a fresh ID. A selective rerun that does
+    not include a top-level fixture-creation test reuses the newest prior harness
+    ID when possible. That lets a failed run stop at Test 55 and a later
+    --testList 56-60 address the same surviving fixture instead of inventing
+    names that cannot exist.
+    """
+
+    fresh = datetime.now().strftime("%m%d%H%M%S")
+    if selected_tests is None:
+        return fresh, False
+
+    if selected_tests.intersection(TOP_LEVEL_FIXTURE_TESTS):
+        return fresh, False
+
+    previous = _latest_harness_run_id(config_path)
+    if previous:
+        return previous, True
+    return fresh, False
+
+
 def _format_test_list(numbers: tuple[int, ...]) -> str:
     """Return a compact normalized representation of selected test numbers."""
 
@@ -180,9 +231,10 @@ Common commands:
 
   --testList uses the canonical numbering from the full {totals['all']}-test run.
   It runs ONLY the requested checks and does not automatically run prerequisite
-  tests. The value must contain no spaces, and range end must be >= range start.
-  --profile and --testList are mutually exclusive. --admin cannot be combined
-  with --testList.
+  tests. When possible, it reuses the newest prior harness Run ID so surviving
+  fixtures from a failed run keep the same generated names. The value must contain
+  no spaces, and range end must be >= range start. --profile and --testList are
+  mutually exclusive. --admin cannot be combined with --testList.
 
   FULL GAUNTLET - all {totals['all']} live acceptance checks:
     python3 tests/run_harness.py --profile all --allow-changes
@@ -342,15 +394,16 @@ def main(argv: list[str] | None = None) -> int:
     if not config_path.exists():
         raise SystemExit(f"ERROR: Configuration file does not exist: {config_display}")
 
-    # Test names need to be unique, but testers should not have to invent or
-    # understand suffixes. Generate a compact run ID internally.
-    run_id = datetime.now().strftime("%m%d%H%M%S")
-
     selected_tests = (
         frozenset(args.test_list)
         if args.test_list is not None
         else None
     )
+
+    # Full/profile runs always use a new fixture suffix. Focused reruns normally
+    # reuse the newest interrupted harness suffix so state-dependent tests can
+    # inspect or finish the exact resources left by that earlier run.
+    run_id, reused_run_id = _select_run_id(config_path, selected_tests)
     canonical_total = _profile_totals()["all"]
     context = HarnessContext(
         repo_root=REPO_ROOT,
@@ -375,13 +428,21 @@ def main(argv: list[str] | None = None) -> int:
         f"{_selection_label(args.profile, args.admin, args.test_list)}"
     )
     print(f"Config:  {config_display}")
-    print(f"Run ID:  {run_id}")
+    print(
+        f"Run ID:  {run_id}"
+        + (" (reused from latest harness operation)" if reused_run_id else "")
+    )
     if selected_tests is not None:
         print(f"Tests:   {len(selected_tests)} selected of {canonical_total}")
         print(
             "NOTE: --testList runs only the requested checks; prerequisite tests "
             "are not added automatically."
         )
+        if not reused_run_id and not selected_tests.intersection(TOP_LEVEL_FIXTURE_TESTS):
+            print(
+                "NOTE: No prior harness run ID was found. State-dependent tests "
+                "must already have matching resources or they will fail cleanly."
+            )
     else:
         print(f"Tests:   {context.total_tests}")
     print()
