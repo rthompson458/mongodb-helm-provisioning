@@ -217,7 +217,8 @@ Normal DBaaS users should use:
         "shardCount, surviving shard readiness, config servers, mongos, and removed "
         "StatefulSets. Only the exact lifecycle lock release is applied through "
         "Terraform; unrelated deployment state is not broadly reconciled.",
-        "  python3 privateWorkerReplacementAdmin.py RecoverDeploymentLock SC9 --confirm",
+        "  python3 privateWorkerReplacementAdmin.py RecoverDeploymentLock SC9 --confirm\n"
+        "  python3 privateWorkerReplacementAdmin.py ListOperation OPERATION_ID",
     )
     x.add_argument(
         "deployment",
@@ -237,7 +238,8 @@ Normal DBaaS users should use:
         "custom resources. If both checks pass, Terraform converges the controller "
         "backend to empty desired state and finishes destroying tracked leftovers. "
         "Use ListOperation with the returned operation ID to monitor completion.",
-        "  python3 privateWorkerReplacementAdmin.py RecoverOrphanedResources --confirm",
+        "  python3 privateWorkerReplacementAdmin.py RecoverOrphanedResources --confirm\n"
+        "  python3 privateWorkerReplacementAdmin.py ListOperation OPERATION_ID",
     )
     _confirm(x)
 
@@ -251,7 +253,8 @@ Normal DBaaS users should use:
         "resulting deployment. The request returns an Operation ID for ListOperation "
         "monitoring. Reconcile refuses to run while a protected ShardedCluster "
         "change is active.",
-        "  python3 privateWorkerReplacementAdmin.py Reconcile",
+        "  python3 privateWorkerReplacementAdmin.py Reconcile\n"
+        "  python3 privateWorkerReplacementAdmin.py ListOperation OPERATION_ID",
     )
 
     return parser
