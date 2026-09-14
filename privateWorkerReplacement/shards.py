@@ -15,6 +15,17 @@ Read-only shard presentation lives in deployment_status.py. Python does not
 directly edit the MongoDB custom resource or delete shard storage.
 """
 
+# MAINTAINER READING GUIDE
+# Shard changes are resumable topology workflows, not simple count edits.
+# The normal pattern is:
+# 1. Validate the requested count and current cluster readiness.
+# 2. Reuse a matching existing topology lock or acquire a new one.
+# 3. Change desired shard count through Terraform.
+# 4. Wait for the ShardedCluster to converge.
+# 5. Commit/verify the resulting desired state and release the lock.
+# Preserve the lock/resume rules when changing this module.
+
+
 from __future__ import annotations
 
 from typing import Any

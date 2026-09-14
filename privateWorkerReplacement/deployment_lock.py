@@ -12,6 +12,16 @@ terraform-dbaas/scripts/lifecycle.sh performs the atomic kubectl create/delete.
 Read-only commands do not take this lock.
 """
 
+# MAINTAINER READING GUIDE
+# This lock is scoped to ONE ShardedCluster and prevents incompatible topology
+# and database changes from overlapping on that cluster.
+# It is stored as a Kubernetes ConfigMap and is created/released THROUGH Terraform.
+# It is different from mutation_lock.py (whole controller desired-state lock) and
+# terraform_runner.py (shared Terraform workdir lock).
+# protected_database_change() uses try/finally so normal failures still attempt
+# to release the exact lock owned by the current operation ID.
+
+
 from __future__ import annotations
 
 import uuid
@@ -119,6 +129,9 @@ def acquire_deployment_lock(
         target_shards=target_shards,
         operation_id=operation_id,
     )
+    # LOCK STEP 1 - Ask Terraform/lifecycle.sh to CREATE the ConfigMap.
+    # lifecycle.sh uses kubectl create, not apply, so an existing lock causes a
+    # hard failure instead of silently overwriting another operation's owner ID.
     apply_inventory(
         config,
         inventory,
@@ -135,6 +148,8 @@ def acquire_deployment_lock(
             "target_shards": target_shards,
         },
     )
+    # LOCK STEP 2 - Read Kubernetes back after Terraform returns. Terraform
+    # success is not enough; verify that the exact operation ID owns the lock.
     lock = read_deployment_lock(config, deployment_key)
     if not lock or lock["operation_id"] != operation_id:
         raise ControllerError(
@@ -162,6 +177,8 @@ def release_deployment_lock(
 ) -> None:
     """Ask Terraform to release only the lock owned by this operation ID."""
 
+    # UNLOCK STEP 1 - Release through Terraform so lock lifecycle remains under
+    # the same mutation ownership model as every other managed change.
     apply_inventory(
         config,
         inventory,
@@ -179,6 +196,9 @@ def release_deployment_lock(
         },
         targets=targets,
     )
+    # UNLOCK STEP 2 - Confirm absence. A completed business change with a stale
+    # deployment lock is NOT considered clean success because it would block all
+    # later managed changes on this ShardedCluster.
     remaining = read_deployment_lock(config, deployment_key)
     if remaining is not None:
         raise ControllerError(

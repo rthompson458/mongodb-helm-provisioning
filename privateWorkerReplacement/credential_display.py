@@ -9,6 +9,12 @@ This module is read-only presentation logic. It never reads or writes a Vault
 secret value.
 """
 
+# MAINTAINER READING GUIDE
+# This file formats credential locations only.
+# It never reads a password and never writes Vault. Keeping path/URL construction
+# here makes lifecycle and status commands display the same credential locations.
+
+
 from __future__ import annotations
 
 from typing import Any

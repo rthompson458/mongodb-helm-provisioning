@@ -8,6 +8,13 @@ administrator mutations launch detached workers and return an Operation ID.
 The administrator CLI itself owns no-argument help behavior.
 """
 
+# MAINTAINER READING GUIDE
+# This file is only the administrator entry point.
+# 1. Python imports main() from privateWorkerReplacement/admin_cli.py.
+# 2. admin_cli.py owns parsing and dispatch for diagnostics and recovery.
+# 3. Keep normal customer lifecycle commands out of this entry point.
+
+
 from privateWorkerReplacement.admin_cli import main
 
 

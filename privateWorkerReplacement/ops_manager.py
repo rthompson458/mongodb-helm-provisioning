@@ -18,6 +18,13 @@ to curl through stdin rather than command-line arguments so they are not exposed
 in the process argument list.
 """
 
+# MAINTAINER READING GUIDE
+# These helpers talk to Ops Manager for inventory/cleanup checks that Terraform
+# cannot infer from Kubernetes alone. Treat Ops Manager as an external system:
+# validate responses carefully and keep destructive project deletion behind the
+# higher-level lifecycle/recovery safeguards that call this module.
+
+
 from __future__ import annotations
 
 import base64

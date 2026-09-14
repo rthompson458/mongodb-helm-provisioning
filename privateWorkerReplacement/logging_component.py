@@ -17,6 +17,15 @@ Neither log should ever receive Vault tokens or managed plaintext passwords.
 Callers must not pass secrets as log fields or command-line arguments.
 """
 
+# MAINTAINER READING GUIDE
+# There are two related but different log streams:
+# 1. Controller JSON-line logs record structured events from normal execution.
+# 2. Operations logs store human-readable Terraform/process diagnostics and
+#    completed detached-worker transcripts.
+# Customer terminals intentionally receive concise messages; detailed command
+# output is preserved here for debugging instead of being dumped to the screen.
+
+
 from __future__ import annotations
 
 import fcntl

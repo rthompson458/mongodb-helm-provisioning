@@ -7,6 +7,13 @@ policy. Higher-level modules such as deployments.py and databases.py decide
 *what* should happen; helpers here only perform small reusable operations.
 """
 
+# MAINTAINER READING GUIDE
+# This is the low-level helper module used by many controller files.
+# Keep helpers here deterministic and side-effect-light. Name normalization,
+# table formatting, time helpers, and subprocess execution belong here.
+# Lifecycle policy and infrastructure ownership do not belong here.
+
+
 from __future__ import annotations
 
 import hashlib

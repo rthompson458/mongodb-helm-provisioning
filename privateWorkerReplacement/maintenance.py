@@ -16,6 +16,14 @@ A live ShardedCluster mutation lock blocks Reconcile because a broad Terraform
 apply must not race with an AddShard/DeleteShard/database operation.
 """
 
+# MAINTAINER READING GUIDE
+# Maintenance commands are guarded repair/recovery workflows.
+# Reconcile means "make live managed resources match Vault-backed desired state"
+# through Terraform. Recovery functions exist for exceptional interrupted/drift
+# cases and must prove their preconditions before deleting or recreating anything.
+# Do not turn recovery helpers into convenient bypasses around normal lifecycle.
+
+
 from __future__ import annotations
 
 from typing import Any
@@ -356,6 +364,8 @@ def managed_resource_inventory(
     )
     return {**desired, **kubernetes, **ops_manager}
 
+# Reconcile is the normal repair path. It reapplies DESIRED managed state; it is
+# not permission to delete arbitrary live resources that are absent from Vault.
 def reconcile(config: dict[str, Any], vault: VaultClient) -> None:
     """Reapply complete Vault-backed desired state and verify convergence."""
 

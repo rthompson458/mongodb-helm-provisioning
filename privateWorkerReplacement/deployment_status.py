@@ -6,6 +6,13 @@ much easier for a reviewer to see that listing commands cannot accidentally
 change deployment state.
 """
 
+# MAINTAINER READING GUIDE
+# This file is presentation-only status code for deployments and shards.
+# It combines Vault-backed managed inventory with live Kubernetes phase/component
+# data, then prints customer-facing rows. It must not repair or mutate resources.
+# If a status looks wrong, trace the data source here before changing lifecycle code.
+
+
 from __future__ import annotations
 
 from typing import Any

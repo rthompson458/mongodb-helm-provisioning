@@ -12,6 +12,13 @@ stable facade without turning one source file into a catch-all:
 - maintenance.py: controller-wide reconciliation and guarded recovery
 """
 
+# MAINTAINER READING GUIDE
+# This module is an import facade only.
+# It gives cli.py and admin_cli.py one stable import location while the real
+# implementations stay split by responsibility. If you are debugging behavior,
+# jump from the imported name here to the source module listed below.
+
+
 from .admin_status import list_managed_resources
 from .databases import (
     add_database,

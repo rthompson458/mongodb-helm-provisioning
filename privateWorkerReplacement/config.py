@@ -12,6 +12,16 @@ This module converts INI text into a typed Python dictionary and fails early on
 invalid values so lifecycle code can work with a clean internal contract.
 """
 
+# MAINTAINER READING GUIDE
+# Configuration flow:
+# 1. Read the selected INI file.
+# 2. Validate required sections and values.
+# 3. Normalize paths, booleans, integers, and defaults into one Python dict.
+# 4. Return that dict to the CLI and every downstream module.
+# Secrets do not belong in this file. The Vault token comes from the configured
+# environment variable and is checked later by VaultClient/terraform_runner.
+
+
 from __future__ import annotations
 
 import configparser

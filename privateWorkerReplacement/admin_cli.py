@@ -16,6 +16,16 @@ Maintainer note:
   CLI module from becoming a second copy of administrator business logic.
 """
 
+# MAINTAINER READING GUIDE
+# Administrator command flow:
+# 1. build_parser() defines diagnostic, reconcile, and recovery commands.
+# 2. main() loads configuration and logging just like the customer CLI.
+# 3. Long-running admin changes use the same detached-worker mechanism.
+# 4. Read-only diagnostics stay synchronous so output returns immediately.
+# 5. Recovery actions deliberately call guarded maintenance functions; do not
+#    bypass those guards with direct Kubernetes, Vault, or Terraform mutations.
+
+
 from __future__ import annotations
 
 import argparse

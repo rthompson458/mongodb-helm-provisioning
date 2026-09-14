@@ -20,6 +20,15 @@ released automatically if a worker exits. A future multi-host worker design
 must replace or supplement this local lock with a distributed equivalent.
 """
 
+# MAINTAINER READING GUIDE
+# This is the BROADEST local controller lock.
+# It covers the complete read -> modify -> apply -> wait -> verify workflow.
+# It is different from:
+# - terraform_runner.py execution lock: protects the shared Terraform workdir.
+# - deployment_lock.py lock: protects one ShardedCluster from conflicting work.
+# This lock prevents an older worker from later applying a stale Vault inventory.
+
+
 from __future__ import annotations
 
 import fcntl
@@ -65,6 +74,9 @@ def controller_state_mutation_lock(
             operation=operation,
             lock_file=str(path),
         )
+        # Wait here BEFORE the business function loads mutable Vault inventory.
+        # Acquiring this lock later would still allow two workers to capture
+        # different snapshots and replay an older snapshot after a newer apply.
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
 
         try:

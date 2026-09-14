@@ -21,6 +21,20 @@ Source rule:
     repository access is part of the current execution path.
 """
 
+# MAINTAINER READING GUIDE
+# This is the Python -> Terraform boundary.
+# Every apply follows the same path:
+# 1. Validate required local executables and Terraform version.
+# 2. Acquire the Terraform workdir execution lock.
+# 3. Refresh .runtime/terraform-cache from local terraform-dbaas source.
+# 4. Convert dev.config values into TF_VAR_* environment variables.
+# 5. Write Vault-backed desired inventory + one-shot operation to a temporary
+#    .tfvars.json file.
+# 6. Run terraform init, then terraform apply.
+# 7. Capture diagnostics, remove the temporary var file, and release the lock.
+# This file must not directly mutate MongoDB, Vault, or Kubernetes resources.
+
+
 from __future__ import annotations
 
 import fcntl
@@ -265,6 +279,7 @@ def apply_inventory(
     the Vault token is passed only through the child-process environment.
     """
 
+    # STEP 1 - Fail before any state work if this host cannot run the toolchain.
     _require(
         "terraform",
         "kubectl",
@@ -272,6 +287,8 @@ def apply_inventory(
         "python3",
     )
 
+    # STEP 2 - Expand the caller's small operation dict into Terraform's full
+    # operation object and add a nonce for one-shot actions.
     op = _operation_payload(operation)
 
     if config["storage_mode"] == "static-local":
@@ -282,6 +299,9 @@ def apply_inventory(
     # The shared Terraform cache, provider directory, and backend work are one
     # transaction. This prevents one worker from refreshing source while another
     # worker is executing Terraform from the same cache.
+    # STEP 3 - Protect the shared cache/.terraform directory. This lock is
+    # intentionally narrower than mutation_lock.py; it protects Terraform files,
+    # not the controller's complete desired-state transaction.
     with _terraform_execution_lock(config):
         _apply_inventory_locked(
             config,
@@ -299,8 +319,12 @@ def _apply_inventory_locked(
 ) -> None:
     """Run one Terraform refresh/init/apply while execution access is held."""
 
+    # STEP 4 - Rebuild the disposable execution copy from the authoritative
+    # local terraform-dbaas source before every operation.
     tfdir = _sync(config)
 
+    # STEP 5 - The token is inherited from the worker environment. It is never
+    # written into dev.config or the temporary Terraform variable file.
     token_name = config["vault_token_env"]
     token = os.getenv(token_name, "")
 
@@ -311,6 +335,8 @@ def _apply_inventory_locked(
 
     env = os.environ.copy()
 
+    # STEP 6 - Static controller configuration becomes TF_VAR_* values.
+    # These values configure the Terraform module; Python does not edit .tf files.
     env.update(
         {
             "VAULT_ADDR": config["vault_address"],
@@ -356,6 +382,7 @@ def _apply_inventory_locked(
         }
     )
 
+    # STEP 7 - Reconfigure the Kubernetes backend for this controller instance.
     init = [
         "terraform",
         "init",
@@ -404,6 +431,11 @@ def _apply_inventory_locked(
     temp: Path | None = None
 
     try:
+        # STEP 8 - Dynamic desired state goes in the temporary var file.
+        # "deployments" is the COMPLETE Vault-backed desired inventory.
+        # "operation" is the ONE action requested for this apply. Keeping these
+        # separate lets Terraform reconcile steady state and perform a one-shot
+        # action without Python rewriting Terraform source.
         payload = {
             "deployments": inventory,
             "operation": op,
@@ -447,6 +479,7 @@ def _apply_inventory_locked(
         )
 
         try:
+            # STEP 9 - This is the exact Python -> Terraform handoff.
             command = [
                 "terraform",
                 "apply",
@@ -486,5 +519,7 @@ def _apply_inventory_locked(
         )
 
     finally:
+        # STEP 10 - Never leave a stale desired-state snapshot in the cache.
+        # A later command must reconstruct intent from Vault again.
         if temp and temp.exists():
             temp.unlink()
