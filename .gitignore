@@ -9,6 +9,20 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
+.coverage.*
+coverage.xml
+.tox/
+.nox/
+.hypothesis/
+
+# Local Python environments and packaging output
+.venv/
+venv/
+env/
+ENV/
+build/
+dist/
+*.egg-info/
 
 # ---------------------------------------------------------------------------
 # privateWorkerReplacement runtime logs
@@ -29,6 +43,22 @@ terraform.tfstate
 terraform.tfstate.*
 .terraform.tfstate.lock.info
 .tc.*.tfvars.json
+*.tfplan
+crash.log
+crash.*.log
+
+# Local Terraform variable/override files may contain machine-specific values
+# or secrets. Commit sanitized examples with an .example name instead.
+*.tfvars
+*.tfvars.json
+!*.example.tfvars
+!*.example.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
 
 # ---------------------------------------------------------------------------
 # Common local editor / OS artifacts
@@ -37,6 +67,15 @@ terraform.tfstate.*
 .idea/
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
+*.swn
+*~
+
+# Local environment-variable files may contain credentials.
+.env
+.env.*
+!.env.example
 
 # Disposable Terraform runtime cache
 .runtime/
