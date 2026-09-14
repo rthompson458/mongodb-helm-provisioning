@@ -523,13 +523,24 @@ class MaintenanceTests(unittest.TestCase):
 
         with (
             patch.object(maintenance.kube, "list_json", return_value=[]),
+            patch.object(
+                maintenance,
+                "discover_managed_deployment_keys",
+                return_value=["rs1"],
+            ) as discover_mock,
+            patch.object(
+                maintenance,
+                "cleanup_deployment_operator_artifacts",
+            ) as cleanup_mock,
             patch.object(maintenance, "apply_inventory") as apply_mock,
         ):
             maintenance.recover_orphaned_resources(
                 self.config, vault, confirmed=True
             )
 
+        discover_mock.assert_called_once_with(self.config)
         apply_mock.assert_called_once_with(self.config, {})
+        cleanup_mock.assert_called_once_with(self.config, "rs1")
 
     def test_recover_orphaned_resources_refuses_nonempty_vault_inventory(self) -> None:
         vault = FakeVault(
