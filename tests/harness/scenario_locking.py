@@ -1,4 +1,13 @@
-"""Live concurrency test for ShardedCluster mutation protection."""
+"""Live concurrency test for ShardedCluster mutation protection.
+
+Canonical full-suite test intent:
+33. Create a one-shard cluster used only for concurrency/locking validation.
+34. Observe the Terraform-created deployment lock while AddShard is active.
+35. Prove a conflicting AddDatabase request is blocked during AddShard.
+36. Wait for the background AddShard operation to complete successfully.
+37. Verify the cluster is readable and no active change remains.
+38. Delete the lock-test ShardedCluster and clean up its resources.
+"""
 
 from __future__ import annotations
 
