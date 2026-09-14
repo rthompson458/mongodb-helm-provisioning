@@ -164,9 +164,23 @@ The shorter name `ListResources` is intentionally not supported because it could
 
 `ListOperations` and `ListOperation` expose the private asynchronous operation journal used for troubleshooting and recovery. Detailed Terraform/external-command output is still kept in the operations log rather than routinely printed on the admin terminal.
 
+The three mutating administrator commands are asynchronous:
+
+```text
+Reconcile
+RecoverDeploymentLock
+RecoverOrphanedResources
+```
+
+Each accepted request starts a detached `privateWorkerReplacementAdmin.py` worker,
+returns an Operation ID to the administrator, and is monitored with
+`ListOperation OPERATION_ID`. Missing `--confirm` on the two recovery commands is
+rejected before a worker is started.
+
 ## Asynchronous execution model
 
-An asynchronous public request follows this model:
+Customer and administrator mutations that may run for meaningful time use the
+same detached-worker model. An asynchronous public request follows this model:
 
 ```text
 Customer
@@ -187,6 +201,27 @@ Detached worker
 ```
 
 The public response deliberately hides the operation ID. The acceptance harness is internal engineering tooling, so it correlates the private state entry and polls detailed status through `privateWorkerReplacementAdmin.py ListOperation`.
+
+Long-running administrator mutations use the same operation journal, but their
+foreground acknowledgement intentionally shows the Operation ID because platform
+operators need it for diagnostics:
+
+```text
+Administrator
+  -> privateWorkerReplacementAdmin.py Reconcile
+     or RecoverDeploymentLock / RecoverOrphanedResources
+  -> validate immediate confirmation requirements
+  -> create operation-state record
+  -> start detached administrator worker
+  -> return Operation ID
+
+Detached administrator worker
+  -> acquire the shared controller mutation lock
+  -> run the normal reconciliation/recovery implementation
+  -> Terraform / Kubernetes / MongoDB / Vault as required
+  -> verify completion
+  -> mark operation Succeeded or Failed
+```
 
 The same harness has a destructive administrator selection:
 
