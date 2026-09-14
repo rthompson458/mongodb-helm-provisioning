@@ -28,6 +28,7 @@ from privateWorkerReplacement.common import (
 )
 from privateWorkerReplacement.config import load_config
 from privateWorkerReplacement.ops_manager import delete_project
+from privateWorkerReplacement.operator_artifacts import list_orphan_operator_artifacts
 from privateWorkerReplacement.vault import VaultClient
 
 from .runner import HarnessRunner
@@ -365,6 +366,8 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    vault_password_before = ""
+    kubernetes_password_before = ""
     try:
         vault_password_before, kubernetes_password_before = _account_passwords(
             config,
@@ -782,10 +785,16 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
-    metadata_ok, metadata_note = _delete_vault_deployment_metadata(
-        config,
-        orphan_rs,
-    )
+    # Test 88 is itself the destructive Vault metadata action. In selective
+    # mode, do not perform that hidden mutation unless Test 88 was requested.
+    if runner.is_test_selected(88):
+        metadata_ok, metadata_note = _delete_vault_deployment_metadata(
+            config,
+            orphan_rs,
+        )
+    else:
+        metadata_ok = True
+        metadata_note = "Test 88 was not selected."
     if not runner.check(
         "Remove orphan-test Vault deployment metadata",
         metadata_ok,
@@ -846,7 +855,18 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
-    ops_ok, ops_note, ops_elapsed = _delete_ops_manager_project(config, orphan_rs)
+    # Test 93 deliberately deletes the fixture's Ops Manager project. Keep
+    # selective runs exact: do not perform that side effect when Test 93 is not
+    # part of --testList.
+    if runner.is_test_selected(93):
+        ops_ok, ops_note, ops_elapsed = _delete_ops_manager_project(
+            config,
+            orphan_rs,
+        )
+    else:
+        ops_ok = True
+        ops_note = "Test 93 was not selected."
+        ops_elapsed = 0.0
     if not runner.check(
         "Delete orphan-test Ops Manager project and group Secret",
         ops_ok,
@@ -882,6 +902,17 @@ def run(runner: HarnessRunner) -> None:
         config,
         (admin_rs_key, admin_sc_key, orphan_rs_key),
     )
+
+    # Test 97 is also useful by itself after a failed full run. Include any
+    # globally orphaned Operator/Helm runtime artifacts, not only resources that
+    # happen to contain this new selective run's generated names.
+    leftovers.extend(
+        list_orphan_operator_artifacts(
+            config,
+            managed_deployment_keys=set(),
+        )
+    )
+    leftovers = sorted(set(leftovers))
     if not runner.check(
         "No administrator-test Kubernetes artifacts remain",
         not leftovers,
