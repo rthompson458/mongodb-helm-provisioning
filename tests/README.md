@@ -142,10 +142,11 @@ It runs the 5 read-only preflight checks plus 62 administrator checks. The suite
 - `ListManagedResources` reporting `ATTENTION REQUIRED` for runtime drift;
 - Reconcile refusal while a ShardedCluster deployment lock exists;
 - refusal to recover a lock whose recorded target does not match desired state;
-- successful recovery of a validated stranded topology lock;
+- successful recovery of validated stranded AddShard and DeleteShard locks;
 - a manufactured partial-destroy condition with empty Vault inventory but Terraform-tracked leftovers;
 - `RecoverOrphanedResources` refusal while managed inventory still exists;
-- successful asynchronous orphan recovery after its independent safety checks pass;
+- refusal when Vault inventory is empty but a live managed MongoDB resource still exists;
+- successful asynchronous orphan recovery after both independent safety checks pass;
 - final Kubernetes/Vault cleanup and a final `Status: CLEAN` inventory.
 
 The suite stops on the first failure. A failed destructive test may intentionally leave its broken state available for diagnosis. A **passing** administrator run finishes clean.
