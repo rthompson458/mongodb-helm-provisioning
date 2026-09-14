@@ -43,9 +43,9 @@ class HarnessCliTests(unittest.TestCase):
         self.assertIn("replicaset  16 checks total", result.stdout)
         self.assertIn("sharded     21 checks total", result.stdout)
         self.assertIn("locking     11 checks total", result.stdout)
-        self.assertIn("--admin     62 checks total when run alone", result.stdout)
-        self.assertIn("all         95 checks total", result.stdout)
-        self.assertIn("FULL GAUNTLET - all 95 live acceptance checks", result.stdout)
+        self.assertIn("--admin     67 checks total when run alone", result.stdout)
+        self.assertIn("all        100 checks total", result.stdout)
+        self.assertIn("FULL GAUNTLET - all 100 live acceptance checks", result.stdout)
         self.assertIn("--allow-changes", result.stdout)
         self.assertNotIn("--allow-mutations", result.stdout)
         self.assertNotIn("--allow-destructive", result.stdout)
@@ -93,7 +93,7 @@ class HarnessCliTests(unittest.TestCase):
         )
         self.assertIn("requires a clean DBaaS starting inventory", result.stdout)
         self.assertIn(
-            "all         95 checks total. Runs every lifecycle and administrator test",
+            "all        100 checks total. Runs every lifecycle and administrator test",
             result.stdout,
         )
 
