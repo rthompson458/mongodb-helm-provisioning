@@ -452,7 +452,7 @@ python3 tests/run_harness.py --admin --allow-changes
 ```
 
 The standalone administrator selection runs 5 read-only preflight checks plus
-57 live administrator checks, for 62 checks total.
+62 live administrator checks, for 67 checks total.
 
 The suite requires a **clean DBaaS starting inventory**. It intentionally:
 
@@ -477,7 +477,7 @@ The complete lifecycle gauntlet automatically includes all administrator tests:
 python3 tests/run_harness.py --profile all --allow-changes
 ```
 
-A passing full run currently contains 95 live checks. A failed destructive
+A passing full run currently contains 100 live checks. A failed destructive
 administrator run stops at the first failed prerequisite so the broken state is
 available for investigation rather than being silently hidden by cleanup.
 
