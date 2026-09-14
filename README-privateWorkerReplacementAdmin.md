@@ -464,10 +464,11 @@ The suite requires a **clean DBaaS starting inventory**. It intentionally:
 - performs real MongoDB authentication after recovery;
 - creates invalid and valid stranded ShardedCluster topology locks;
 - proves unsafe lock recovery is refused;
-- proves a valid completed lock can be recovered;
+- proves completed AddShard and DeleteShard locks can both be recovered;
 - creates a real partial-destroy/orphan condition;
 - proves orphan recovery is blocked while desired state still exists;
-- runs `RecoverOrphanedResources` after its safety conditions are met;
+- proves it is also blocked when desired state is empty but a live managed MongoDB resource remains;
+- runs `RecoverOrphanedResources` only after both independent safety conditions are met;
 - verifies Kubernetes and Vault test artifacts are gone; and
 - finishes with `ListManagedResources` reporting `Status: CLEAN`.
 
