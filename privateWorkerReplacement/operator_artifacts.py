@@ -132,6 +132,14 @@ def _artifact_deployment_key(resource: str, item: dict[str, Any]) -> str:
 
     metadata = item.get("metadata", {}) or {}
     name = str(metadata.get("name", ""))
+    labels = metadata.get("labels", {}) or {}
+
+    # New controller-created Helm hook objects carry an explicit deployment
+    # label. Prefer it because Kubernetes name truncation can remove part of a
+    # long suffix.
+    labeled_key = str(labels.get("dbaas.deployment", "")).strip()
+    if labeled_key:
+        return labeled_key
 
     if resource == "secret" and name.endswith("-agent-auth-secret"):
         return name.removesuffix("-agent-auth-secret")
