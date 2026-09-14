@@ -141,14 +141,19 @@ class HarnessRunner:
     ) -> StepResult:
         """Record a check that does not map directly to one foreground command."""
 
-        self._announce(name)
+        number, execute = self._begin_test(name)
+        if not execute:
+            return self._skipped_result(name)
+
+        self._announce(name, number)
         return self._record(
             StepResult(
                 name=name,
                 passed=passed,
                 note=note,
                 elapsed_seconds=elapsed_seconds,
-            )
+            ),
+            number,
         )
 
     def run(
@@ -164,8 +169,13 @@ class HarnessRunner:
     ) -> StepResult:
         """Run a command and verify its exit code and optional output text."""
 
+        number: int | None = None
         if announce:
-            self._announce(name)
+            number, execute = self._begin_test(name)
+            if not execute:
+                return self._skipped_result(name)
+            self._announce(name, number)
+
         started = time.monotonic()
         cmd = list(command)
         try:
@@ -188,7 +198,8 @@ class HarnessRunner:
                     stderr=exc.stderr or "",
                     note=f"Timed out after {timeout} seconds.",
                     elapsed_seconds=time.monotonic() - started,
-                )
+                ),
+                number,
             )
 
         exit_ok = (
@@ -220,7 +231,8 @@ class HarnessRunner:
                 stderr=completed.stderr,
                 note=" ".join(note_parts),
                 elapsed_seconds=time.monotonic() - started,
-            )
+            ),
+            number,
         )
 
     def controller(
