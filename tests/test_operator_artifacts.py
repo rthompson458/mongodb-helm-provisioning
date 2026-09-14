@@ -176,6 +176,69 @@ class OperatorArtifactTests(unittest.TestCase):
 
         self.assertEqual(keys, ["oldrs", "orphanrs", "rs1"])
 
+    def test_orphan_listing_requires_no_desired_or_live_deployment(self) -> None:
+        def fake_list(_config, resource, **_kwargs):
+            if resource == "job":
+                return [
+                    {
+                        "metadata": {
+                            "name": (
+                                "orphanrs-mongodb-management-"
+                                "database-provisioner"
+                            ),
+                            "labels": {},
+                        }
+                    }
+                ]
+            if resource == "pod":
+                return []
+            if resource == "secret":
+                return [
+                    {
+                        "metadata": {
+                            "name": "active-agent-auth-secret",
+                            "labels": {},
+                        }
+                    },
+                    {
+                        "metadata": {
+                            "name": "desired-agent-auth-secret",
+                            "labels": {},
+                        }
+                    },
+                ]
+            raise AssertionError(resource)
+
+        def fake_get(_config, resource, name):
+            self.assertEqual(resource, "mongodb")
+            if name == "active":
+                return {"metadata": {"name": "active"}}
+            return None
+
+        with (
+            mock.patch.object(
+                operator_artifacts.kube,
+                "list_json",
+                side_effect=fake_list,
+            ),
+            mock.patch.object(
+                operator_artifacts.kube,
+                "get_json",
+                side_effect=fake_get,
+            ),
+        ):
+            artifacts = operator_artifacts.list_orphan_operator_artifacts(
+                self.config,
+                {"desired"},
+            )
+
+        self.assertEqual(
+            artifacts,
+            [
+                "job/orphanrs-mongodb-management-database-provisioner",
+            ],
+        )
+
     def test_helm_hooks_delete_successful_jobs_and_carry_ownership_labels(self) -> None:
         templates = (
             "mongodb-database-job.yaml",
