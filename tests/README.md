@@ -47,7 +47,7 @@ This is intentionally equivalent to:
 python3 tests/run_harness.py --help
 ```
 
-No live tests run when no arguments are supplied. An actual harness run requires an explicit `--profile`, `--admin`, or both.
+No live tests run when no arguments are supplied. An actual harness run requires an explicit `--profile`, `--admin`, or `--testList`.
 
 `--help` is global harness help. For example, this is safe and does not run the locking profile:
 
@@ -165,6 +165,38 @@ python3 tests/run_harness.py --profile replicaset --admin --allow-changes
 
 The `all` profile already includes the full administrator suite, so adding `--admin` to `--profile all` does not duplicate the tests.
 
+### Targeted test-list execution
+
+Use `--testList` when a narrow change needs only specific tests from the
+canonical 100-test full-suite numbering:
+
+```bash
+python3 tests/run_harness.py --testList 97-100 --allow-changes
+python3 tests/run_harness.py --testList 56,58-67 --allow-changes
+```
+
+Rules:
+
+- numbers refer to the order used by `--profile all`;
+- individual numbers and inclusive ranges may be mixed with commas;
+- the list itself must contain **no spaces**;
+- a range end must be greater than or equal to its start;
+- valid test numbers are 1 through 100;
+- duplicate selections are harmless and are normalized;
+- `--profile` and `--testList` are mutually exclusive;
+- `--admin` cannot be combined with `--testList`;
+- every `--testList` run requires `--allow-changes`;
+- **only** the requested tests run. Prerequisite tests are not added automatically.
+
+That last rule is deliberate. A state-dependent test can fail when selected by
+itself if its normal setup test was not also selected or the required state does
+not already exist. This mode is intended for focused engineering retests, not as
+a replacement for the complete acceptance run.
+
+Each scenario module documents the purpose of every canonical test number in its
+module-level comments. This keeps the test number, intent, and implementation
+close together for maintainers.
+
 ### Complete acceptance run — 100 total checks
 
 Run the full gauntlet only when broad end-to-end acceptance is needed:
@@ -181,7 +213,8 @@ The harness help derives displayed totals from the scenario `TEST_COUNT` constan
 
 ## 4. Safety flag
 
-Every mutating lifecycle selection and the administrator suite require:
+Every mutating lifecycle selection, the administrator suite, and every
+`--testList` selection require:
 
 ```text
 --allow-changes
@@ -189,7 +222,10 @@ Every mutating lifecycle selection and the administrator suite require:
 
 `--allow-changes` explicitly acknowledges that the harness may create, modify, deliberately damage, recover, and delete temporary test resources in the configured environment.
 
-The flag is a deliberate safety gate. A mutating profile or `--admin` does **not** start until `--allow-changes` is present.
+The flag is a deliberate safety gate. A mutating profile, `--admin`, or
+`--testList` does **not** start until `--allow-changes` is present. Selective
+mode always requires the flag because it intentionally skips normal scenario
+prerequisites and may target destructive tests directly.
 
 The read-only `preflight` profile does not require `--allow-changes`.
 
@@ -250,7 +286,10 @@ Long asynchronous tests print periodic progress:
 
 The operation ID is appropriate in harness output because the harness is internal engineering tooling, not the customer interface.
 
-At the end, the harness reports pass/fail totals plus elapsed time for each profile and the complete run.
+At the end, the harness reports pass/fail totals plus elapsed time for each
+profile and the complete run. A `--testList` run reports only the selected
+checks as pass/fail results while preserving their canonical display numbers
+(for example, `Test 97 of 100`).
 
 A successful complete run ends with:
 
@@ -327,7 +366,11 @@ Use this approach:
 3. For narrow ReplicaSet/database lifecycle changes, run `--profile replicaset --allow-changes`.
 4. For ShardedCluster/shard changes, run `--profile sharded --allow-changes`.
 5. For deployment-lock/concurrency changes, run `--profile locking --allow-changes`.
-6. For administrator inventory, Reconcile, recovery, or cross-plane consistency changes, run `--admin --allow-changes` from a clean DBaaS starting inventory.
-7. Reserve `--profile all --allow-changes` for broad cross-cutting lifecycle changes, release/demo baselines, or other true acceptance milestones.
+6. For a narrow regression where the required fixture/state already exists, use
+   `--testList` to rerun only the affected canonical tests.
+7. For administrator inventory, Reconcile, recovery, or cross-plane consistency
+   changes, run `--admin --allow-changes` from a clean DBaaS starting inventory.
+8. Reserve `--profile all --allow-changes` for broad cross-cutting lifecycle
+   changes, release/demo baselines, or other true acceptance milestones.
 
 This keeps normal feedback fast while preserving the full 100-check run for the occasions when its broad coverage is actually valuable.
