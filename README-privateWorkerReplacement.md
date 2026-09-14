@@ -152,11 +152,13 @@ Request a ShardedCluster using the configured default shard count:
 python3 privateWorkerReplacement.py AddShardedCluster SC9
 ```
 
-Or specify the initial shard count:
+Or specify the initial shard count, up to the configured per-cluster maximum:
 
 ```bash
 python3 privateWorkerReplacement.py AddShardedCluster SC9 --shards 5
 ```
+
+The supplied `dev.config` sets `max_shards_per_cluster = 5`. Requests above that limit are refused before a new ShardedCluster is created.
 
 Check cluster and shard readiness:
 
@@ -411,7 +413,11 @@ python3 privateWorkerReplacement.py ListReplicaSet RS1
 
 ## 7. ShardedCluster behavior
 
-`AddShardedCluster` creates an empty managed ShardedCluster. If `--shards` is omitted, the initial shard count comes from `dev.config`. The current repository configuration uses three shards.
+`AddShardedCluster` creates an empty managed ShardedCluster. If `--shards` is omitted, the initial shard count comes from `dev.config`. The current repository configuration uses three initial shards and a maximum of five shards per ShardedCluster.
+
+The `[Sharding] max_shards_per_cluster` setting is the hard upper limit for a single ShardedCluster. New clusters cannot start above it, and `AddShard` cannot produce a target topology above it. A target exactly equal to the maximum is allowed. `default_shards` must be less than or equal to the configured maximum.
+
+Lowering the maximum does not automatically shrink an existing cluster. If an existing cluster is already above the new maximum, further `AddShard` requests are refused until shard deletion brings the cluster back at or below the limit.
 
 Typical topology defaults are:
 
@@ -435,7 +441,7 @@ No conflicting managed change is active
 
 ### Adding shards
 
-`AddShard` defaults to one shard when COUNT is omitted.
+`AddShard` defaults to one shard when COUNT is omitted. Before acquiring a topology lock or applying Terraform, the controller calculates the resulting shard count and refuses the request if that target would exceed `max_shards_per_cluster`.
 
 ```bash
 python3 privateWorkerReplacement.py AddShard SC9
