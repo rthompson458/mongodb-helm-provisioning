@@ -152,7 +152,7 @@ Profiles and administrator suite:
   all         {totals['all']:2d} checks total. Runs every lifecycle and administrator test.
 
 Safety:
-  Lifecycle profiles and --admin require --allow-changes.
+  Lifecycle profiles, --admin, and every --testList selection require --allow-changes.
   The administrator suite deliberately creates drift, stranded locks, and
   orphaned Terraform state, then proves supported recovery returns the
   environment to CLEAN. It requires a clean DBaaS starting inventory.
@@ -236,9 +236,9 @@ Configuration:
         "--allow-changes",
         action="store_true",
         help=(
-            "Required for every mutating selection, including --admin. Allows the "
-            "harness to create, modify, deliberately damage, recover, and delete "
-            "temporary test resources in the configured environment."
+            "Required for every mutating selection, --admin, and --testList. "
+            "Allows the harness to create, modify, deliberately damage, recover, "
+            "and delete temporary test resources in the configured environment."
         ),
     )
     parser.add_argument(
