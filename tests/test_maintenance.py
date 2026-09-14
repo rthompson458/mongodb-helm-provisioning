@@ -339,6 +339,91 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(resources["missing_mongodb_users"], ["tc-rs1-admin"])
         self.assertEqual(resources["orphan_mongodb_users"], [])
 
+    def test_inventory_does_not_flag_intentionally_disabled_owner_as_missing(self) -> None:
+        """Disabled Owner has Vault state but intentionally has no live MongoDBUser."""
+
+        vault = FakeVault(
+            deployment_inventory(
+                deployment_type="ReplicaSet",
+                name="RS1",
+                with_db=True,
+                owner_disabled=True,
+            )
+        )
+        readwrite = maintenance.account_resource_name(
+            "rs1", "houseinfo", "readwrite"
+        )
+        read = maintenance.account_resource_name("rs1", "houseinfo", "read")
+
+        def fake_list(_config, resource, **_kwargs):
+            if resource == "mongodb":
+                return [{"metadata": {"name": "rs1"}}]
+            if resource == "mongodbuser":
+                return [
+                    {"metadata": {"name": "tc-rs1-admin"}},
+                    {"metadata": {"name": readwrite}},
+                    {"metadata": {"name": read}},
+                ]
+            if resource in {"pvc", "pv", "configmap", "secret"}:
+                return []
+            raise AssertionError(resource)
+
+        with (
+            patch.object(maintenance.kube, "list_json", side_effect=fake_list),
+            patch.object(
+                maintenance,
+                "list_ops_manager_projects",
+                return_value=(
+                    "mongodb-development",
+                    [
+                        {"id": "base-id", "name": "mongodb-development"},
+                        {"id": "rs1-id", "name": "RS1"},
+                    ],
+                ),
+            ),
+        ):
+            resources = maintenance.managed_resource_inventory(self.config, vault)
+
+        self.assertEqual(resources["missing_mongodb_resources"], [])
+        self.assertEqual(resources["orphan_mongodb_resources"], [])
+        self.assertEqual(resources["missing_mongodb_users"], [])
+        self.assertEqual(resources["orphan_mongodb_users"], [])
+
+    def test_inventory_flags_orphan_managed_runtime_objects(self) -> None:
+        """Controller-labelled runtime objects without desired state are orphan drift."""
+
+        vault = FakeVault({})
+
+        def fake_list(_config, resource, **_kwargs):
+            if resource == "mongodb":
+                return [{"metadata": {"name": "stale-rs"}}]
+            if resource == "mongodbuser":
+                return [{"metadata": {"name": "tc-stale-rs-admin"}}]
+            if resource in {"pvc", "pv", "configmap", "secret"}:
+                return []
+            raise AssertionError(resource)
+
+        with (
+            patch.object(maintenance.kube, "list_json", side_effect=fake_list),
+            patch.object(
+                maintenance,
+                "list_ops_manager_projects",
+                return_value=(
+                    "mongodb-development",
+                    [{"id": "base-id", "name": "mongodb-development"}],
+                ),
+            ),
+        ):
+            resources = maintenance.managed_resource_inventory(self.config, vault)
+
+        self.assertEqual(resources["missing_mongodb_resources"], [])
+        self.assertEqual(resources["missing_mongodb_users"], [])
+        self.assertEqual(resources["orphan_mongodb_resources"], ["stale-rs"])
+        self.assertEqual(
+            resources["orphan_mongodb_users"],
+            ["tc-stale-rs-admin"],
+        )
+
     def test_reconcile_with_no_inventory_is_noop(self) -> None:
         vault = FakeVault({})
         with patch.object(maintenance, "apply_inventory") as apply_mock:
