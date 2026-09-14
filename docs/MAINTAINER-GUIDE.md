@@ -98,6 +98,7 @@ The implementation is split by responsibility:
 | `operator_artifacts.py` | Narrow cleanup of Operator/Helm leftovers | Terraform-owned resource cleanup |
 | `logging_component.py` | Structured controller/operation evidence | Operation semantics |
 | `runtime_paths.py` | Predictable runtime path locations | Business logic |
+| `config.py` | Parse/validate dev.config and expose normalized settings | Runtime mutation logic |
 | `common.py` | Shared normalization/time/process/table helpers | Domain lifecycle logic |
 
 ## 4. Public command flow
