@@ -9,6 +9,12 @@ Public-interface rules:
   2. Long-running deployment, topology, and database create/delete work is async.
   3. Database status and database-account details are separate commands.
   4. Terraform/Git/Kubernetes internals do not belong on the customer terminal.
+
+Maintainer note:
+  build_parser() is intentionally declarative and keeps the complete customer
+  command/help contract together. Lifecycle behavior does NOT live there; after
+  parsing, execution dispatches into focused deployment/shard/database modules.
+  Section comments below separate deployment, topology, and database commands.
 """
 
 from __future__ import annotations
@@ -168,6 +174,271 @@ def _sub(
     )
 
 
+def _add_deployment_commands(
+    sp,
+    *,
+    configured_shards_text: str,
+    configured_maximum_text: str,
+    configured_maximum_example: str,
+) -> None:
+    """Register deployment lifecycle/status commands on the public parser."""
+
+    # ------------------------------------------------------------------
+    # Deployment lifecycle and deployment status
+    # ------------------------------------------------------------------
+    x = _sub(
+        sp,
+        "AddReplicaSet",
+        "Create an empty managed ReplicaSet.",
+        "Requests creation of a non-sharded MongoDB ReplicaSet and returns promptly while provisioning continues in the background.",
+        "  python3 privateWorkerReplacement.py AddReplicaSet RS1",
+    )
+    _deployment(x, "REPLICASET")
+
+    x = _sub(
+        sp,
+        "AddShardedCluster",
+        "Create an empty managed ShardedCluster.",
+        f"Requests creation of a MongoDB ShardedCluster and returns promptly while provisioning continues in the background. Initial shards cannot exceed the configured maximum of {configured_maximum_text}.",
+        f"  python3 privateWorkerReplacement.py AddShardedCluster SC9\n  python3 privateWorkerReplacement.py AddShardedCluster SC9 --shards {configured_maximum_example}    # configured maximum",
+    )
+    _deployment(x, "SHARDED_CLUSTER")
+    x.add_argument(
+        "--shards",
+        type=int,
+        metavar="N",
+        help=(
+            f"Initial shard count. Optional. Default: {configured_shards_text} "
+            "(read from controller configuration). "
+            f"Maximum: {configured_maximum_text}. Use --shards N to override."
+        ),
+    )
+
+    x = _sub(
+        sp,
+        "DeleteReplicaSet",
+        "Delete an empty managed ReplicaSet.",
+        "Requires --confirm. The request runs in the background and is refused while managed databases remain.",
+        "  python3 privateWorkerReplacement.py DeleteReplicaSet RS1 --confirm",
+    )
+    _deployment(x, "REPLICASET")
+    _confirm(x)
+
+    x = _sub(
+        sp,
+        "DeleteShardedCluster",
+        "Delete an empty managed ShardedCluster.",
+        "Requires --confirm. The request runs in the background and is refused while managed databases remain.",
+        "  python3 privateWorkerReplacement.py DeleteShardedCluster SC9 --confirm",
+    )
+    _deployment(x, "SHARDED_CLUSTER")
+    _confirm(x)
+
+    _sub(
+        sp,
+        "ListDeployments",
+        "List all managed ReplicaSets and ShardedClusters.",
+        "Shows deployment name, type, live phase, topology, MongoDB version, and managed database count.",
+        "  python3 privateWorkerReplacement.py ListDeployments",
+    )
+
+    x = _sub(
+        sp,
+        "ListDeployment",
+        "Show one managed deployment.",
+        "Shows detailed service status for either a ReplicaSet or ShardedCluster.",
+        "  python3 privateWorkerReplacement.py ListDeployment SC9",
+    )
+    _deployment(x)
+
+    _sub(
+        sp,
+        "ListReplicaSets",
+        "List managed ReplicaSets.",
+        "Lists all privateWorkerReplacement-managed ReplicaSet deployments with live phase, topology, MongoDB version, and managed database count.",
+        "  python3 privateWorkerReplacement.py ListReplicaSets",
+    )
+
+    x = _sub(
+        sp,
+        "ListReplicaSet",
+        "Show one managed ReplicaSet.",
+        "Shows one ReplicaSet, live phase, members, MongoDB version, and database count.",
+        "  python3 privateWorkerReplacement.py ListReplicaSet RS1",
+    )
+    _deployment(x, "REPLICASET")
+
+    _sub(
+        sp,
+        "ListShardedClusters",
+        "List managed ShardedClusters.",
+        "Lists all privateWorkerReplacement-managed ShardedCluster deployments with live phase, topology, MongoDB version, and managed database count.",
+        "  python3 privateWorkerReplacement.py ListShardedClusters",
+    )
+
+    x = _sub(
+        sp,
+        "ListShardedCluster",
+        "Show one managed ShardedCluster.",
+        "Shows cluster phase, topology, database count, and individual shard status.",
+        "  python3 privateWorkerReplacement.py ListShardedCluster SC9",
+    )
+    _deployment(x, "SHARDED_CLUSTER")
+
+
+
+def _add_shard_commands(
+    sp,
+    *,
+    configured_maximum_text: str,
+) -> None:
+    """Register ShardedCluster topology lifecycle/status commands."""
+
+    # ------------------------------------------------------------------
+    # ShardedCluster topology lifecycle and status
+    # ------------------------------------------------------------------
+    x = _sub(
+        sp,
+        "ListShards",
+        "List shard creation/readiness status.",
+        "With no cluster name, shows shards across all managed ShardedClusters. With a cluster name, shows detailed shard, config-server, mongos, and active-change status.",
+        "  python3 privateWorkerReplacement.py ListShards\n  python3 privateWorkerReplacement.py ListShards SC9",
+    )
+    x.add_argument(
+        "deployment",
+        metavar="SHARDED_CLUSTER",
+        nargs="?",
+        help="Optional ShardedCluster name.",
+    )
+
+    x = _sub(
+        sp,
+        "AddShard",
+        "Add one or more shards to a Running ShardedCluster.",
+        f"COUNT defaults to 1. The resulting shard count cannot exceed the configured maximum of {configured_maximum_text}. The request runs in the background; use ListShards to monitor readiness.",
+        "  python3 privateWorkerReplacement.py AddShard SC9\n  python3 privateWorkerReplacement.py AddShard SC9 2",
+    )
+    _deployment(x, "SHARDED_CLUSTER")
+    x.add_argument(
+        "count",
+        metavar="COUNT",
+        nargs="?",
+        type=int,
+        default=1,
+        help=(
+            "Number of shards to add. Optional. Default: 1. "
+            f"The resulting total cannot exceed {configured_maximum_text}."
+        ),
+    )
+
+    x = _sub(
+        sp,
+        "DeleteShard",
+        "Remove one or more shards from a ShardedCluster.",
+        "COUNT defaults to 1 and --confirm is required. The request runs in the background. At least one shard must remain.",
+        "  python3 privateWorkerReplacement.py DeleteShard SC9 --confirm\n  python3 privateWorkerReplacement.py DeleteShard SC9 2 --confirm",
+    )
+    _deployment(x, "SHARDED_CLUSTER")
+    x.add_argument(
+        "count",
+        metavar="COUNT",
+        nargs="?",
+        type=int,
+        default=1,
+        help="Number of shards to delete. Optional. Default: 1.",
+    )
+    _confirm(x)
+
+
+
+def _add_database_commands(sp) -> None:
+    """Register database/account commands shared by both deployment types."""
+
+    # ------------------------------------------------------------------
+    # Database and database-account lifecycle
+    # Shared by ReplicaSets and ShardedClusters.
+    # ------------------------------------------------------------------
+    x = _sub(
+        sp,
+        "AddDatabase",
+        "Create a database on a ready ReplicaSet or ShardedCluster.",
+        "The request runs in the background. Terraform creates the database, its three managed accounts, and Vault credentials. Use ListDatabase to monitor database lifecycle status.",
+        "  python3 privateWorkerReplacement.py AddDatabase RS1 HouseInfo\n  python3 privateWorkerReplacement.py AddDatabase SC9 HouseInfo\n  python3 privateWorkerReplacement.py AddDatabase HouseInfo    # only one deployment exists",
+    )
+    _database_target(x)
+
+    x = _sub(
+        sp,
+        "DeleteDatabase",
+        "Delete a database and its managed accounts.",
+        "Requires --confirm and runs in the background. Confirmation authorizes deletion of the database and contents, managed MongoDB users, Vault credentials, and lifecycle metadata.",
+        "  python3 privateWorkerReplacement.py DeleteDatabase SC9 HouseInfo --confirm\n  python3 privateWorkerReplacement.py DeleteDatabase HouseInfo --confirm",
+    )
+    _database_target(x)
+    _confirm(x)
+
+    x = _sub(
+        sp,
+        "ListDatabases",
+        "List databases and their lifecycle status.",
+        "Shows database inventory only: deployment, database name, and status. Account details are intentionally excluded; use ListDatabaseAccounts for those.",
+        "  python3 privateWorkerReplacement.py ListDatabases\n  python3 privateWorkerReplacement.py ListDatabases SC9",
+    )
+    x.add_argument(
+        "deployment",
+        metavar="DEPLOYMENT",
+        nargs="?",
+        help="Optional ReplicaSet or ShardedCluster name.",
+    )
+
+    x = _sub(
+        sp,
+        "ListDatabase",
+        "Show status for one database.",
+        "Shows database-level information only: deployment, deployment type, database name, lifecycle status, and creation time.",
+        "  python3 privateWorkerReplacement.py ListDatabase SC9 HouseInfo\n  python3 privateWorkerReplacement.py ListDatabase HouseInfo    # only one deployment exists",
+    )
+    _database_target(x)
+
+    x = _sub(
+        sp,
+        "ListDatabaseAccounts",
+        "Show the three managed accounts for one database.",
+        "Shows Owner, ReadWrite, and Read accounts, enabled/disabled state, rotation due timing, last rotation, Vault paths, and complete browser-ready Vault URLs.",
+        "  python3 privateWorkerReplacement.py ListDatabaseAccounts SC9 HouseInfo\n  python3 privateWorkerReplacement.py ListDatabaseAccounts HouseInfo    # only one deployment exists",
+    )
+    _database_target(x)
+
+    x = _sub(
+        sp,
+        "RotatePasswords",
+        "Rotate all three managed database passwords.",
+        "Performs deployment health checks first, rotates Owner/ReadWrite/Read credentials through Terraform, updates Vault, and verifies MongoDB authentication.",
+        "  python3 privateWorkerReplacement.py RotatePasswords SC9 HouseInfo\n  python3 privateWorkerReplacement.py RotatePasswords HouseInfo",
+    )
+    _database_target(x)
+
+    x = _sub(
+        sp,
+        "DisableOwner",
+        "Disable the database Owner account.",
+        "Requires --confirm and a ready deployment. The Owner Vault credential remains managed and continues to rotate.",
+        "  python3 privateWorkerReplacement.py DisableOwner SC9 HouseInfo --confirm",
+    )
+    _database_target(x)
+    _confirm(x)
+
+    x = _sub(
+        sp,
+        "EnableOwner",
+        "Re-enable the database Owner account.",
+        "Requires a ready deployment. Recreates the Owner MongoDB account using the existing managed credential without rotating its password.",
+        "  python3 privateWorkerReplacement.py EnableOwner SC9 HouseInfo",
+    )
+    _database_target(x)
+
+
+
 def build_parser(config_path: Path | None = None) -> argparse.ArgumentParser:
     """Build the complete public CLI contract."""
 
@@ -280,238 +551,24 @@ Inventory across all managed deployments:
     )
     sp = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
 
-    x = _sub(
+    _add_deployment_commands(
         sp,
-        "AddReplicaSet",
-        "Create an empty managed ReplicaSet.",
-        "Requests creation of a non-sharded MongoDB ReplicaSet and returns promptly while provisioning continues in the background.",
-        "  python3 privateWorkerReplacement.py AddReplicaSet RS1",
+        configured_shards_text=configured_shards_text,
+        configured_maximum_text=configured_maximum_text,
+        configured_maximum_example=configured_maximum_example,
     )
-    _deployment(x, "REPLICASET")
-
-    x = _sub(
+    _add_shard_commands(
         sp,
-        "AddShardedCluster",
-        "Create an empty managed ShardedCluster.",
-        f"Requests creation of a MongoDB ShardedCluster and returns promptly while provisioning continues in the background. Initial shards cannot exceed the configured maximum of {configured_maximum_text}.",
-        f"  python3 privateWorkerReplacement.py AddShardedCluster SC9\n  python3 privateWorkerReplacement.py AddShardedCluster SC9 --shards {configured_maximum_example}    # configured maximum",
+        configured_maximum_text=configured_maximum_text,
     )
-    _deployment(x, "SHARDED_CLUSTER")
-    x.add_argument(
-        "--shards",
-        type=int,
-        metavar="N",
-        help=(
-            f"Initial shard count. Optional. Default: {configured_shards_text} "
-            "(read from controller configuration). "
-            f"Maximum: {configured_maximum_text}. Use --shards N to override."
-        ),
-    )
-
-    x = _sub(
-        sp,
-        "DeleteReplicaSet",
-        "Delete an empty managed ReplicaSet.",
-        "Requires --confirm. The request runs in the background and is refused while managed databases remain.",
-        "  python3 privateWorkerReplacement.py DeleteReplicaSet RS1 --confirm",
-    )
-    _deployment(x, "REPLICASET")
-    _confirm(x)
-
-    x = _sub(
-        sp,
-        "DeleteShardedCluster",
-        "Delete an empty managed ShardedCluster.",
-        "Requires --confirm. The request runs in the background and is refused while managed databases remain.",
-        "  python3 privateWorkerReplacement.py DeleteShardedCluster SC9 --confirm",
-    )
-    _deployment(x, "SHARDED_CLUSTER")
-    _confirm(x)
-
-    _sub(
-        sp,
-        "ListDeployments",
-        "List all managed ReplicaSets and ShardedClusters.",
-        "Shows deployment name, type, live phase, topology, MongoDB version, and managed database count.",
-        "  python3 privateWorkerReplacement.py ListDeployments",
-    )
-
-    x = _sub(
-        sp,
-        "ListDeployment",
-        "Show one managed deployment.",
-        "Shows detailed service status for either a ReplicaSet or ShardedCluster.",
-        "  python3 privateWorkerReplacement.py ListDeployment SC9",
-    )
-    _deployment(x)
-
-    _sub(
-        sp,
-        "ListReplicaSets",
-        "List managed ReplicaSets.",
-        "Lists all privateWorkerReplacement-managed ReplicaSet deployments with live phase, topology, MongoDB version, and managed database count.",
-        "  python3 privateWorkerReplacement.py ListReplicaSets",
-    )
-
-    x = _sub(
-        sp,
-        "ListReplicaSet",
-        "Show one managed ReplicaSet.",
-        "Shows one ReplicaSet, live phase, members, MongoDB version, and database count.",
-        "  python3 privateWorkerReplacement.py ListReplicaSet RS1",
-    )
-    _deployment(x, "REPLICASET")
-
-    _sub(
-        sp,
-        "ListShardedClusters",
-        "List managed ShardedClusters.",
-        "Lists all privateWorkerReplacement-managed ShardedCluster deployments with live phase, topology, MongoDB version, and managed database count.",
-        "  python3 privateWorkerReplacement.py ListShardedClusters",
-    )
-
-    x = _sub(
-        sp,
-        "ListShardedCluster",
-        "Show one managed ShardedCluster.",
-        "Shows cluster phase, topology, database count, and individual shard status.",
-        "  python3 privateWorkerReplacement.py ListShardedCluster SC9",
-    )
-    _deployment(x, "SHARDED_CLUSTER")
-
-    x = _sub(
-        sp,
-        "ListShards",
-        "List shard creation/readiness status.",
-        "With no cluster name, shows shards across all managed ShardedClusters. With a cluster name, shows detailed shard, config-server, mongos, and active-change status.",
-        "  python3 privateWorkerReplacement.py ListShards\n  python3 privateWorkerReplacement.py ListShards SC9",
-    )
-    x.add_argument(
-        "deployment",
-        metavar="SHARDED_CLUSTER",
-        nargs="?",
-        help="Optional ShardedCluster name.",
-    )
-
-    x = _sub(
-        sp,
-        "AddShard",
-        "Add one or more shards to a Running ShardedCluster.",
-        f"COUNT defaults to 1. The resulting shard count cannot exceed the configured maximum of {configured_maximum_text}. The request runs in the background; use ListShards to monitor readiness.",
-        "  python3 privateWorkerReplacement.py AddShard SC9\n  python3 privateWorkerReplacement.py AddShard SC9 2",
-    )
-    _deployment(x, "SHARDED_CLUSTER")
-    x.add_argument(
-        "count",
-        metavar="COUNT",
-        nargs="?",
-        type=int,
-        default=1,
-        help=(
-            "Number of shards to add. Optional. Default: 1. "
-            f"The resulting total cannot exceed {configured_maximum_text}."
-        ),
-    )
-
-    x = _sub(
-        sp,
-        "DeleteShard",
-        "Remove one or more shards from a ShardedCluster.",
-        "COUNT defaults to 1 and --confirm is required. The request runs in the background. At least one shard must remain.",
-        "  python3 privateWorkerReplacement.py DeleteShard SC9 --confirm\n  python3 privateWorkerReplacement.py DeleteShard SC9 2 --confirm",
-    )
-    _deployment(x, "SHARDED_CLUSTER")
-    x.add_argument(
-        "count",
-        metavar="COUNT",
-        nargs="?",
-        type=int,
-        default=1,
-        help="Number of shards to delete. Optional. Default: 1.",
-    )
-    _confirm(x)
-
-    x = _sub(
-        sp,
-        "AddDatabase",
-        "Create a database on a ready ReplicaSet or ShardedCluster.",
-        "The request runs in the background. Terraform creates the database, its three managed accounts, and Vault credentials. Use ListDatabase to monitor database lifecycle status.",
-        "  python3 privateWorkerReplacement.py AddDatabase RS1 HouseInfo\n  python3 privateWorkerReplacement.py AddDatabase SC9 HouseInfo\n  python3 privateWorkerReplacement.py AddDatabase HouseInfo    # only one deployment exists",
-    )
-    _database_target(x)
-
-    x = _sub(
-        sp,
-        "DeleteDatabase",
-        "Delete a database and its managed accounts.",
-        "Requires --confirm and runs in the background. Confirmation authorizes deletion of the database and contents, managed MongoDB users, Vault credentials, and lifecycle metadata.",
-        "  python3 privateWorkerReplacement.py DeleteDatabase SC9 HouseInfo --confirm\n  python3 privateWorkerReplacement.py DeleteDatabase HouseInfo --confirm",
-    )
-    _database_target(x)
-    _confirm(x)
-
-    x = _sub(
-        sp,
-        "ListDatabases",
-        "List databases and their lifecycle status.",
-        "Shows database inventory only: deployment, database name, and status. Account details are intentionally excluded; use ListDatabaseAccounts for those.",
-        "  python3 privateWorkerReplacement.py ListDatabases\n  python3 privateWorkerReplacement.py ListDatabases SC9",
-    )
-    x.add_argument(
-        "deployment",
-        metavar="DEPLOYMENT",
-        nargs="?",
-        help="Optional ReplicaSet or ShardedCluster name.",
-    )
-
-    x = _sub(
-        sp,
-        "ListDatabase",
-        "Show status for one database.",
-        "Shows database-level information only: deployment, deployment type, database name, lifecycle status, and creation time.",
-        "  python3 privateWorkerReplacement.py ListDatabase SC9 HouseInfo\n  python3 privateWorkerReplacement.py ListDatabase HouseInfo    # only one deployment exists",
-    )
-    _database_target(x)
-
-    x = _sub(
-        sp,
-        "ListDatabaseAccounts",
-        "Show the three managed accounts for one database.",
-        "Shows Owner, ReadWrite, and Read accounts, enabled/disabled state, rotation due timing, last rotation, Vault paths, and complete browser-ready Vault URLs.",
-        "  python3 privateWorkerReplacement.py ListDatabaseAccounts SC9 HouseInfo\n  python3 privateWorkerReplacement.py ListDatabaseAccounts HouseInfo    # only one deployment exists",
-    )
-    _database_target(x)
-
-    x = _sub(
-        sp,
-        "RotatePasswords",
-        "Rotate all three managed database passwords.",
-        "Performs deployment health checks first, rotates Owner/ReadWrite/Read credentials through Terraform, updates Vault, and verifies MongoDB authentication.",
-        "  python3 privateWorkerReplacement.py RotatePasswords SC9 HouseInfo\n  python3 privateWorkerReplacement.py RotatePasswords HouseInfo",
-    )
-    _database_target(x)
-
-    x = _sub(
-        sp,
-        "DisableOwner",
-        "Disable the database Owner account.",
-        "Requires --confirm and a ready deployment. The Owner Vault credential remains managed and continues to rotate.",
-        "  python3 privateWorkerReplacement.py DisableOwner SC9 HouseInfo --confirm",
-    )
-    _database_target(x)
-    _confirm(x)
-
-    x = _sub(
-        sp,
-        "EnableOwner",
-        "Re-enable the database Owner account.",
-        "Requires a ready deployment. Recreates the Owner MongoDB account using the existing managed credential without rotating its password.",
-        "  python3 privateWorkerReplacement.py EnableOwner SC9 HouseInfo",
-    )
-    _database_target(x)
+    _add_database_commands(sp)
 
     return parser
 
+
+# ---------------------------------------------------------------------------
+# Parsed-command normalization, async submission, and execution dispatch
+# ---------------------------------------------------------------------------
 
 def _database_values(args: argparse.Namespace) -> tuple[str, str]:
     """Return (explicit deployment or blank, database) from parsed DB arguments."""

@@ -4,6 +4,10 @@
 
 Platform diagnostics, Terraform reconciliation, operation IDs, and recovery commands are intentionally separated into `privateWorkerReplacementAdmin.py`. See `README-privateWorkerReplacementAdmin.md` if you are operating the platform rather than consuming the DBaaS service.
 
+For maintainers/reviewers who need the implementation ownership map, mutation
+boundaries, locking rationale, source-of-truth model, and common design answers,
+see `docs/MAINTAINER-GUIDE.md`.
+
 ---
 
 ## 1. Basic usage

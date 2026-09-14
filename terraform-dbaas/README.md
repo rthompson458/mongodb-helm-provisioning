@@ -4,6 +4,9 @@ This directory is one Terraform root module. Terraform loads every `*.tf` file
 in the directory together; file names are for human organization and do not form
 separate modules.
 
+For the larger Python/Terraform/Vault/Kubernetes ownership model and reviewer
+rationale, see `docs/MAINTAINER-GUIDE.md`.
+
 The former `main.tf` grew to roughly 1,000 lines and mixed desired-state
 normalization, storage, MongoDB deployment resources, Vault metadata,
 credentials, Helm database management, and one-shot lifecycle operations. The

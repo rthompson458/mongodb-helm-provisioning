@@ -53,27 +53,15 @@ def _kubernetes_names(items: list[dict[str, Any]]) -> list[str]:
     return sorted(names)
 
 
-def managed_resource_inventory(
-    config: dict[str, Any],
-    vault: VaultClient,
-) -> dict[str, list[str]]:
-    """Return the authoritative read-only cross-plane DBaaS inventory.
+def _desired_inventory_summary(
+    inventory: dict[str, dict[str, Any]],
+) -> tuple[dict[str, list[str]], set[str], set[str]]:
+    """Summarize Vault desired state and derive expected Kubernetes objects.
 
-    The inventory intentionally compares multiple systems instead of trusting
-    one source in isolation:
-
-    - Vault says which deployments/databases/accounts should exist.
-    - Kubernetes says which controller-managed runtime objects actually exist.
-    - Ops Manager says which deployment projects exist and gives their IDs.
-    - Terraform backend/config objects identify permanent controller plumbing.
-
-    The returned dictionary separates permanent infrastructure, legitimate
-    active resources, and mismatch/orphan conditions. admin_status.py turns
-    those categories into CLEAN, MANAGED RESOURCES PRESENT, or ATTENTION
-    REQUIRED without repeating the classification logic here.
+    Vault is the durable desired-state inventory. This helper converts that
+    hierarchy into human-readable deployment/database/account lists and the
+    exact MongoDB/MongoDBUser resource names that should exist at runtime.
     """
-
-    inventory = vault.load_inventory()
 
     deployments = sorted(
         str(deployment.get("display_name", key))
@@ -107,9 +95,9 @@ def managed_resource_inventory(
                     f"{deployment_name}/{db_name}/{db_name}_{suffix}"
                 )
 
-            # A disabled Owner credential remains managed in Vault, but the
-            # corresponding MongoDBUser is intentionally absent. ReadWrite and
-            # Read must always exist for a managed database.
+            # Disabled Owner credentials remain managed in Vault, but their
+            # MongoDBUser is intentionally absent. ReadWrite and Read users are
+            # always required for a managed database.
             if not db.get("owner_disabled", False):
                 expected_mongodb_users.add(
                     account_resource_name(key, db_key, "owner")
@@ -121,9 +109,30 @@ def managed_resource_inventory(
                 account_resource_name(key, db_key, "read")
             )
 
-    # Label selectors keep customer-unrelated Kubernetes objects out of the
-    # DBaaS inventory. Secrets/ConfigMaps need separate name-based handling
-    # below because some permanent or Operator-created objects use other labels.
+    summary = {
+        "managed_deployments": deployments,
+        "replica_sets": replica_sets,
+        "sharded_clusters": sharded_clusters,
+        "databases": sorted(databases),
+        "managed_accounts": sorted(accounts),
+    }
+    return summary, expected_mongodb_resources, expected_mongodb_users
+
+
+def _kubernetes_inventory_summary(
+    config: dict[str, Any],
+    expected_mongodb_resources: set[str],
+    expected_mongodb_users: set[str],
+) -> tuple[dict[str, list[str]], list[str]]:
+    """Collect Kubernetes runtime state and classify desired-state drift.
+
+    The returned group-Secret list is passed to the Ops Manager classifier
+    because those Secret names encode Ops Manager project IDs.
+    """
+
+    # Labels keep unrelated cluster objects out of DBaaS inventory. Secrets and
+    # ConfigMaps need name-based classification because permanent infrastructure
+    # and Operator-created resources do not all share the same labels.
     mongodb_resources = kube.list_json(
         config,
         "mongodb",
@@ -140,31 +149,6 @@ def managed_resource_inventory(
     actual_mongodb_resources = set(mongodb_resource_names)
     actual_mongodb_users = set(mongodb_user_names)
 
-    # Compare Vault desired state to the live controller-labelled runtime
-    # objects. These checks make ListManagedResources useful for real drift,
-    # not only Ops Manager project mismatches.
-    missing_mongodb_resources = sorted(
-        expected_mongodb_resources - actual_mongodb_resources
-    )
-    orphan_mongodb_resources = sorted(
-        actual_mongodb_resources - expected_mongodb_resources
-    )
-    missing_mongodb_users = sorted(
-        expected_mongodb_users - actual_mongodb_users
-    )
-    orphan_mongodb_users = sorted(
-        actual_mongodb_users - expected_mongodb_users
-    )
-
-    # MongoDB Operator auth Secrets and Helm hook Jobs/Pods are created outside
-    # Terraform state. They are healthy while their deployment exists, but a
-    # leftover with neither desired state nor a live MongoDB CR is actionable
-    # cleanup drift and must prevent a false CLEAN report.
-    orphan_operator_artifacts = list_orphan_operator_artifacts(
-        config,
-        expected_mongodb_resources,
-    )
-
     pvcs = kube.list_json(
         config,
         "pvc",
@@ -178,55 +162,81 @@ def managed_resource_inventory(
     )
     secrets = kube.list_json(config, "secret")
     configmaps = kube.list_json(config, "configmap")
-
     secret_names = _kubernetes_names(secrets)
     configmap_names = _kubernetes_names(configmaps)
 
-    # Controller-owned credentials such as deployment admin/database-account
-    # Secrets are active DBaaS resources. Ops Manager group Secrets are handled
-    # separately because the Secret name itself contains the Ops Manager ID.
-    controller_secrets = sorted(
-        name
-        for name in secret_names
-        if name.startswith("tc-")
-    )
     group_secrets = sorted(
-        name
-        for name in secret_names
-        if name.endswith("-group-secret")
+        name for name in secret_names if name.endswith("-group-secret")
     )
 
-    # These objects are permanent controller infrastructure. They remain when
-    # there are zero customer deployments and therefore must not make a clean
-    # zero-deployment environment look dirty.
-    terraform_states = sorted(
-        name
-        for name in secret_names
-        if name.startswith("tfstate-")
-        and name.endswith(config["backend_secret_suffix"])
-    )
-    controller_infrastructure_configmaps = sorted(
-        name
-        for name in configmap_names
-        if name == "tc-ops-manager-projects"
-    )
+    summary = {
+        "mongodb_resources": mongodb_resource_names,
+        "mongodb_users": mongodb_user_names,
+        "missing_mongodb_resources": sorted(
+            expected_mongodb_resources - actual_mongodb_resources
+        ),
+        "orphan_mongodb_resources": sorted(
+            actual_mongodb_resources - expected_mongodb_resources
+        ),
+        "missing_mongodb_users": sorted(
+            expected_mongodb_users - actual_mongodb_users
+        ),
+        "orphan_mongodb_users": sorted(
+            actual_mongodb_users - expected_mongodb_users
+        ),
+        # Operator auth Secrets and Helm hook Jobs/Pods live outside Terraform
+        # state. Leftovers without desired/live ownership are actionable drift.
+        "orphan_operator_artifacts": list_orphan_operator_artifacts(
+            config,
+            expected_mongodb_resources,
+        ),
+        "pvcs": _kubernetes_names(pvcs),
+        "pvs": _kubernetes_names(pvs),
+        "controller_secrets": sorted(
+            name for name in secret_names if name.startswith("tc-")
+        ),
+        "controller_configmaps": sorted(
+            name
+            for name in configmap_names
+            if name.startswith("tc-")
+            and name != "tc-ops-manager-projects"
+            and not name.startswith(DEPLOYMENT_LOCK_PREFIX)
+        ),
+        # Permanent infrastructure remains visible but does not make an empty
+        # deployment inventory dirty.
+        "controller_infrastructure_configmaps": sorted(
+            name for name in configmap_names if name == "tc-ops-manager-projects"
+        ),
+        "terraform_states": sorted(
+            name
+            for name in secret_names
+            if name.startswith("tfstate-")
+            and name.endswith(config["backend_secret_suffix"])
+        ),
+        "deployment_locks": sorted(
+            name
+            for name in configmap_names
+            if name.startswith(DEPLOYMENT_LOCK_PREFIX)
+        ),
+    }
+    return summary, group_secrets
 
-    controller_configmaps = sorted(
-        name
-        for name in configmap_names
-        if name.startswith("tc-")
-        and name != "tc-ops-manager-projects"
-        and not name.startswith(DEPLOYMENT_LOCK_PREFIX)
-    )
-    locks = sorted(
-        name
-        for name in configmap_names
-        if name.startswith(DEPLOYMENT_LOCK_PREFIX)
-    )
+
+def _ops_manager_inventory_summary(
+    config: dict[str, Any],
+    deployments: list[str],
+    group_secrets: list[str],
+) -> dict[str, list[str]]:
+    """Classify Ops Manager projects and project-ID group Secrets.
+
+    User-facing deployments should each have one non-platform Ops Manager
+    project. The permanent platform project is reported separately so it stays
+    visible without being confused with customer-managed deployment state.
+    """
 
     permanent_project, projects = list_ops_manager_projects(config)
-
     expected_project_names = {name.lower() for name in deployments}
+
     platform_project = next(
         (
             project
@@ -235,10 +245,6 @@ def managed_resource_inventory(
         ),
         None,
     )
-
-    # Every user-facing deployment gets a distinct non-platform Ops Manager
-    # project. Matching by case-insensitive display name lets us compare Vault
-    # desired state to Ops Manager without exposing internal Kubernetes names.
     nonplatform_projects = [
         project
         for project in projects
@@ -256,8 +262,7 @@ def managed_resource_inventory(
     ]
 
     actual_project_names = {
-        project["name"].lower()
-        for project in nonplatform_projects
+        project["name"].lower() for project in nonplatform_projects
     }
     missing_ops_manager_projects = sorted(
         name
@@ -265,28 +270,16 @@ def managed_resource_inventory(
         if name.lower() not in actual_project_names
     )
 
-    # The base project is platform infrastructure, but *missing* permanent
-    # infrastructure is still a fault. Keep that condition separate so the
-    # administrator formatter can raise ATTENTION REQUIRED instead of silently
-    # treating "Project ID: NOT FOUND" as healthy infrastructure.
+    # A missing permanent project is a platform fault even though permanent
+    # infrastructure normally does not prevent CLEAN zero-state.
     missing_ops_manager_platform_project = (
         [permanent_project] if platform_project is None else []
     )
-
-    project_ids = {
-        project["id"]
-        for project in projects
-        if project["id"]
-    }
     platform_project_id = (
-        platform_project["id"]
-        if platform_project is not None
-        else ""
+        platform_project["id"] if platform_project is not None else ""
     )
     active_project_ids = {
-        project["id"]
-        for project in active_projects
-        if project["id"]
+        project["id"] for project in active_projects if project["id"]
     }
 
     platform_group_secrets: list[str] = []
@@ -296,56 +289,32 @@ def managed_resource_inventory(
     for secret_name in group_secrets:
         project_id = secret_name.removesuffix("-group-secret")
         rendered = f"{secret_name} (Project ID: {project_id})"
-
         if project_id == platform_project_id:
             platform_group_secrets.append(rendered)
         elif project_id in active_project_ids:
             active_group_secrets.append(rendered)
         else:
-            # This includes both a Secret whose project ID no longer exists and
-            # a Secret for a live non-platform project that Vault does not know
-            # about. In either case the Secret is not legitimate active state.
+            # Either the project ID no longer exists or the live project is not
+            # present in Vault desired state. Both are actionable orphan state.
             orphan_group_secrets.append(rendered)
 
-    ops_manager_platform_project = (
-        [
-            f"{platform_project['name']} (Project ID: {platform_project['id']})"
-        ]
-        if platform_project is not None
-        else [f"{permanent_project} (Project ID: NOT FOUND)"]
-    )
-    ops_manager_projects = sorted(
-        f"{project['name']} (Project ID: {project['id']})"
-        for project in active_projects
-    )
-    ops_manager_orphans = sorted(
-        f"{project['name']} (Project ID: {project['id']})"
-        for project in orphan_projects
-    )
-
     return {
-        "managed_deployments": deployments,
-        "replica_sets": replica_sets,
-        "sharded_clusters": sharded_clusters,
-        "databases": sorted(databases),
-        "managed_accounts": sorted(accounts),
-        "mongodb_resources": mongodb_resource_names,
-        "mongodb_users": mongodb_user_names,
-        "missing_mongodb_resources": missing_mongodb_resources,
-        "orphan_mongodb_resources": orphan_mongodb_resources,
-        "missing_mongodb_users": missing_mongodb_users,
-        "orphan_mongodb_users": orphan_mongodb_users,
-        "orphan_operator_artifacts": orphan_operator_artifacts,
-        "pvcs": _kubernetes_names(pvcs),
-        "pvs": _kubernetes_names(pvs),
-        "controller_secrets": controller_secrets,
-        "controller_configmaps": controller_configmaps,
-        "controller_infrastructure_configmaps": controller_infrastructure_configmaps,
-        "terraform_states": terraform_states,
-        "deployment_locks": locks,
-        "ops_manager_platform_project": ops_manager_platform_project,
-        "ops_manager_projects": ops_manager_projects,
-        "ops_manager_orphans": ops_manager_orphans,
+        "ops_manager_platform_project": (
+            [
+                f"{platform_project['name']} "
+                f"(Project ID: {platform_project['id']})"
+            ]
+            if platform_project is not None
+            else [f"{permanent_project} (Project ID: NOT FOUND)"]
+        ),
+        "ops_manager_projects": sorted(
+            f"{project['name']} (Project ID: {project['id']})"
+            for project in active_projects
+        ),
+        "ops_manager_orphans": sorted(
+            f"{project['name']} (Project ID: {project['id']})"
+            for project in orphan_projects
+        ),
         "ops_manager_platform_group_secrets": sorted(platform_group_secrets),
         "ops_manager_group_secrets": sorted(active_group_secrets),
         "orphan_group_secrets": sorted(orphan_group_secrets),
@@ -353,6 +322,39 @@ def managed_resource_inventory(
         "missing_ops_manager_platform_project": missing_ops_manager_platform_project,
     }
 
+
+def managed_resource_inventory(
+    config: dict[str, Any],
+    vault: VaultClient,
+) -> dict[str, list[str]]:
+    """Return the authoritative read-only cross-plane DBaaS inventory.
+
+    Collection is deliberately split by ownership plane so reviewers can see
+    exactly where each result comes from:
+
+    1. Vault defines desired deployments, databases, and accounts.
+    2. Kubernetes supplies live runtime resources and drift evidence.
+    3. Ops Manager supplies project/group identity and cross-plane consistency.
+
+    The combined result separates permanent infrastructure, legitimate managed
+    resources, and actionable mismatch/orphan conditions. admin_status.py owns
+    presentation and the CLEAN/MANAGED/ATTENTION status wording.
+    """
+
+    desired, expected_resources, expected_users = _desired_inventory_summary(
+        vault.load_inventory()
+    )
+    kubernetes, group_secrets = _kubernetes_inventory_summary(
+        config,
+        expected_resources,
+        expected_users,
+    )
+    ops_manager = _ops_manager_inventory_summary(
+        config,
+        desired["managed_deployments"],
+        group_secrets,
+    )
+    return {**desired, **kubernetes, **ops_manager}
 
 def reconcile(config: dict[str, Any], vault: VaultClient) -> None:
     """Reapply complete Vault-backed desired state and verify convergence."""

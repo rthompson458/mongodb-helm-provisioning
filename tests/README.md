@@ -7,7 +7,74 @@ The privateWorkerReplacement test suite has two jobs:
 
 The live harness is intended for a development environment such as the local k3d environment. Do not point lifecycle profiles at production.
 
+For the repository-wide code ownership map and the distinction between unit
+tests, live acceptance tests, Terraform ownership, and runtime reconciliation,
+see `docs/MAINTAINER-GUIDE.md`.
+
 ---
+
+## Test directory map
+
+The split is intentional:
+
+```text
+tests/test_*.py
+    Fast unit/regression/contract tests.
+    Test controller code without building a live MongoDB environment.
+
+tests/run_harness.py
+    Command-line entry point for live acceptance testing.
+
+tests/harness/
+    Live harness engine and real end-to-end scenarios.
+```
+
+Key unit/regression files:
+
+| File | What it protects |
+| --- | --- |
+| `test_cli.py` | Customer command syntax, help, async request safety |
+| `test_admin_cli.py` | Administrator command boundary, help, recovery safety |
+| `test_config.py` | Configuration parsing/defaults/validation |
+| `test_deployment_lifecycle.py` | Deployment orchestration call ordering and controller-admin checks |
+| `test_shard_lifecycle.py` | AddShard/DeleteShard rules and topology behavior |
+| `test_database_lifecycle.py` | DB/account lifecycle and credential operations |
+| `test_deployment_status.py` | ReplicaSet/ShardedCluster/shard presentation |
+| `test_database_status.py` | Database/account status presentation |
+| `test_deployment_lock.py` | Per-ShardedCluster mutation-lock behavior |
+| `test_mutation_lock.py` | Controller-wide desired-state serialization |
+| `test_async_operations.py` | Detached worker journal and operation states |
+| `test_admin_status.py` | CLEAN/MANAGED/ATTENTION inventory presentation |
+| `test_maintenance.py` | Reconcile and guarded recovery rules |
+| `test_operator_artifacts.py` | Operator/Helm orphan discovery and cleanup |
+| `test_vault_inventory.py` | Vault desired-state/credential reading and token errors |
+| `test_terraform_runner.py` | Terraform cache/input/execution behavior |
+| `test_terraform_contract.py` | Terraform structural/resource-address contracts |
+| `test_lifecycle_script.py` | lifecycle.sh storage/lock/auth contract |
+| `test_mongodb_management_runner.py` | Helm database-management integration contract |
+| `test_logging.py` | Controller/operation logging behavior |
+| `test_no_argument_help.py` | Safe no-command help for all three entry points |
+| `test_help_completeness.py` | Every command has useful description/examples |
+| `test_documentation_consistency.py` | README/help/test-count/code-map synchronization |
+| `test_source_documentation.py` | Docstrings on production and live-harness maintainership code |
+| `test_repository_hygiene.py` | Prevent generated/runtime junk from entering Git |
+
+Live-harness files:
+
+| File | Responsibility |
+| --- | --- |
+| `run_harness.py` | Parse selection/safety options, choose run ID, execute selected scenarios |
+| `harness/models.py` | Shared harness context/result data structures |
+| `harness/runner.py` | Numbering, subprocess execution, async polling, timing, PASS/FAIL evidence |
+| `harness/scenario_preflight.py` | Canonical tests 1-5 |
+| `harness/scenario_replicaset.py` | Canonical tests 6-16 |
+| `harness/scenario_sharded.py` | Canonical tests 17-32 |
+| `harness/scenario_locking.py` | Canonical tests 33-38 |
+| `harness/scenario_admin.py` | Canonical tests 39-100 |
+
+This means a file such as `tests/test_deployment_lifecycle.py` is a fast
+code-level regression test; it is **not** canonical live Test 36 just because a
+source-code line happens to be numbered 36.
 
 ## 1. Fast unit/regression tests
 

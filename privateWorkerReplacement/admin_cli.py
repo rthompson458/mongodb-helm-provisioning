@@ -7,6 +7,13 @@ platform diagnostics, repair, reconciliation, and guarded recovery belong here.
 The executable split improves clarity but is not an authorization boundary.
 Production must still restrict host, Kubernetes, Vault, and Terraform access to
 authorized administrators.
+
+Maintainer note:
+  build_parser() defines only the operator-facing command contract. Read-only
+  inventory formatting lives in admin_status.py; reconciliation/recovery logic
+  lives in maintenance.py; detached-operation plumbing lives in
+  async_operations.py. Keeping those responsibilities separate prevents this
+  CLI module from becoming a second copy of administrator business logic.
 """
 
 from __future__ import annotations
@@ -87,6 +94,120 @@ def _sub(
     )
 
 
+def _add_diagnostic_commands(sp) -> None:
+    """Register read-only administrator diagnostics."""
+
+    # ------------------------------------------------------------------
+    # Read-only diagnostics
+    # ------------------------------------------------------------------
+    x = _sub(
+        sp,
+        "ListManagedResources",
+        "List authoritative DBaaS resources and zero-state status.",
+        "Read-only authoritative inventory across Vault, Kubernetes, Terraform "
+        "backend state, and Ops Manager. The default view shows compact grouped "
+        "counts, health/consistency status, and one row per managed deployment. "
+        "Permanent controller infrastructure remains visible without preventing "
+        "CLEAN; orphan or missing cross-plane state, including MongoDB Operator/Helm "
+        "runtime leftovers, reports ATTENTION REQUIRED. Use --verbose to append the "
+        "full object-name inventory for troubleshooting.",
+        "  python3 privateWorkerReplacementAdmin.py ListManagedResources\n"
+        "  python3 privateWorkerReplacementAdmin.py ListManagedResources --verbose",
+    )
+    x.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Append full object-name inventory details after the compact summary.",
+    )
+
+    x = _sub(
+        sp,
+        "ListOperation",
+        "Show detailed status for one background controller operation.",
+        "Displays the internal operation ID, command, scope, result, timestamps, "
+        "elapsed time, worker PID, daily operations-log path, and recorded message. "
+        "This diagnostic detail is intentionally available only on the administrator "
+        "interface.",
+        "  python3 privateWorkerReplacementAdmin.py ListOperation 7c1349abc123",
+    )
+    x.add_argument(
+        "operation_id",
+        metavar="OPERATION_ID",
+        help="Operation ID from the administrator operation journal.",
+    )
+
+    _sub(
+        sp,
+        "ListOperations",
+        "List recent background controller operations.",
+        "Shows up to 50 recent asynchronous controller operations with their "
+        "operation IDs, commands, scopes, results, and elapsed times. This command "
+        "reads local operation state only and does not require MongoDB/Vault health.",
+        "  python3 privateWorkerReplacementAdmin.py ListOperations",
+    )
+
+
+
+def _add_recovery_commands(sp) -> None:
+    """Register guarded asynchronous administrator mutations."""
+
+    # ------------------------------------------------------------------
+    # Guarded asynchronous reconciliation and recovery
+    # ------------------------------------------------------------------
+    x = _sub(
+        sp,
+        "RecoverDeploymentLock",
+        "Release a completed ShardedCluster topology lock after validation.",
+        "Asynchronous exceptional recovery for an interrupted AddShard/DeleteShard "
+        "that already reached the lock's target topology. Requires --confirm. The "
+        "request returns an Operation ID for ListOperation monitoring. Before "
+        "releasing the lock, the worker verifies the recorded target, live MongoDB "
+        "shardCount, surviving shard readiness, config servers, mongos, and removed "
+        "StatefulSets. Only the exact lifecycle lock release is applied through "
+        "Terraform; unrelated deployment state is not broadly reconciled.",
+        "  python3 privateWorkerReplacementAdmin.py RecoverDeploymentLock SC9 --confirm\n"
+        "  python3 privateWorkerReplacementAdmin.py ListOperation OPERATION_ID",
+    )
+    x.add_argument(
+        "deployment",
+        metavar="SHARDED_CLUSTER",
+        help="Managed ShardedCluster name whose topology lock is being recovered.",
+    )
+    _confirm(x)
+
+    x = _sub(
+        sp,
+        "RecoverOrphanedResources",
+        "Finish Terraform cleanup after desired-state inventory is already empty.",
+        "Asynchronous controller-state recovery. Requires --confirm. The request "
+        "returns an Operation ID for ListOperation monitoring and is allowed only "
+        "when Vault-backed managed deployment inventory "
+        "is empty AND Kubernetes contains no privateWorkerReplacement-managed MongoDB "
+        "custom resources. If both checks pass, Terraform converges the controller "
+        "backend to empty desired state, then removes deployment-specific MongoDB "
+        "Operator/Helm runtime leftovers that live outside Terraform state. Use "
+        "ListOperation with the returned operation ID to monitor completion.",
+        "  python3 privateWorkerReplacementAdmin.py RecoverOrphanedResources --confirm\n"
+        "  python3 privateWorkerReplacementAdmin.py ListOperation OPERATION_ID",
+    )
+    _confirm(x)
+
+    _sub(
+        sp,
+        "Reconcile",
+        "Reapply all Vault-backed managed desired state through Terraform.",
+        "Asynchronously reloads managed desired state from Vault, refreshes the local "
+        "Terraform execution cache, reapplies the complete controller-managed "
+        "environment, waits for deployments/accounts to converge, and reports each "
+        "resulting deployment. The request returns an Operation ID for ListOperation "
+        "monitoring. Reconcile refuses to run while a protected ShardedCluster "
+        "change is active.",
+        "  python3 privateWorkerReplacementAdmin.py Reconcile\n"
+        "  python3 privateWorkerReplacementAdmin.py ListOperation OPERATION_ID",
+    )
+
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the complete platform-administrator CLI contract."""
 
@@ -161,106 +282,15 @@ Normal DBaaS users should use:
 
     sp = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
 
-    x = _sub(
-        sp,
-        "ListManagedResources",
-        "List authoritative DBaaS resources and zero-state status.",
-        "Read-only authoritative inventory across Vault, Kubernetes, Terraform "
-        "backend state, and Ops Manager. The default view shows compact grouped "
-        "counts, health/consistency status, and one row per managed deployment. "
-        "Permanent controller infrastructure remains visible without preventing "
-        "CLEAN; orphan or missing cross-plane state, including MongoDB Operator/Helm "
-        "runtime leftovers, reports ATTENTION REQUIRED. Use --verbose to append the "
-        "full object-name inventory for troubleshooting.",
-        "  python3 privateWorkerReplacementAdmin.py ListManagedResources\n"
-        "  python3 privateWorkerReplacementAdmin.py ListManagedResources --verbose",
-    )
-    x.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Append full object-name inventory details after the compact summary.",
-    )
-
-    x = _sub(
-        sp,
-        "ListOperation",
-        "Show detailed status for one background controller operation.",
-        "Displays the internal operation ID, command, scope, result, timestamps, "
-        "elapsed time, worker PID, daily operations-log path, and recorded message. "
-        "This diagnostic detail is intentionally available only on the administrator "
-        "interface.",
-        "  python3 privateWorkerReplacementAdmin.py ListOperation 7c1349abc123",
-    )
-    x.add_argument(
-        "operation_id",
-        metavar="OPERATION_ID",
-        help="Operation ID from the administrator operation journal.",
-    )
-
-    _sub(
-        sp,
-        "ListOperations",
-        "List recent background controller operations.",
-        "Shows up to 50 recent asynchronous controller operations with their "
-        "operation IDs, commands, scopes, results, and elapsed times. This command "
-        "reads local operation state only and does not require MongoDB/Vault health.",
-        "  python3 privateWorkerReplacementAdmin.py ListOperations",
-    )
-
-    x = _sub(
-        sp,
-        "RecoverDeploymentLock",
-        "Release a completed ShardedCluster topology lock after validation.",
-        "Asynchronous exceptional recovery for an interrupted AddShard/DeleteShard "
-        "that already reached the lock's target topology. Requires --confirm. The "
-        "request returns an Operation ID for ListOperation monitoring. Before "
-        "releasing the lock, the worker verifies the recorded target, live MongoDB "
-        "shardCount, surviving shard readiness, config servers, mongos, and removed "
-        "StatefulSets. Only the exact lifecycle lock release is applied through "
-        "Terraform; unrelated deployment state is not broadly reconciled.",
-        "  python3 privateWorkerReplacementAdmin.py RecoverDeploymentLock SC9 --confirm\n"
-        "  python3 privateWorkerReplacementAdmin.py ListOperation OPERATION_ID",
-    )
-    x.add_argument(
-        "deployment",
-        metavar="SHARDED_CLUSTER",
-        help="Managed ShardedCluster name whose topology lock is being recovered.",
-    )
-    _confirm(x)
-
-    x = _sub(
-        sp,
-        "RecoverOrphanedResources",
-        "Finish Terraform cleanup after desired-state inventory is already empty.",
-        "Asynchronous controller-state recovery. Requires --confirm. The request "
-        "returns an Operation ID for ListOperation monitoring and is allowed only "
-        "when Vault-backed managed deployment inventory "
-        "is empty AND Kubernetes contains no privateWorkerReplacement-managed MongoDB "
-        "custom resources. If both checks pass, Terraform converges the controller "
-        "backend to empty desired state, then removes deployment-specific MongoDB "
-        "Operator/Helm runtime leftovers that live outside Terraform state. Use "
-        "ListOperation with the returned operation ID to monitor completion.",
-        "  python3 privateWorkerReplacementAdmin.py RecoverOrphanedResources --confirm\n"
-        "  python3 privateWorkerReplacementAdmin.py ListOperation OPERATION_ID",
-    )
-    _confirm(x)
-
-    _sub(
-        sp,
-        "Reconcile",
-        "Reapply all Vault-backed managed desired state through Terraform.",
-        "Asynchronously reloads managed desired state from Vault, refreshes the local "
-        "Terraform execution cache, reapplies the complete controller-managed "
-        "environment, waits for deployments/accounts to converge, and reports each "
-        "resulting deployment. The request returns an Operation ID for ListOperation "
-        "monitoring. Reconcile refuses to run while a protected ShardedCluster "
-        "change is active.",
-        "  python3 privateWorkerReplacementAdmin.py Reconcile\n"
-        "  python3 privateWorkerReplacementAdmin.py ListOperation OPERATION_ID",
-    )
+    _add_diagnostic_commands(sp)
+    _add_recovery_commands(sp)
 
     return parser
 
+
+# ---------------------------------------------------------------------------
+# Detached-worker normalization and execution dispatch
+# ---------------------------------------------------------------------------
 
 def _admin_worker_arguments(args: argparse.Namespace) -> list[str]:
     """Rebuild one administrator mutation for its detached worker.

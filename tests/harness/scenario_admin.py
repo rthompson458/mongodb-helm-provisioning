@@ -4,6 +4,15 @@ The administrator scenario deliberately creates configuration drift and stranded
 controller state, then proves the supported recovery commands repair it. This is
 engineering-only test code for a disposable development environment.
 
+Scenario roadmap:
+- Tests 39-45: administrator interface baseline and safety gates.
+- Tests 46-66: manufacture MongoDBUser drift and prove Reconcile repairs it.
+- Tests 67-85: manufacture stranded AddShard/DeleteShard locks and prove guarded recovery.
+- Tests 86-100: manufacture orphaned cross-plane state, recover it, and prove final hygiene.
+
+The file is intentionally ordered by those four recovery stories. Every test also
+has an adjacent TEST / WHY / PASS comment at its implementation site.
+
 Canonical full-suite test intent:
 39. Verify administrator CLI help renders without starting work.
 40. Verify the asynchronous operation journal is readable.
