@@ -44,7 +44,7 @@ class VaultInventoryTests(unittest.TestCase):
         )
         self.assertIn(
             "export TEST_VAULT_TOKEN=\"$(kubectl exec -n vault vault-0 -- sh -c "
-            "'printf %s \\\"$VAULT_DEV_ROOT_TOKEN_ID\\\"')\"",
+            "'printf %s \"$VAULT_DEV_ROOT_TOKEN_ID\"')\"",
             message,
         )
         self.assertIn(
