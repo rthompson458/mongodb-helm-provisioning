@@ -76,7 +76,8 @@ class HarnessCliTests(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Choose --profile", result.stderr)
-        self.assertIn("and/or --admin", result.stderr)
+        self.assertIn("--admin", result.stderr)
+        self.assertIn("--testList", result.stderr)
 
     def test_lifecycle_profile_requires_allow_changes(self) -> None:
         result = self._run("--profile", "replicaset")
