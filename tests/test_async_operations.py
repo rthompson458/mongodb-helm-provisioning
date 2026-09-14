@@ -61,6 +61,11 @@ class AsyncOperationTests(unittest.TestCase):
         self.assertIn("AddDatabase", ASYNC_COMMANDS)
         self.assertIn("DeleteDatabase", ASYNC_COMMANDS)
 
+    def test_long_running_admin_mutations_are_async_commands(self) -> None:
+        self.assertIn("Reconcile", ASYNC_COMMANDS)
+        self.assertIn("RecoverDeploymentLock", ASYNC_COMMANDS)
+        self.assertIn("RecoverOrphanedResources", ASYNC_COMMANDS)
+
     def test_operation_lifecycle_records_positive_result(self) -> None:
         state = create_operation(
             self.config_path,

@@ -53,6 +53,11 @@ ADMIN_MUTATING_COMMANDS = {
     "Reconcile",
 }
 
+# Every administrator mutation can invoke Terraform and/or wait for Kubernetes or
+# MongoDB convergence. Keep those potentially long-running actions off the
+# interactive shell. Read-only diagnostics remain synchronous.
+ADMIN_ASYNC_COMMANDS = set(ADMIN_MUTATING_COMMANDS)
+
 
 def _confirm(parser: argparse.ArgumentParser) -> None:
     """Add the standard explicit confirmation flag for recovery actions."""
@@ -106,6 +111,10 @@ Use this administrator program for:
   - controlled recovery after interrupted lifecycle work
   - controller-wide Terraform reconciliation
 
+All mutating administrator commands run as detached background operations.
+They return an Operation ID immediately. Use ListOperation to monitor one
+operation or ListOperations to view recent work.
+
 Default configuration file:
   ./dev.config
 
@@ -126,10 +135,10 @@ Inspect recent background work:
 Inspect one operation:
   python3 privateWorkerReplacementAdmin.py ListOperation OPERATION_ID
 
-Reapply managed desired state:
+Reapply managed desired state in the background:
   python3 privateWorkerReplacementAdmin.py Reconcile
 
-Exceptional recovery:
+Exceptional recovery (also background operations):
   python3 privateWorkerReplacementAdmin.py RecoverDeploymentLock SC9 --confirm
   python3 privateWorkerReplacementAdmin.py RecoverOrphanedResources --confirm
 
@@ -201,13 +210,15 @@ Normal DBaaS users should use:
         sp,
         "RecoverDeploymentLock",
         "Release a completed ShardedCluster topology lock after validation.",
-        "Exceptional recovery for an interrupted AddShard/DeleteShard that already "
-        "reached the lock's target topology. Requires --confirm. Before releasing "
-        "the lock, the controller verifies the recorded target, live MongoDB "
+        "Asynchronous exceptional recovery for an interrupted AddShard/DeleteShard "
+        "that already reached the lock's target topology. Requires --confirm. The "
+        "request returns an Operation ID for ListOperation monitoring. Before "
+        "releasing the lock, the worker verifies the recorded target, live MongoDB "
         "shardCount, surviving shard readiness, config servers, mongos, and removed "
         "StatefulSets. Only the exact lifecycle lock release is applied through "
         "Terraform; unrelated deployment state is not broadly reconciled.",
-        "  python3 privateWorkerReplacementAdmin.py RecoverDeploymentLock SC9 --confirm",
+        "  python3 privateWorkerReplacementAdmin.py RecoverDeploymentLock SC9 --confirm\n"
+        "  python3 privateWorkerReplacementAdmin.py ListOperation OPERATION_ID",
     )
     x.add_argument(
         "deployment",
@@ -220,13 +231,15 @@ Normal DBaaS users should use:
         sp,
         "RecoverOrphanedResources",
         "Finish Terraform cleanup after desired-state inventory is already empty.",
-        "Exceptional asynchronous controller-state recovery. Requires --confirm. "
-        "The request is allowed only when Vault-backed managed deployment inventory "
+        "Asynchronous controller-state recovery. Requires --confirm. The request "
+        "returns an Operation ID for ListOperation monitoring and is allowed only "
+        "when Vault-backed managed deployment inventory "
         "is empty AND Kubernetes contains no privateWorkerReplacement-managed MongoDB "
         "custom resources. If both checks pass, Terraform converges the controller "
         "backend to empty desired state and finishes destroying tracked leftovers. "
         "Use ListOperation with the returned operation ID to monitor completion.",
-        "  python3 privateWorkerReplacementAdmin.py RecoverOrphanedResources --confirm",
+        "  python3 privateWorkerReplacementAdmin.py RecoverOrphanedResources --confirm\n"
+        "  python3 privateWorkerReplacementAdmin.py ListOperation OPERATION_ID",
     )
     _confirm(x)
 
@@ -234,24 +247,69 @@ Normal DBaaS users should use:
         sp,
         "Reconcile",
         "Reapply all Vault-backed managed desired state through Terraform.",
-        "Reloads managed desired state from Vault, refreshes the local Terraform "
-        "execution cache, reapplies the complete controller-managed environment, "
-        "waits for deployments/accounts to converge, and reports each resulting "
-        "deployment. Reconcile refuses to run while a protected ShardedCluster "
+        "Asynchronously reloads managed desired state from Vault, refreshes the local "
+        "Terraform execution cache, reapplies the complete controller-managed "
+        "environment, waits for deployments/accounts to converge, and reports each "
+        "resulting deployment. The request returns an Operation ID for ListOperation "
+        "monitoring. Reconcile refuses to run while a protected ShardedCluster "
         "change is active.",
-        "  python3 privateWorkerReplacementAdmin.py Reconcile",
+        "  python3 privateWorkerReplacementAdmin.py Reconcile\n"
+        "  python3 privateWorkerReplacementAdmin.py ListOperation OPERATION_ID",
     )
 
     return parser
 
 
-def _recover_orphans_worker_arguments(args: argparse.Namespace) -> list[str]:
-    """Rebuild the guarded orphan-recovery command for its detached worker."""
+def _admin_worker_arguments(args: argparse.Namespace) -> list[str]:
+    """Rebuild one administrator mutation for its detached worker.
 
-    values = ["RecoverOrphanedResources"]
-    if args.confirm:
-        values.append("--confirm")
-    return values
+    Only values already validated by argparse are copied. Destructive recovery
+    confirmation is preserved so the worker re-enters the same command contract
+    instead of bypassing normal safety checks.
+    """
+
+    if args.command == "Reconcile":
+        return ["Reconcile"]
+
+    if args.command == "RecoverDeploymentLock":
+        values = ["RecoverDeploymentLock", args.deployment]
+        if args.confirm:
+            values.append("--confirm")
+        return values
+
+    if args.command == "RecoverOrphanedResources":
+        values = ["RecoverOrphanedResources"]
+        if args.confirm:
+            values.append("--confirm")
+        return values
+
+    raise ControllerError(
+        f"Administrator command '{args.command}' is not an asynchronous mutation."
+    )
+
+
+def _admin_operation_scope(args: argparse.Namespace) -> str:
+    """Return the operation-journal scope used for launch conflict detection."""
+
+    if args.command == "RecoverDeploymentLock":
+        return str(args.deployment)
+    return "controller-state"
+
+
+def _validate_admin_async_request(args: argparse.Namespace) -> None:
+    """Reject missing destructive confirmations before a worker is launched."""
+
+    if args.command == "RecoverDeploymentLock" and not args.confirm:
+        raise ControllerError(
+            "RecoverDeploymentLock is a recovery action and requires '--confirm'. "
+            f"Example: privateWorkerReplacementAdmin.py RecoverDeploymentLock "
+            f"{args.deployment} --confirm"
+        )
+
+    if args.command == "RecoverOrphanedResources" and not args.confirm:
+        raise ControllerError(
+            "RecoverOrphanedResources is destructive and requires '--confirm'."
+        )
 
 
 def _run_admin_action(
@@ -311,19 +369,19 @@ def main(argv: list[str] | None = None) -> int:
             log_event("admin.command.succeeded", command=args.command)
             return 0
 
-        # Orphan cleanup can contain bounded storage waits, so it remains async.
-        # The worker re-enters this administrator executable, never the public CLI.
-        if args.command == "RecoverOrphanedResources" and not operation_id:
-            if not args.confirm:
-                raise ControllerError(
-                    "RecoverOrphanedResources is destructive and requires '--confirm'."
-                )
+        # Every administrator mutation can take meaningful time. The foreground
+        # process validates immediate safety requirements, records the request,
+        # starts a detached admin worker, and returns the Operation ID. The worker
+        # re-enters this same executable and performs the normal guarded action.
+        if args.command in ADMIN_ASYNC_COMMANDS and not operation_id:
+            _validate_admin_async_request(args)
+            scope = _admin_operation_scope(args)
             state = launch_operation(
                 config_path,
                 REPO_ROOT,
                 command=args.command,
-                deployment="controller-state",
-                worker_arguments=_recover_orphans_worker_arguments(args),
+                deployment=scope,
+                worker_arguments=_admin_worker_arguments(args),
                 entrypoint_name="privateWorkerReplacementAdmin.py",
             )
             print(
@@ -337,7 +395,7 @@ def main(argv: list[str] | None = None) -> int:
                 "admin.command.accepted",
                 command=args.command,
                 operation_id=state["operation_id"],
-                scope="controller-state",
+                scope=scope,
             )
             return 0
 

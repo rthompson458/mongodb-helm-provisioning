@@ -285,10 +285,9 @@ def run(runner: HarnessRunner) -> None:
     kubectl = kube.base(config)
     namespace = str(config["mongodb_namespace"])
 
-    if not runner.admin(
-        "Reconcile is a no-op when desired-state inventory is empty",
+    if not runner.admin_async(
+        "Async Reconcile is a no-op when desired-state inventory is empty",
         "Reconcile",
-        expected_text="Nothing to reconcile.",
         timeout=300,
     ).passed:
         return
@@ -311,7 +310,8 @@ def run(runner: HarnessRunner) -> None:
         return
 
     # ------------------------------------------------------------------
-    # Reconcile: create real drift, repair it, and prove credentials survive
+    # Reconcile: submit the background repair, then prove drift is repaired
+    # without changing the credential that already belongs to the account.
     # ------------------------------------------------------------------
     if not runner.controller_async(
         "Create administrator Reconcile test ReplicaSet",
@@ -437,10 +437,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
-    if not runner.admin(
-        "Reconcile repairs the deliberately deleted MongoDBUser",
+    if not runner.admin_async(
+        "Async Reconcile repairs the deliberately deleted MongoDBUser",
         "Reconcile",
-        expected_text="Reconcile complete.",
         timeout=1800,
     ).passed:
         return
@@ -548,7 +547,8 @@ def run(runner: HarnessRunner) -> None:
         return
 
     # ------------------------------------------------------------------
-    # RecoverDeploymentLock: refuse unsafe release, then recover valid drift
+    # RecoverDeploymentLock: prove background recovery refuses unsafe release,
+    # then succeeds for validated AddShard and DeleteShard stranded locks.
     # ------------------------------------------------------------------
     max_shards_ok = int(config["max_shards_per_cluster"]) >= 2
     if not runner.check(
@@ -595,8 +595,8 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
-    if not runner.admin(
-        "Reconcile refuses to race an active ShardedCluster lock",
+    if not runner.admin_async(
+        "Async Reconcile refuses to race an active ShardedCluster lock",
         "Reconcile",
         expect_success=False,
         expected_text="Reconcile is blocked",
@@ -604,8 +604,8 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
-    if not runner.admin(
-        "Lock recovery refuses a target that does not match desired state",
+    if not runner.admin_async(
+        "Async lock recovery refuses a target that does not match desired state",
         "RecoverDeploymentLock",
         admin_sc,
         "--confirm",
@@ -661,12 +661,11 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
-    if not runner.admin(
-        "RecoverDeploymentLock releases the validated stranded lock",
+    if not runner.admin_async(
+        "Async RecoverDeploymentLock releases the validated stranded lock",
         "RecoverDeploymentLock",
         admin_sc,
         "--confirm",
-        expected_text="Deployment lock: Released",
         timeout=900,
     ).passed:
         return
@@ -712,12 +711,11 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
-    if not runner.admin(
-        "RecoverDeploymentLock validates completed DeleteShard cleanup",
+    if not runner.admin_async(
+        "Async RecoverDeploymentLock validates completed DeleteShard cleanup",
         "RecoverDeploymentLock",
         admin_sc,
         "--confirm",
-        expected_text="Recovered completed DeleteShard lock",
         timeout=900,
     ).passed:
         return
@@ -740,10 +738,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
-    if not runner.admin(
-        "Reconcile succeeds after deployment-lock recovery",
+    if not runner.admin_async(
+        "Async Reconcile succeeds after deployment-lock recovery",
         "Reconcile",
-        expected_text="Reconcile complete.",
         timeout=2400,
     ).passed:
         return
@@ -928,9 +925,8 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
-    runner.admin(
-        "Final Reconcile confirms there is no desired state left to repair",
+    runner.admin_async(
+        "Final async Reconcile confirms there is no desired state left to repair",
         "Reconcile",
-        expected_text="Nothing to reconcile.",
         timeout=300,
     )

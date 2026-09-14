@@ -202,7 +202,12 @@ class HarnessRunner:
         expected_text: str | None = None,
         timeout: int | None = None,
     ) -> StepResult:
-        """Run a synchronous privateWorkerReplacementAdmin.py command."""
+        """Run a foreground admin command.
+
+        Use this for read-only diagnostics and immediate validation failures.
+        Long-running administrator mutations must use admin_async() so the
+        harness proves detached-worker and operation-journal behavior too.
+        """
 
         command = [
             self.context.python,

@@ -49,16 +49,22 @@ Use `--config FILE` only when another configuration file is intentionally select
 
 ## 2. Command reference
 
-| Command | Purpose | Mutation |
+| Command | Purpose | Execution |
 | --- | --- | --- |
-| `ListManagedResources [--verbose]` | Show compact controller-managed resource/health summary; optionally append full object-name inventory | Read-only |
-| `ListOperations` | List recent asynchronous controller operations | Read-only |
-| `ListOperation OPERATION_ID` | Show detailed status for one asynchronous operation | Read-only |
-| `Reconcile` | Reapply complete Vault-backed desired state through Terraform | Yes |
-| `RecoverDeploymentLock SC --confirm` | Release a completed but stranded ShardedCluster topology lock after safety validation | Yes |
-| `RecoverOrphanedResources --confirm` | Finish Terraform cleanup after desired-state inventory is already empty | Yes |
+| `ListManagedResources [--verbose]` | Show compact controller-managed resource/health summary; optionally append full object-name inventory | Foreground, read-only |
+| `ListOperations` | List recent asynchronous controller operations | Foreground, read-only |
+| `ListOperation OPERATION_ID` | Show detailed status for one asynchronous operation | Foreground, read-only |
+| `Reconcile` | Reapply complete Vault-backed desired state through Terraform | Asynchronous mutation |
+| `RecoverDeploymentLock SC --confirm` | Release a completed but stranded ShardedCluster topology lock after safety validation | Asynchronous mutation |
+| `RecoverOrphanedResources --confirm` | Finish Terraform cleanup after desired-state inventory is already empty | Asynchronous mutation |
 
 These commands are deliberately not accepted by `privateWorkerReplacement.py`.
+
+All three mutating administrator commands return to the shell after starting a
+detached worker. The acknowledgement includes an Operation ID. Use
+`ListOperation OPERATION_ID` to monitor completion. This keeps Terraform,
+Kubernetes, MongoDB convergence, and recovery waits out of the interactive
+administrator shell.
 
 ---
 
@@ -160,9 +166,17 @@ AddDatabase
 DeleteDatabase
 ```
 
-`RecoverOrphanedResources` is also asynchronous on the administrator interface because cleanup can contain bounded storage waits.
+The long-running administrator mutations are also asynchronous:
 
-The customer CLI intentionally hides internal operation IDs. Administrators can inspect them here.
+```text
+Reconcile
+RecoverDeploymentLock
+RecoverOrphanedResources
+```
+
+The customer CLI intentionally hides internal operation IDs. Administrator
+mutations intentionally return their Operation ID because operators need that
+identifier for diagnostics and recovery monitoring.
 
 ### ListOperations
 
@@ -261,7 +275,12 @@ Controller code must not intentionally write Vault tokens or managed plaintext p
 python3 privateWorkerReplacementAdmin.py Reconcile
 ```
 
-`Reconcile` is the normal administrator convergence/repair command. It:
+`Reconcile` is the normal administrator convergence/repair command. It is
+asynchronous: the foreground command starts a detached worker, prints an
+Operation ID, and returns to the shell. Monitor it with
+`ListOperation OPERATION_ID`.
+
+The worker:
 
 1. reloads the managed desired state from Vault;
 2. refreshes the Terraform source;
@@ -283,7 +302,10 @@ Routine Terraform/external-command output is captured in the daily operations lo
 python3 privateWorkerReplacementAdmin.py RecoverDeploymentLock SC9 --confirm
 ```
 
-This is exceptional recovery, not a normal completion command.
+This is exceptional recovery, not a normal completion command. It is
+asynchronous: after `--confirm` is validated, the foreground command starts a
+detached worker, prints an Operation ID, and returns to the shell. Monitor it
+with `ListOperation OPERATION_ID`.
 
 Use it only when an interrupted `AddShard` or `DeleteShard` has already reached its recorded target topology but a later bookkeeping/storage step failed and left the ShardedCluster deployment lock in place.
 
@@ -324,7 +346,9 @@ If either check fails, recovery stops.
 
 When both checks pass, Terraform receives empty desired state and finishes converging tracked resources toward zero. Existing storage safeguards remain active: ownership checks, live-pod/PVC-use checks, bounded waits, and refusal instead of unsafe force deletion.
 
-`RecoverOrphanedResources` is asynchronous. A successful submission prints the internal operation ID because this is an administrator workflow:
+`RecoverOrphanedResources` is asynchronous, matching `Reconcile` and
+`RecoverDeploymentLock`. A successful submission prints the internal operation
+ID because this is an administrator workflow:
 
 ```text
 RecoverOrphanedResources request accepted.
@@ -454,7 +478,9 @@ python3 tests/run_harness.py --admin --allow-changes
 The standalone administrator selection runs 5 read-only preflight checks plus
 62 live administrator checks, for 67 checks total.
 
-The suite requires a **clean DBaaS starting inventory**. It intentionally:
+The suite requires a **clean DBaaS starting inventory**. It also verifies that
+all long-running administrator mutations use the detached-worker operation
+journal instead of holding the interactive shell open. It intentionally:
 
 - creates a real ReplicaSet and database;
 - deletes one managed `MongoDBUser` outside the controller;

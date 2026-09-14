@@ -3,7 +3,9 @@
 
 Normal DBaaS users should run privateWorkerReplacement.py. This separate
 executable exposes administrator-only diagnostics, reconciliation, and guarded
-recovery. The administrator CLI itself owns no-argument help behavior.
+recovery. Read-only diagnostics run in the foreground. Potentially long-running
+administrator mutations launch detached workers and return an Operation ID.
+The administrator CLI itself owns no-argument help behavior.
 """
 
 from privateWorkerReplacement.admin_cli import main

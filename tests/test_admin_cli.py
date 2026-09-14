@@ -96,14 +96,93 @@ class AdminCliTests(unittest.TestCase):
         )
         self.assertTrue(args.confirm)
 
-    def test_orphan_recovery_worker_arguments_preserve_confirmation(self) -> None:
-        args = admin_cli.build_parser().parse_args(
+    def test_admin_worker_arguments_preserve_each_command_contract(self) -> None:
+        reconcile = admin_cli.build_parser().parse_args(["Reconcile"])
+        recover_lock = admin_cli.build_parser().parse_args(
+            ["RecoverDeploymentLock", "SC9", "--confirm"]
+        )
+        recover_orphans = admin_cli.build_parser().parse_args(
             ["RecoverOrphanedResources", "--confirm"]
         )
+
         self.assertEqual(
-            admin_cli._recover_orphans_worker_arguments(args),
+            admin_cli._admin_worker_arguments(reconcile),
+            ["Reconcile"],
+        )
+        self.assertEqual(
+            admin_cli._admin_worker_arguments(recover_lock),
+            ["RecoverDeploymentLock", "SC9", "--confirm"],
+        )
+        self.assertEqual(
+            admin_cli._admin_worker_arguments(recover_orphans),
             ["RecoverOrphanedResources", "--confirm"],
         )
+        self.assertEqual(
+            admin_cli._admin_operation_scope(reconcile),
+            "controller-state",
+        )
+        self.assertEqual(
+            admin_cli._admin_operation_scope(recover_lock),
+            "SC9",
+        )
+
+    def test_all_admin_mutations_are_background_operations(self) -> None:
+        self.assertEqual(
+            admin_cli.ADMIN_ASYNC_COMMANDS,
+            {
+                "RecoverDeploymentLock",
+                "RecoverOrphanedResources",
+                "Reconcile",
+            },
+        )
+
+    def test_reconcile_foreground_process_launches_admin_worker(self) -> None:
+        state = {
+            "operation_id": "abc123",
+            "command": "Reconcile",
+            "deployment": "controller-state",
+        }
+
+        with (
+            mock.patch.object(admin_cli, "load_config", return_value={}),
+            mock.patch.object(admin_cli, "configure_logging"),
+            mock.patch.object(admin_cli, "log_event"),
+            mock.patch.object(admin_cli, "launch_operation", return_value=state) as launch,
+            mock.patch.object(
+                admin_cli,
+                "admin_submission_instructions",
+                return_value="accepted",
+            ),
+            mock.patch.object(admin_cli, "VaultClient") as vault_client,
+            mock.patch("builtins.print"),
+        ):
+            result = admin_cli.main(["Reconcile"])
+
+        self.assertEqual(result, 0)
+        vault_client.assert_not_called()
+        launch.assert_called_once()
+        self.assertEqual(launch.call_args.kwargs["command"], "Reconcile")
+        self.assertEqual(
+            launch.call_args.kwargs["deployment"],
+            "controller-state",
+        )
+        self.assertEqual(
+            launch.call_args.kwargs["worker_arguments"],
+            ["Reconcile"],
+        )
+
+    def test_lock_recovery_without_confirmation_never_launches_worker(self) -> None:
+        with (
+            mock.patch.object(admin_cli, "load_config", return_value={}),
+            mock.patch.object(admin_cli, "configure_logging"),
+            mock.patch.object(admin_cli, "log_event"),
+            mock.patch.object(admin_cli, "launch_operation") as launch,
+            mock.patch("builtins.print"),
+        ):
+            result = admin_cli.main(["RecoverDeploymentLock", "SC9"])
+
+        self.assertEqual(result, 1)
+        launch.assert_not_called()
 
     def test_admin_mutations_use_controller_state_lock(self) -> None:
         action = mock.Mock()
@@ -124,9 +203,33 @@ class AdminCliTests(unittest.TestCase):
         self.assertIn("RecoverDeploymentLock", help_text)
         self.assertIn("RecoverOrphanedResources", help_text)
         self.assertIn("Reconcile", help_text)
+        self.assertIn("detached background operations", help_text)
+        self.assertIn("Operation ID", help_text)
         self.assertIn("NOT the DBaaS end-user interface", help_text)
         self.assertIn("./dev.config", help_text)
         self.assertNotIn("Git/Terraform", help_text)
+
+
+    def test_long_running_admin_help_explains_async_monitoring(self) -> None:
+        parser = admin_cli.build_parser()
+        subparsers = next(
+            action
+            for action in parser._actions
+            if getattr(action, "choices", None)
+            and "ListManagedResources" in action.choices
+        )
+
+        for command in (
+            "Reconcile",
+            "RecoverDeploymentLock",
+            "RecoverOrphanedResources",
+        ):
+            with self.subTest(command=command):
+                text = " ".join(
+                    subparsers.choices[command].format_help().split()
+                )
+                self.assertIn("Operation ID", text)
+                self.assertIn("ListOperation", text)
 
     def test_managed_resource_help_explains_attention_semantics(self) -> None:
         parser = admin_cli.build_parser()
