@@ -314,6 +314,15 @@ The current runtime does **not** fetch Terraform from Git or depend on a remote 
 terraform-dbaas/
 ```
 
+The Terraform root module is split by responsibility rather than kept in one
+large `main.tf`. For example, deployment CRs are in `deployments.tf`, static
+storage lifecycle is in `storage.tf`, Vault metadata is in `metadata.tf`,
+database accounts are in `database-accounts.tf`, and one-shot lifecycle
+operations are in `lifecycle.tf`. Terraform loads all of these files together
+as one module, so the file split does not change Terraform resource addresses.
+See `terraform-dbaas/README.md` for the complete ownership map and state-safety
+rules.
+
 Before each Terraform transaction, the controller refreshes a disposable execution cache from that local source:
 
 ```text
