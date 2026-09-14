@@ -231,9 +231,10 @@ Common commands:
 
   --testList uses the canonical numbering from the full {totals['all']}-test run.
   It runs ONLY the requested checks and does not automatically run prerequisite
-  tests. The value must contain no spaces, and range end must be >= range start.
-  --profile and --testList are mutually exclusive. --admin cannot be combined
-  with --testList.
+  tests. When possible, it reuses the newest prior harness Run ID so surviving
+  fixtures from a failed run keep the same generated names. The value must contain
+  no spaces, and range end must be >= range start. --profile and --testList are
+  mutually exclusive. --admin cannot be combined with --testList.
 
   FULL GAUNTLET - all {totals['all']} live acceptance checks:
     python3 tests/run_harness.py --profile all --allow-changes
