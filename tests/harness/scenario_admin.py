@@ -306,6 +306,9 @@ def run(runner: HarnessRunner) -> None:
     # ------------------------------------------------------------------
     # Administrator interface and zero-state safety
     # ------------------------------------------------------------------
+    # TEST 39 - Render administrator CLI help.
+    # WHY: Proves the operator-facing entry point starts safely and exposes the administration interface.
+    # PASS: Admin help renders successfully with the expected interface description.
     if not runner.admin(
         "Administrator CLI help renders",
         "--help",
@@ -313,12 +316,18 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 40 - Read the asynchronous operation journal.
+    # WHY: Administrators need operation history to diagnose detached lifecycle and recovery work.
+    # PASS: ListOperations completes successfully.
     if not runner.admin(
         "Administrator operation journal is readable",
         "ListOperations",
     ).passed:
         return
 
+    # TEST 41 - Reject an unknown operation ID cleanly.
+    # WHY: Prevents a bad diagnostic lookup from producing a traceback or misleading result.
+    # PASS: ListOperation returns a controlled `does not exist` error.
     if not runner.admin(
         "Unknown administrator operation ID is rejected",
         "ListOperation",
@@ -328,6 +337,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 42 - Require a clean starting DBaaS inventory.
+    # WHY: The destructive Admin suite must never adopt or damage unrelated managed resources.
+    # PASS: ListManagedResources reports `Status: CLEAN` before destructive testing begins.
     clean_start = runner.admin(
         "Administrator tests start from a clean DBaaS inventory",
         "ListManagedResources",
@@ -351,6 +363,9 @@ def run(runner: HarnessRunner) -> None:
     kubectl = kube.base(config)
     namespace = str(config["mongodb_namespace"])
 
+    # TEST 43 - Reconcile an empty desired-state inventory.
+    # WHY: Proves Reconcile is safe when there is nothing to repair or create.
+    # PASS: The asynchronous Reconcile operation succeeds without creating managed resources.
     if not runner.admin_async(
         "Async Reconcile is a no-op when desired-state inventory is empty",
         "Reconcile",
@@ -358,6 +373,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 44 - Require confirmation for orphan-resource recovery.
+    # WHY: RecoverOrphanedResources can destroy stranded infrastructure and must not run accidentally.
+    # PASS: The command is refused when `--confirm` is omitted.
     if not runner.admin(
         "Orphan recovery requires explicit confirmation",
         "RecoverOrphanedResources",
@@ -366,6 +384,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 45 - Require confirmation for deployment-lock recovery.
+    # WHY: Releasing a deployment lock is an administrator recovery action with lifecycle risk.
+    # PASS: RecoverDeploymentLock is refused when `--confirm` is omitted.
     if not runner.admin(
         "Deployment-lock recovery requires explicit confirmation",
         "RecoverDeploymentLock",
@@ -379,6 +400,9 @@ def run(runner: HarnessRunner) -> None:
     # Reconcile: submit the background repair, then prove drift is repaired
     # without changing the credential that already belongs to the account.
     # ------------------------------------------------------------------
+    # TEST 46 - Create the ReplicaSet used for Reconcile drift testing.
+    # WHY: Reconcile must be proven against a real managed deployment, not only mocked state.
+    # PASS: The asynchronous AddReplicaSet operation completes successfully.
     if not runner.controller_async(
         "Create administrator Reconcile test ReplicaSet",
         "AddReplicaSet",
@@ -387,6 +411,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 47 - Inspect the completed ReplicaSet creation with ListOperation.
+    # WHY: Proves an administrator can diagnose one specific background lifecycle operation.
+    # PASS: ListOperation reports the creation operation as Succeeded.
     create_operation_id = _latest_operation_id(
         runner,
         "AddReplicaSet",
@@ -400,6 +427,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 48 - Find the ReplicaSet creation in the operation journal.
+    # WHY: Proves completed customer lifecycle work is visible in the administrator operation history.
+    # PASS: ListOperations includes the generated ReplicaSet name.
     if not runner.admin(
         "ListOperations includes the administrator test ReplicaSet",
         "ListOperations",
@@ -407,6 +437,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 49 - Create the database used for Reconcile account-drift testing.
+    # WHY: The repair test needs real managed MongoDBUser objects and credentials to damage safely.
+    # PASS: The asynchronous AddDatabase operation completes successfully.
     if not runner.controller_async(
         "Create administrator Reconcile test database",
         "AddDatabase",
@@ -416,6 +449,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 50 - Verify inventory sees the active managed deployment.
+    # WHY: The administrator inventory must distinguish healthy managed resources from a clean empty system.
+    # PASS: ListManagedResources reports `MANAGED RESOURCES PRESENT`.
     if not runner.admin(
         "Managed-resource inventory sees the live Reconcile test deployment",
         "ListManagedResources",
@@ -423,6 +459,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 51 - Verify verbose inventory identifies the exact test database.
+    # WHY: Operators need object-level detail when diagnosing a specific deployment or database.
+    # PASS: Verbose ListManagedResources includes the generated deployment/database pair.
     if not runner.admin(
         "Verbose managed-resource inventory includes the test database",
         "ListManagedResources",
@@ -431,6 +470,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 52 - Establish a credential baseline before creating drift.
+    # WHY: Reconcile must repair missing runtime objects without silently changing an existing password.
+    # PASS: Vault and the Kubernetes password Secret contain the same non-displayed password.
     vault_password_before = ""
     kubernetes_password_before = ""
     try:
@@ -458,6 +500,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 53 - Delete only the managed readWrite MongoDBUser.
+    # WHY: Deliberately creates realistic runtime drift while preserving desired state and credentials.
+    # PASS: kubectl deletes the MongoDBUser successfully.
     if not runner.run(
         "Delete only the managed readWrite MongoDBUser",
         kubectl
@@ -473,6 +518,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 54 - Confirm the manufactured MongoDBUser drift exists.
+    # WHY: The recovery test is valid only if the target user is truly missing before Reconcile.
+    # PASS: Kubernetes returns NotFound for the deleted MongoDBUser.
     if not runner.run(
         "Confirm the readWrite MongoDBUser is absent",
         kubectl + ["-n", namespace, "get", "mongodbuser", rw_resource],
@@ -482,6 +530,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 55 - Confirm the password Secret survived the user deletion.
+    # WHY: Isolates the failure to the MongoDBUser object so Reconcile can reuse the existing credential.
+    # PASS: The original Kubernetes password Secret still exists.
     if not runner.run(
         "Confirm the readWrite password Secret survives the drift",
         kubectl + ["-n", namespace, "get", "secret", rw_password_secret],
@@ -490,6 +541,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 56 - Detect the missing MongoDBUser in compact inventory.
+    # WHY: Runtime drift must prevent a false healthy status.
+    # PASS: ListManagedResources reports `ATTENTION REQUIRED`.
     if not runner.admin(
         "Managed-resource inventory flags the missing MongoDBUser",
         "ListManagedResources",
@@ -497,6 +551,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 57 - Identify the exact missing MongoDBUser in verbose inventory.
+    # WHY: An operator must know which object is broken before choosing a recovery action.
+    # PASS: Verbose inventory includes the deterministic MongoDBUser resource name.
     if not runner.admin(
         "Verbose inventory identifies the exact missing MongoDBUser",
         "ListManagedResources",
@@ -505,6 +562,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 58 - Reconcile the deliberately deleted MongoDBUser.
+    # WHY: Proves Vault-backed desired state can repair runtime drift through the supported recovery path.
+    # PASS: The asynchronous Reconcile operation completes successfully.
     if not runner.admin_async(
         "Async Reconcile repairs the deliberately deleted MongoDBUser",
         "Reconcile",
@@ -512,6 +572,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 59 - Verify the recreated MongoDBUser reaches Updated.
+    # WHY: Reconcile success is meaningful only if the MongoDB Operator finishes provisioning the user.
+    # PASS: The recreated MongoDBUser reports phase `Updated`.
     if not runner.run(
         "Recreated readWrite MongoDBUser reaches Updated",
         kubectl
@@ -529,6 +592,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 60 - Authenticate all managed database accounts after Reconcile.
+    # WHY: Proves recovery restored real MongoDB access, not just Kubernetes object appearance.
+    # PASS: The lifecycle authentication probe returns `TC_RESULT=AUTH_OK`.
     if not runner.run(
         "All database accounts authenticate after Reconcile",
         ["bash", str(ctx.repo_root / "terraform-dbaas" / "scripts" / "lifecycle.sh")],
@@ -538,6 +604,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 61 - Verify Reconcile preserved the Vault password.
+    # WHY: Repairing a missing user must not rotate a credential that was not scheduled for rotation.
+    # PASS: The post-Reconcile Vault password exactly matches the pre-drift value.
     try:
         vault_password_after, kubernetes_password_after = _account_passwords(
             config,
@@ -567,6 +636,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 62 - Verify Reconcile preserved the Kubernetes password Secret.
+    # WHY: The recreated user must continue using the same credential material as Vault.
+    # PASS: The post-Reconcile Kubernetes password equals the pre-drift Secret value.
     kubernetes_preserved = bool(kubernetes_password_after) and (
         kubernetes_password_after == kubernetes_password_before
     )
@@ -581,6 +653,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 63 - Verify inventory is healthy after Reconcile.
+    # WHY: A successful repair must clear the drift warning while keeping legitimate resources visible.
+    # PASS: ListManagedResources reports `MANAGED RESOURCES PRESENT`, not ATTENTION REQUIRED.
     if not runner.admin(
         "Inventory returns to healthy managed-resource state after Reconcile",
         "ListManagedResources",
@@ -588,6 +663,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 64 - Delete the Reconcile test database.
+    # WHY: Begins supported cleanup of the fixture after the repair assertions are complete.
+    # PASS: The asynchronous DeleteDatabase operation completes successfully.
     if not runner.controller_async(
         "Delete administrator Reconcile test database",
         "DeleteDatabase",
@@ -598,6 +676,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 65 - Delete the Reconcile test ReplicaSet.
+    # WHY: Proves the repaired deployment can still complete normal lifecycle teardown.
+    # PASS: The asynchronous DeleteReplicaSet operation completes successfully.
     if not runner.controller_async(
         "Delete administrator Reconcile test ReplicaSet",
         "DeleteReplicaSet",
@@ -607,6 +688,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 66 - Verify Reconcile fixture cleanup returned the environment to CLEAN.
+    # WHY: Later destructive Admin scenarios must start without leftovers from the drift test.
+    # PASS: ListManagedResources reports `Status: CLEAN`.
     if not runner.admin(
         "Reconcile test cleanup returns inventory to CLEAN",
         "ListManagedResources",
@@ -618,6 +702,9 @@ def run(runner: HarnessRunner) -> None:
     # RecoverDeploymentLock: prove background recovery refuses unsafe release,
     # then succeeds for validated AddShard and DeleteShard stranded locks.
     # ------------------------------------------------------------------
+    # TEST 67 - Verify configuration supports the lock-recovery fixture.
+    # WHY: The recovery scenario needs two shards to model completed AddShard and DeleteShard states safely.
+    # PASS: `max_shards_per_cluster` is at least 2.
     max_shards_ok = int(config["max_shards_per_cluster"]) >= 2
     if not runner.check(
         "Admin lock-recovery test configuration permits two shards",
@@ -630,6 +717,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 68 - Create the ShardedCluster used for deployment-lock recovery.
+    # WHY: Lock recovery must be proven against a real managed sharded deployment.
+    # PASS: A two-shard ShardedCluster is created successfully.
     if not runner.controller_async(
         "Create two-shard administrator lock-recovery cluster",
         "AddShardedCluster",
@@ -640,6 +730,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 69 - Create an intentionally mismatched stranded topology lock.
+    # WHY: Builds an unsafe recovery case where recorded lock target and desired state disagree.
+    # PASS: Kubernetes creates the synthetic lock ConfigMap with the mismatched target.
     lock_name = f"tc-deployment-lock-{admin_sc_key}"
     invalid_lock_id = f"harness-invalid-{ctx.run_id}"
     if not runner.run(
@@ -663,6 +756,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 70 - Refuse Reconcile while a ShardedCluster deployment lock is active.
+    # WHY: Reconcile must not race a protected topology change and create conflicting Terraform work.
+    # PASS: Reconcile fails safely with a lock-related refusal.
     if not runner.admin_async(
         "Async Reconcile refuses to race an active ShardedCluster lock",
         "Reconcile",
@@ -672,6 +768,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 71 - Refuse recovery of the mismatched deployment lock.
+    # WHY: A lock cannot be released safely when its recorded target disagrees with current desired state.
+    # PASS: RecoverDeploymentLock fails and explains the target mismatch.
     if not runner.admin_async(
         "Async lock recovery refuses a target that does not match desired state",
         "RecoverDeploymentLock",
@@ -683,6 +782,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 72 - Remove the intentionally invalid synthetic lock.
+    # WHY: Clears the negative-test fixture so the valid recovery path can be tested independently.
+    # PASS: kubectl deletes the invalid lock ConfigMap successfully.
     if not runner.run(
         "Remove the intentionally invalid synthetic lock",
         kubectl + ["-n", namespace, "delete", "configmap", lock_name],
@@ -690,6 +792,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 73 - Create a valid stranded AddShard lock.
+    # WHY: Models an AddShard operation whose desired target has already been reached but whose lock remained behind.
+    # PASS: Kubernetes creates the synthetic lock with values that match the live/desired topology.
     valid_lock_id = f"harness-valid-{ctx.run_id}"
     if not runner.run(
         "Create valid synthetic stranded AddShard lock",
@@ -712,6 +817,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 74 - Expose the stranded AddShard lock in verbose inventory.
+    # WHY: Operators must be able to see the exact lock before deciding whether to recover it.
+    # PASS: Verbose ListManagedResources includes the lock ConfigMap name.
     if not runner.admin(
         "Verbose inventory exposes the stranded deployment lock",
         "ListManagedResources",
@@ -720,6 +828,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 75 - Require confirmation even for a valid recoverable lock.
+    # WHY: Safety confirmation must not be bypassed just because the recovery preconditions are valid.
+    # PASS: RecoverDeploymentLock is refused without `--confirm`.
     if not runner.admin(
         "Valid deployment-lock recovery still requires confirmation",
         "RecoverDeploymentLock",
@@ -729,6 +840,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 76 - Recover the validated stranded AddShard lock.
+    # WHY: Proves the supported Admin recovery path can release a lock after validating completed topology state.
+    # PASS: The asynchronous RecoverDeploymentLock operation succeeds.
     if not runner.admin_async(
         "Async RecoverDeploymentLock releases the validated stranded lock",
         "RecoverDeploymentLock",
@@ -738,6 +852,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 77 - Verify the recovered AddShard lock is gone.
+    # WHY: Recovery is incomplete if the Kubernetes lock object still blocks future mutations.
+    # PASS: Kubernetes returns NotFound for the deployment-lock ConfigMap.
     if not runner.run(
         "Recovered deployment lock is absent",
         kubectl + ["-n", namespace, "get", "configmap", lock_name],
@@ -747,6 +864,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 78 - Reduce the cluster to one shard for DeleteShard recovery testing.
+    # WHY: Creates the completed target state needed to model a stranded DeleteShard lock.
+    # PASS: The asynchronous DeleteShard operation completes and leaves one shard.
     if not runner.controller_async(
         "Reduce administrator cluster to one shard for DeleteShard recovery",
         "DeleteShard",
@@ -757,6 +877,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 79 - Create a valid stranded DeleteShard lock.
+    # WHY: Models a completed shard contraction whose protective lock was not released.
+    # PASS: Kubernetes creates a synthetic DeleteShard lock matching the completed target state.
     delete_lock_id = f"harness-delete-{ctx.run_id}"
     if not runner.run(
         "Create valid synthetic stranded DeleteShard lock",
@@ -779,6 +902,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 80 - Recover the validated stranded DeleteShard lock.
+    # WHY: Proves lock recovery understands completed scale-down state as well as AddShard state.
+    # PASS: The asynchronous RecoverDeploymentLock operation succeeds.
     if not runner.admin_async(
         "Async RecoverDeploymentLock validates completed DeleteShard cleanup",
         "RecoverDeploymentLock",
@@ -788,6 +914,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 81 - Verify the recovered DeleteShard lock is gone.
+    # WHY: Confirms the recovery actually releases the topology guard for future work.
+    # PASS: Kubernetes returns NotFound for the deployment-lock ConfigMap.
     if not runner.run(
         "Recovered DeleteShard deployment lock is absent",
         kubectl + ["-n", namespace, "get", "configmap", lock_name],
@@ -797,6 +926,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 82 - Verify the ShardedCluster remains Running after lock recovery.
+    # WHY: Releasing a stranded lock must not damage the underlying MongoDB deployment.
+    # PASS: ListShardedCluster reports Running.
     if not runner.controller(
         "ShardedCluster remains Running after lock recovery",
         "ListShardedCluster",
@@ -806,6 +938,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 83 - Run Reconcile after the lock-recovery sequence.
+    # WHY: Proves normal desired-state convergence is available again after the stranded lock is repaired.
+    # PASS: The asynchronous Reconcile operation completes successfully.
     if not runner.admin_async(
         "Async Reconcile succeeds after deployment-lock recovery",
         "Reconcile",
@@ -813,6 +948,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 84 - Delete the lock-recovery ShardedCluster.
+    # WHY: Proves the recovered deployment can complete normal supported teardown.
+    # PASS: The asynchronous DeleteShardedCluster operation completes successfully.
     if not runner.controller_async(
         "Delete administrator lock-recovery ShardedCluster",
         "DeleteShardedCluster",
@@ -822,6 +960,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 85 - Verify lock-recovery cleanup returned the environment to CLEAN.
+    # WHY: The orphan-resource tests must not inherit deployment or lock leftovers from this scenario.
+    # PASS: ListManagedResources reports `Status: CLEAN`.
     if not runner.admin(
         "Lock-recovery cleanup returns inventory to CLEAN",
         "ListManagedResources",
@@ -832,6 +973,9 @@ def run(runner: HarnessRunner) -> None:
     # ------------------------------------------------------------------
     # RecoverOrphanedResources: manufacture a real partial-destroy condition
     # ------------------------------------------------------------------
+    # TEST 86 - Create the ReplicaSet used for orphan-resource recovery.
+    # WHY: The recovery path must be tested against real Terraform-managed resources that can be stranded deliberately.
+    # PASS: The asynchronous AddReplicaSet operation completes successfully.
     if not runner.controller_async(
         "Create administrator orphan-recovery ReplicaSet",
         "AddReplicaSet",
@@ -840,6 +984,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 87 - Refuse orphan recovery while Vault still contains desired state.
+    # WHY: RecoverOrphanedResources must never destroy resources that the controller still considers managed.
+    # PASS: Recovery fails safely because the controller inventory is not empty.
     if not runner.admin_async(
         "Orphan recovery refuses a nonempty Vault desired-state inventory",
         "RecoverOrphanedResources",
@@ -850,6 +997,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 88 - Remove only the orphan-test deployment metadata from Vault.
+    # WHY: Deliberately makes Terraform-managed resources lose their normal desired-state owner without deleting them.
+    # PASS: The deployment metadata is removed while runtime/Terraform resources remain for recovery testing.
     # Test 88 is itself the destructive Vault metadata action. In selective
     # mode, do not perform that hidden mutation unless Test 88 was requested.
     if runner.is_test_selected(88):
@@ -867,6 +1017,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 89 - Verify Vault desired-state inventory is empty.
+    # WHY: Orphan recovery is allowed only after the controller no longer has desired deployments to protect.
+    # PASS: Vault-backed managed deployment inventory contains no deployments.
     try:
         inventory_empty = not vault.load_inventory()
         inventory_note = (
@@ -885,6 +1038,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 90 - Refuse orphan recovery while the managed MongoDB CR is still live.
+    # WHY: Empty Vault inventory alone is not enough; a live managed deployment is an independent safety stop.
+    # PASS: RecoverOrphanedResources fails because the live managed MongoDB resource still exists.
     if not runner.admin_async(
         "Orphan recovery refuses a live managed MongoDB resource",
         "RecoverOrphanedResources",
@@ -895,6 +1051,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 91 - Delete the orphan-test MongoDB CR outside the controller.
+    # WHY: Manufactures the partial-destroy state in which Terraform-managed leftovers remain but the live deployment is gone.
+    # PASS: kubectl deletes the MongoDB custom resource successfully.
     if not runner.run(
         "Delete the orphan-test MongoDB resource outside the controller",
         kubectl
@@ -911,6 +1070,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 92 - Confirm the orphan-test MongoDB CR is absent.
+    # WHY: Recovery must not proceed until the live deployment safety gate is truly cleared.
+    # PASS: Kubernetes returns NotFound for the orphan-test MongoDB resource.
     if not runner.run(
         "Confirm the orphan-test MongoDB resource is absent",
         kubectl + ["-n", namespace, "get", "mongodb", orphan_rs_key],
@@ -920,6 +1082,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 93 - Delete the orphan-test Ops Manager project and group Secret.
+    # WHY: Completes the manufactured cross-plane orphan condition before Terraform cleanup is attempted.
+    # PASS: The project and matching Operator-created group Secret are removed.
     # Test 93 deliberately deletes the fixture's Ops Manager project. Keep
     # selective runs exact: do not perform that side effect when Test 93 is not
     # part of --testList.
@@ -940,6 +1105,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 94 - Expose the manufactured orphaned controller resources.
+    # WHY: The Admin inventory must identify stranded resources instead of reporting a false clean state.
+    # PASS: Verbose ListManagedResources shows the orphan fixture by deployment key.
     if not runner.admin(
         "Inventory exposes the manufactured orphaned controller resources",
         "ListManagedResources",
@@ -948,6 +1116,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 95 - Recover the stranded Terraform-managed resources.
+    # WHY: Proves the guarded orphan-recovery path can converge tracked leftovers to zero after both safety gates pass.
+    # PASS: The asynchronous RecoverOrphanedResources operation succeeds.
     if not runner.admin_async(
         "RecoverOrphanedResources destroys stranded Terraform-managed resources",
         "RecoverOrphanedResources",
@@ -956,6 +1127,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 96 - Verify managed-resource inventory is CLEAN after orphan recovery.
+    # WHY: Recovery must return controller-owned desired/runtime state to a consistent zero-resource condition.
+    # PASS: ListManagedResources reports `Status: CLEAN`.
     if not runner.admin(
         "Administrator suite finishes with CLEAN managed-resource inventory",
         "ListManagedResources",
@@ -963,6 +1137,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 97 - Verify no administrator-test Kubernetes or Operator/Helm artifacts remain.
+    # WHY: A clean inventory is not enough if Jobs, Pods, Secrets, PVCs, PVs, or runtime artifacts were leaked.
+    # PASS: The Kubernetes leftover scan returns no test-owned or globally orphaned runtime artifacts.
     leftovers = _harness_kubernetes_leftovers(
         config,
         (admin_rs_key, admin_sc_key, orphan_rs_key),
@@ -989,6 +1166,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 98 - Verify no administrator-test Vault folders remain.
+    # WHY: Successful cleanup must remove test desired-state metadata and credentials as well as Kubernetes resources.
+    # PASS: None of the generated Admin test deployment folders remain under the Vault base path.
     try:
         vault_root = vault.list_keys(str(config["vault_base_path"]))
         expected_folders = {
@@ -1014,6 +1194,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 99 - Verify the operation journal records orphan recovery.
+    # WHY: Administrators need durable evidence that the destructive recovery operation was submitted and completed.
+    # PASS: ListOperations includes RecoverOrphanedResources.
     if not runner.admin(
         "Operation journal records administrator orphan recovery",
         "ListOperations",
@@ -1021,6 +1204,9 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    # TEST 100 - Run a final Reconcile against the cleaned environment.
+    # WHY: Provides the final proof that no hidden desired-state work remains after all lifecycle and recovery tests.
+    # PASS: The asynchronous Reconcile operation succeeds with nothing left to repair.
     runner.admin_async(
         "Final async Reconcile confirms there is no desired state left to repair",
         "Reconcile",

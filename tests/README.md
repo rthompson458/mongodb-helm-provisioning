@@ -219,9 +219,19 @@ creation test starts a fresh Run ID instead of adopting an older fixture. This
 mode is intended for focused engineering retests, not as a replacement for the
 complete acceptance run.
 
-Each scenario module documents the purpose of every canonical test number in its
-module-level comments. This keeps the test number, intent, and implementation
-close together for maintainers.
+Each scenario module keeps a numbered 1-100 index at the top of the file. In
+addition, every individual live test has an inline three-line comment immediately
+beside its implementation:
+
+```text
+TEST <number> - what the test does
+WHY: why the behavior matters
+PASS: what successful evidence looks like
+```
+
+CI verifies that all canonical test numbers 1 through 100 have both the top-level
+intent entry and the inline TEST/WHY/PASS explanation. This makes each acceptance
+check defensible without requiring a maintainer to reverse-engineer the test code.
 
 ### Complete acceptance run — 100 total checks
 
