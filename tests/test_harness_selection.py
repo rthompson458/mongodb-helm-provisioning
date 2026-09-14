@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import io
+import re
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
+from harness import (
+    scenario_admin,
+    scenario_locking,
+    scenario_preflight,
+    scenario_replicaset,
+    scenario_sharded,
+)
 from harness.models import HarnessContext
 from harness.runner import HarnessRunner
 
@@ -69,6 +77,27 @@ class HarnessRunnerSelectionTests(unittest.TestCase):
         self.assertTrue(runner.any_test_selected(97, 100))
         self.assertTrue(runner.is_test_selected(100))
         self.assertFalse(runner.is_test_selected(96))
+
+    def test_all_100_canonical_tests_have_numbered_intent_comments(self) -> None:
+        """Every live test must keep a human-readable purpose beside its scenario."""
+
+        documented: list[int] = []
+        for scenario in (
+            scenario_preflight,
+            scenario_replicaset,
+            scenario_sharded,
+            scenario_locking,
+            scenario_admin,
+        ):
+            documented.extend(
+                int(number)
+                for number in re.findall(
+                    r"(?m)^(\d+)\. ",
+                    scenario.__doc__ or "",
+                )
+            )
+
+        self.assertEqual(documented, list(range(1, 101)))
 
     def test_normal_runner_still_records_compact_numbers(self) -> None:
         temp = tempfile.TemporaryDirectory()
