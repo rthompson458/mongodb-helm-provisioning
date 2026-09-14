@@ -35,6 +35,16 @@ from harness import (
     scenario_sharded,
 )
 
+# Canonical full-suite order. Keep this single plan authoritative so profile
+# counts, --testList ranges, and execution order cannot drift independently.
+SCENARIO_PLAN = (
+    ("Preflight", "preflight", scenario_preflight),
+    ("ReplicaSet", "replicaset", scenario_replicaset),
+    ("ShardedCluster", "sharded", scenario_sharded),
+    ("Locking", "locking", scenario_locking),
+    ("Admin", "admin", scenario_admin),
+)
+
 
 def _profile_totals() -> dict[str, int]:
     """Return the displayed check count for every live-test profile.
@@ -66,15 +76,9 @@ def _scenario_ranges() -> dict[str, tuple[int, int]]:
 
     start = 1
     ranges: dict[str, tuple[int, int]] = {}
-    for name, count in (
-        ("preflight", scenario_preflight.TEST_COUNT),
-        ("replicaset", scenario_replicaset.TEST_COUNT),
-        ("sharded", scenario_sharded.TEST_COUNT),
-        ("locking", scenario_locking.TEST_COUNT),
-        ("admin", scenario_admin.TEST_COUNT),
-    ):
-        end = start + count - 1
-        ranges[name] = (start, end)
+    for _, key, scenario in SCENARIO_PLAN:
+        end = start + scenario.TEST_COUNT - 1
+        ranges[key] = (start, end)
         start = end + 1
     return ranges
 
@@ -376,6 +380,33 @@ def _selection_label(
     return " + ".join(parts)
 
 
+def _run_scenario(runner: HarnessRunner, label: str, scenario) -> bool:
+    """Run one timed scenario and return True only when all results still pass."""
+
+    runner.start_profile(label)
+    scenario.run(runner)
+    runner.finish_profile(label)
+    return not any(not result.passed for result in runner.results)
+
+
+def _normal_scenario_plan(
+    profile: str | None,
+    admin: bool,
+) -> list[tuple[str, object]]:
+    """Return scenarios selected for a normal non---testList invocation."""
+
+    selected: list[tuple[str, object]] = [("Preflight", scenario_preflight)]
+    if profile in {"replicaset", "all"}:
+        selected.append(("ReplicaSet", scenario_replicaset))
+    if profile in {"sharded", "all"}:
+        selected.append(("ShardedCluster", scenario_sharded))
+    if profile in {"locking", "all"}:
+        selected.append(("Locking", scenario_locking))
+    if admin or profile == "all":
+        selected.append(("Admin", scenario_admin))
+    return selected
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the requested scenarios and return zero only when all checks pass."""
 
@@ -453,60 +484,23 @@ def main(argv: list[str] | None = None) -> int:
         # with no selected numbers are skipped so a late test such as 97-100
         # starts immediately instead of replaying the preceding hour of work.
         scenario_ranges = _scenario_ranges()
-        scenario_plan = (
-            ("Preflight", "preflight", scenario_preflight),
-            ("ReplicaSet", "replicaset", scenario_replicaset),
-            ("ShardedCluster", "sharded", scenario_sharded),
-            ("Locking", "locking", scenario_locking),
-            ("Admin", "admin", scenario_admin),
-        )
-        for label, key, scenario in scenario_plan:
+        for label, key, scenario in SCENARIO_PLAN:
             start, end = scenario_ranges[key]
             if not runner.any_test_selected(start, end):
                 continue
 
             runner.set_canonical_position(start - 1)
-            runner.start_profile(label)
-            scenario.run(runner)
-            runner.finish_profile(label)
-            if any(not result.passed for result in runner.results):
+            if not _run_scenario(runner, label, scenario):
                 return runner.summary()
 
         return runner.summary()
 
-    # Normal profile/admin runs keep the established behavior: preflight always
-    # runs first and numbering is compact for the selected profile(s).
-    runner.start_profile("Preflight")
-    scenario_preflight.run(runner)
-    runner.finish_profile("Preflight")
-    if any(not result.passed for result in runner.results):
-        return runner.summary()
-
-    if args.profile in {"replicaset", "all"}:
-        runner.start_profile("ReplicaSet")
-        scenario_replicaset.run(runner)
-        runner.finish_profile("ReplicaSet")
-        if any(not result.passed for result in runner.results):
+    # Normal profile/admin runs keep compact numbering and always begin with
+    # preflight. One shared execution helper keeps timing/fail-fast behavior
+    # identical across every scenario.
+    for label, scenario in _normal_scenario_plan(args.profile, args.admin):
+        if not _run_scenario(runner, label, scenario):
             return runner.summary()
-
-    if args.profile in {"sharded", "all"}:
-        runner.start_profile("ShardedCluster")
-        scenario_sharded.run(runner)
-        runner.finish_profile("ShardedCluster")
-        if any(not result.passed for result in runner.results):
-            return runner.summary()
-
-    if args.profile in {"locking", "all"}:
-        runner.start_profile("Locking")
-        scenario_locking.run(runner)
-        runner.finish_profile("Locking")
-        if any(not result.passed for result in runner.results):
-            return runner.summary()
-
-    if args.admin or args.profile == "all":
-        runner.start_profile("Admin")
-        scenario_admin.run(runner)
-        runner.finish_profile("Admin")
 
     return runner.summary()
 
