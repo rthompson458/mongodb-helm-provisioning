@@ -215,8 +215,9 @@ Database inventory/status commands intentionally do not mix in account details.
 Use ListDatabaseAccounts when you need roles, account status, rotation due timing,
 or browser-ready Vault credential URLs.
 
-Database commands can omit the deployment only when exactly one managed
-deployment exists. If multiple deployments exist, specify the deployment.
+Database commands work the same way for both ReplicaSets and ShardedClusters.
+They can omit the deployment only when exactly one managed deployment exists.
+If multiple deployments exist, specify the deployment.
 
 Long-running deployment, shard-topology, and database create/delete requests
 run in the background. The submitting shell returns promptly with a status
@@ -234,21 +235,33 @@ Configured defaults:
 Run this program with no command, or use -h/--help, to show this help.
 Use '<command> --help' for detailed command-specific help.
 """,
-        epilog="""Typical flows:
+        epilog="""Typical end-user workflows:
 
-ReplicaSet:
+Database commands are shared by ReplicaSets and ShardedClusters. They are
+repeated below so each workflow can be followed from deployment creation
+through database and account status without jumping between sections.
+
+ReplicaSet workflow:
   python3 privateWorkerReplacement.py AddReplicaSet RS1
+  python3 privateWorkerReplacement.py ListReplicaSets
+  python3 privateWorkerReplacement.py ListReplicaSet RS1
   python3 privateWorkerReplacement.py AddDatabase RS1 HouseInfo
+  python3 privateWorkerReplacement.py ListDatabases RS1
   python3 privateWorkerReplacement.py ListDatabase RS1 HouseInfo
   python3 privateWorkerReplacement.py ListDatabaseAccounts RS1 HouseInfo
 
-ShardedCluster:
+ShardedCluster workflow:
   python3 privateWorkerReplacement.py AddShardedCluster SC9
+  python3 privateWorkerReplacement.py ListShardedClusters
+  python3 privateWorkerReplacement.py ListShardedCluster SC9
   python3 privateWorkerReplacement.py ListShards SC9
   python3 privateWorkerReplacement.py AddShard SC9 2
   python3 privateWorkerReplacement.py AddDatabase SC9 HouseInfo
+  python3 privateWorkerReplacement.py ListDatabases SC9
+  python3 privateWorkerReplacement.py ListDatabase SC9 HouseInfo
+  python3 privateWorkerReplacement.py ListDatabaseAccounts SC9 HouseInfo
 
-Inventory:
+Inventory across all managed deployments:
   python3 privateWorkerReplacement.py ListDeployments
   python3 privateWorkerReplacement.py ListDatabases
 """,
