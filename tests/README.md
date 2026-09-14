@@ -69,7 +69,12 @@ Harness
 
 The administrator suite also drives `privateWorkerReplacementAdmin.py` directly. It deliberately creates recoverable drift, invalid/valid stranded deployment locks, and orphaned Terraform state so the real recovery paths are exercised instead of only mocked.
 
-The harness does not treat an asynchronous request acknowledgement as success. It correlates the private operation-state record and polls `privateWorkerReplacementAdmin.py ListOperation` until the operation reports a terminal result.
+The harness does not treat an asynchronous request acknowledgement as success.
+It correlates the private operation-state record and polls
+`privateWorkerReplacementAdmin.py ListOperation` until the operation reports a
+terminal result. This applies to customer lifecycle work and to all three
+long-running administrator mutations: `Reconcile`,
+`RecoverDeploymentLock`, and `RecoverOrphanedResources`.
 
 Database status and account status are tested separately. `ListDatabase` verifies database-level lifecycle/service state. `ListDatabaseAccounts` verifies the three managed account rows and credential-facing output.
 
@@ -132,21 +137,22 @@ python3 tests/run_harness.py --admin --allow-changes
 It runs the 5 read-only preflight checks plus 62 administrator checks. The suite requires a **clean DBaaS starting inventory** because it intentionally damages and repairs the test environment. It verifies:
 
 - administrator help, operation-journal reads, and unknown-operation handling;
-- zero-state `ListManagedResources` and no-op `Reconcile`;
+- zero-state `ListManagedResources` and asynchronous no-op `Reconcile`;
 - required confirmation on destructive recovery commands;
 - live ReplicaSet/database creation for Reconcile testing;
 - detection of a manually deleted `MongoDBUser`;
-- `Reconcile` recreation of the missing user;
+- asynchronous `Reconcile` recreation of the missing user;
 - preservation of the existing Vault and Kubernetes passwords;
 - real MongoDB authentication after Reconcile;
 - `ListManagedResources` reporting `ATTENTION REQUIRED` for runtime drift;
 - Reconcile refusal while a ShardedCluster deployment lock exists;
 - refusal to recover a lock whose recorded target does not match desired state;
-- successful recovery of validated stranded AddShard and DeleteShard locks;
+- successful asynchronous recovery of validated stranded AddShard and DeleteShard locks;
 - a manufactured partial-destroy condition with empty Vault inventory but Terraform-tracked leftovers;
 - `RecoverOrphanedResources` refusal while managed inventory still exists;
 - refusal when Vault inventory is empty but a live managed MongoDB resource still exists;
 - successful asynchronous orphan recovery after both independent safety checks pass;
+- operation-journal polling for every long-running administrator mutation;
 - final Kubernetes/Vault cleanup and a final `Status: CLEAN` inventory.
 
 The suite stops on the first failure. A failed destructive test may intentionally leave its broken state available for diagnosis. A **passing** administrator run finishes clean.
