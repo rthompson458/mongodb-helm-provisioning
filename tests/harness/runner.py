@@ -7,6 +7,12 @@ rendered. Keeping command mechanics here prevents each scenario from inventing
 its own subprocess, timeout, numbering, and failure-reporting behavior.
 """
 
+# MAINTAINER READING GUIDE
+# Central live-harness executor. It runs commands, records results, enforces change/destructive gates, and provides common scenario services.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import re
@@ -29,6 +35,9 @@ def _duration(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
+# One runner instance is shared across selected live scenarios.
+# It centralizes subprocess execution and safety gates so scenario files cannot
+# invent different rules for when live mutations are permitted.
 class HarnessRunner:
     """Run commands and collect results without hiding useful diagnostics."""
 

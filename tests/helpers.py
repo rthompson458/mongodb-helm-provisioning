@@ -5,6 +5,12 @@ fixtures here prevents every test file from carrying a large copy of the same
 ReplicaSet/ShardedCluster/Vault dictionaries.
 """
 
+# MAINTAINER READING GUIDE
+# Shared unit-test helpers and fixtures. These reduce setup duplication; they are not production behavior.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 from typing import Any

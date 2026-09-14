@@ -1,5 +1,11 @@
 """Unit tests for cleanup of MongoDB Operator and Helm runtime artifacts."""
 
+# MAINTAINER READING GUIDE
+# Protects deterministic discovery, classification, and cleanup of secondary MongoDB Operator and Helm artifacts.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import unittest

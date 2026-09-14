@@ -1,5 +1,11 @@
 """Unit tests for Vault metadata-to-inventory reconstruction."""
 
+# MAINTAINER READING GUIDE
+# Protects desired-state reconstruction from current Vault metadata plus the legacy migration fallback.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import os

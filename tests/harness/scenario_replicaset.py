@@ -14,6 +14,12 @@ Canonical full-suite test intent:
 16. Delete the now-empty ReplicaSet and complete deployment cleanup.
 """
 
+# MAINTAINER READING GUIDE
+# End-to-end ReplicaSet lifecycle scenario: create, readiness, database/account work, and cleanup using the public controller.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 from .runner import HarnessRunner
@@ -21,6 +27,8 @@ from .runner import HarnessRunner
 TEST_COUNT = 11
 
 
+# Read in lifecycle order: create ReplicaSet -> wait for Running ->
+# database/account checks -> cleanup when change authorization permits it.
 def run(runner: HarnessRunner) -> None:
     """Create, exercise, and clean up a temporary ReplicaSet and database.
 

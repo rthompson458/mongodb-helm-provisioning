@@ -1,5 +1,11 @@
 """Unit tests for the administrator-only privateWorkerReplacement CLI."""
 
+# MAINTAINER READING GUIDE
+# Protects administrator CLI parsing, help, dispatch, async behavior, and recovery confirmation rules.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import unittest

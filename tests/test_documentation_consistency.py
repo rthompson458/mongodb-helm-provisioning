@@ -1,5 +1,11 @@
 """Regression tests that keep README command/test references synchronized."""
 
+# MAINTAINER READING GUIDE
+# Checks that user/admin documentation stays consistent with implemented CLI names, examples, and supported behavior.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import unittest

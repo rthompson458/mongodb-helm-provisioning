@@ -4,6 +4,12 @@ These tests execute the shell script with small fake external commands so bugs
 in Bash expansion are caught before a live Kubernetes environment is needed.
 """
 
+# MAINTAINER READING GUIDE
+# Protects the Terraform-driven lifecycle.sh contract, shell branches, environment variables, safety checks, and Kubernetes operations.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import os

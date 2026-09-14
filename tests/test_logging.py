@@ -1,5 +1,11 @@
 """Unit tests for controller and operation logging."""
 
+# MAINTAINER READING GUIDE
+# Protects controller/operations log locations, structured events, diagnostic capture, and worker transcript archival.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import json

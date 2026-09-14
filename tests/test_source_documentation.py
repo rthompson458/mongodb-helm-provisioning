@@ -5,6 +5,12 @@ layer of maintainer documentation. This test keeps that baseline from silently
 eroding as new helpers are added.
 """
 
+# MAINTAINER READING GUIDE
+# Checks that important source modules retain maintainer-oriented documentation and architecture boundaries.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import ast

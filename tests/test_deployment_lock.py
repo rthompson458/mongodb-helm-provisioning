@@ -1,5 +1,11 @@
 """Unit tests for the ShardedCluster deployment-lock component."""
 
+# MAINTAINER READING GUIDE
+# Protects the per-ShardedCluster deployment lock, exact operation ownership, and release behavior.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import unittest

@@ -1,5 +1,11 @@
 """Static contract tests for Terraform lifecycle operation wiring."""
 
+# MAINTAINER READING GUIDE
+# Protects the static contract between Python inputs and terraform-dbaas variables, resources, and lifecycle actions.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import re

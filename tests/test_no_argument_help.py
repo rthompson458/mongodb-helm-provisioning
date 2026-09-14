@@ -1,5 +1,11 @@
 """Regression tests for no-argument help behavior on both CLI entry points."""
 
+# MAINTAINER READING GUIDE
+# Checks that customer/admin/harness entry points without arguments produce usable help instead of an error.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import subprocess

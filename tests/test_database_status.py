@@ -1,5 +1,11 @@
 """Regression tests for database-level status and account detail separation."""
 
+# MAINTAINER READING GUIDE
+# Protects customer database status, including Creating/Deleting states sourced from active async operations.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import io

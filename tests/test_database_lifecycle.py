@@ -1,5 +1,11 @@
 """Unit tests for database and credential lifecycle orchestration."""
 
+# MAINTAINER READING GUIDE
+# Protects database mutation ordering: materialize, persist desired state, manage accounts, verify authentication, and cleanup.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import copy

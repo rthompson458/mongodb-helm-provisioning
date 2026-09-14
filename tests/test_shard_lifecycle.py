@@ -1,5 +1,11 @@
 """Unit tests for ShardedCluster shard-topology lifecycle behavior."""
 
+# MAINTAINER READING GUIDE
+# Protects AddShard/DeleteShard validation, lock/resume behavior, desired-count transitions, waits, and failure handling.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import copy

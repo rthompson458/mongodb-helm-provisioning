@@ -1,5 +1,11 @@
 """Regression tests for the live-harness command-line interface."""
 
+# MAINTAINER READING GUIDE
+# Protects live-harness command-line parsing and the safety semantics of --allow-changes.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import subprocess

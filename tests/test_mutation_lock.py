@@ -1,5 +1,11 @@
 """Regression tests for controller-wide desired-state mutation serialization."""
 
+# MAINTAINER READING GUIDE
+# Protects the broad controller state-mutation lock that prevents stale Vault inventory snapshots from overlapping.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import fcntl
