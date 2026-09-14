@@ -33,7 +33,7 @@ from privateWorkerReplacement.vault import VaultClient
 from .runner import HarnessRunner
 
 
-TEST_COUNT = 57
+TEST_COUNT = 62
 
 
 def _latest_operation_id(
@@ -670,6 +670,57 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    if not runner.controller_async(
+        "Reduce administrator cluster to one shard for DeleteShard recovery",
+        "DeleteShard",
+        admin_sc,
+        "1",
+        "--confirm",
+        timeout=2400,
+    ).passed:
+        return
+
+    delete_lock_id = f"harness-delete-{ctx.run_id}"
+    if not runner.run(
+        "Create valid synthetic stranded DeleteShard lock",
+        kubectl
+        + [
+            "-n",
+            namespace,
+            "create",
+            "configmap",
+            lock_name,
+            f"--from-literal=operation_id={delete_lock_id}",
+            "--from-literal=category=topology",
+            "--from-literal=action=DeleteShard",
+            "--from-literal=database=",
+            "--from-literal=start_shards=2",
+            "--from-literal=target_shards=1",
+            "--from-literal=started_at=2026-01-01T00:00:00Z",
+        ],
+        timeout=60,
+    ).passed:
+        return
+
+    if not runner.admin(
+        "RecoverDeploymentLock validates completed DeleteShard cleanup",
+        "RecoverDeploymentLock",
+        admin_sc,
+        "--confirm",
+        expected_text="Recovered completed DeleteShard lock",
+        timeout=900,
+    ).passed:
+        return
+
+    if not runner.run(
+        "Recovered DeleteShard deployment lock is absent",
+        kubectl + ["-n", namespace, "get", "configmap", lock_name],
+        expect_success=False,
+        expected_text="NotFound",
+        timeout=60,
+    ).passed:
+        return
+
     if not runner.controller(
         "ShardedCluster remains Running after lock recovery",
         "ListShardedCluster",
@@ -724,6 +775,45 @@ def run(runner: HarnessRunner) -> None:
     ).passed:
         return
 
+    metadata_ok, metadata_note = _delete_vault_deployment_metadata(
+        config,
+        orphan_rs,
+    )
+    if not runner.check(
+        "Remove orphan-test Vault deployment metadata",
+        metadata_ok,
+        metadata_note,
+    ).passed:
+        return
+
+    try:
+        inventory_empty = not vault.load_inventory()
+        inventory_note = (
+            "Vault-backed managed deployment inventory is empty."
+            if inventory_empty
+            else "Vault still reports managed desired-state deployments."
+        )
+    except Exception as exc:
+        inventory_empty = False
+        inventory_note = f"Could not verify Vault inventory: {exc}"
+
+    if not runner.check(
+        "Vault inventory is empty before orphan recovery",
+        inventory_empty,
+        inventory_note,
+    ).passed:
+        return
+
+    if not runner.admin_async(
+        "Orphan recovery refuses a live managed MongoDB resource",
+        "RecoverOrphanedResources",
+        "--confirm",
+        timeout=300,
+        expect_success=False,
+        expected_text="live privateWorkerReplacement-managed MongoDB",
+    ).passed:
+        return
+
     if not runner.run(
         "Delete the orphan-test MongoDB resource outside the controller",
         kubectl
@@ -755,35 +845,6 @@ def run(runner: HarnessRunner) -> None:
         ops_ok,
         ops_note,
         elapsed_seconds=ops_elapsed,
-    ).passed:
-        return
-
-    metadata_ok, metadata_note = _delete_vault_deployment_metadata(
-        config,
-        orphan_rs,
-    )
-    if not runner.check(
-        "Remove orphan-test Vault deployment metadata",
-        metadata_ok,
-        metadata_note,
-    ).passed:
-        return
-
-    try:
-        inventory_empty = not vault.load_inventory()
-        inventory_note = (
-            "Vault-backed managed deployment inventory is empty."
-            if inventory_empty
-            else "Vault still reports managed desired-state deployments."
-        )
-    except Exception as exc:
-        inventory_empty = False
-        inventory_note = f"Could not verify Vault inventory: {exc}"
-
-    if not runner.check(
-        "Vault inventory is empty before orphan recovery",
-        inventory_empty,
-        inventory_note,
     ).passed:
         return
 
