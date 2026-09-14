@@ -231,6 +231,22 @@ class AdminCliTests(unittest.TestCase):
                 self.assertIn("Operation ID", text)
                 self.assertIn("ListOperation", text)
 
+    def test_orphan_recovery_help_explains_non_terraform_cleanup(self) -> None:
+        parser = admin_cli.build_parser()
+        subparsers = next(
+            action
+            for action in parser._actions
+            if getattr(action, "choices", None)
+            and "RecoverOrphanedResources" in action.choices
+        )
+        text = " ".join(
+            subparsers.choices[
+                "RecoverOrphanedResources"
+            ].format_help().split()
+        )
+        self.assertIn("Operator/Helm", text)
+        self.assertIn("outside Terraform state", text)
+
     def test_managed_resource_help_explains_attention_semantics(self) -> None:
         parser = admin_cli.build_parser()
         subparsers = next(
@@ -244,6 +260,7 @@ class AdminCliTests(unittest.TestCase):
         )
         self.assertIn("Vault, Kubernetes, Terraform backend state, and Ops Manager", text)
         self.assertIn("ATTENTION REQUIRED", text)
+        self.assertIn("Operator/Helm", text)
         self.assertIn("Permanent controller infrastructure", text)
         self.assertIn("--verbose", text)
 
