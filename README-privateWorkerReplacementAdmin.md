@@ -8,6 +8,10 @@ Customer and administrator mutations share one controller-wide desired-state ser
 
 The executable split is an interface boundary, not an authorization boundary. Production must also restrict administrator host access, Kubernetes privileges, Vault policy, and Terraform backend access.
 
+For code ownership, recovery rationale, cross-plane source-of-truth boundaries,
+locking design, and reviewer-oriented implementation notes, see
+`docs/MAINTAINER-GUIDE.md`.
+
 ---
 
 ## 1. Quick start
