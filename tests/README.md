@@ -7,6 +7,10 @@ The privateWorkerReplacement test suite has two jobs:
 
 The live harness is intended for a development environment such as the local k3d environment. Do not point lifecycle profiles at production.
 
+For the repository-wide code ownership map and the distinction between unit
+tests, live acceptance tests, Terraform ownership, and runtime reconciliation,
+see `docs/MAINTAINER-GUIDE.md`.
+
 ---
 
 ## 1. Fast unit/regression tests
