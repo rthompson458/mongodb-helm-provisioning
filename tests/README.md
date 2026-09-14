@@ -186,12 +186,16 @@ Rules:
 - `--profile` and `--testList` are mutually exclusive;
 - `--admin` cannot be combined with `--testList`;
 - every `--testList` run requires `--allow-changes`;
-- **only** the requested tests run. Prerequisite tests are not added automatically.
+- **only** the requested tests run. Prerequisite tests are not added automatically;
+- when possible, selective mode reuses the newest prior harness Run ID from the
+  operation journal so surviving resources from a failed run retain the names
+  expected by the selected tests.
 
-That last rule is deliberate. A state-dependent test can fail when selected by
-itself if its normal setup test was not also selected or the required state does
-not already exist. This mode is intended for focused engineering retests, not as
-a replacement for the complete acceptance run.
+That behavior is deliberate. A state-dependent test can still fail when selected
+by itself if its required fixture no longer exists. Selecting a top-level fixture
+creation test starts a fresh Run ID instead of adopting an older fixture. This
+mode is intended for focused engineering retests, not as a replacement for the
+complete acceptance run.
 
 Each scenario module documents the purpose of every canonical test number in its
 module-level comments. This keeps the test number, intent, and implementation
