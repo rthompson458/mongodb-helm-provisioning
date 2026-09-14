@@ -87,6 +87,9 @@ def run(runner: HarnessRunner) -> None:
     sc = ctx.lock_cluster
     db = f"LockDB_{ctx.run_id}"
 
+    # TEST 33 - Create the ShardedCluster used for concurrency testing.
+    # WHY: The locking tests need a real live deployment that can undergo a topology change.
+    # PASS: The one-shard ShardedCluster is created successfully.
     created = runner.controller_async(
         "Create lock-test ShardedCluster",
         "AddShardedCluster",
@@ -109,6 +112,9 @@ def run(runner: HarnessRunner) -> None:
         operation = AsyncOperation(operation_id="", command=[])
         lock_started = time.monotonic()
         lock_seen = False
+    # TEST 34 - Observe the deployment lock while AddShard is active.
+    # WHY: Proves the topology workflow publishes the lock that protects the deployment from conflicts.
+    # PASS: The expected lock ConfigMap becomes visible before AddShard finishes.
     runner.check(
         "Observe Terraform-created deployment lock",
         lock_seen,
@@ -120,6 +126,9 @@ def run(runner: HarnessRunner) -> None:
         elapsed_seconds=time.monotonic() - lock_started,
     )
 
+    # TEST 35 - Reject a conflicting AddDatabase request during AddShard.
+    # WHY: Proves another customer mutation cannot race an active topology change on the same cluster.
+    # PASS: AddDatabase is refused while the first operation owns the deployment.
     if lock_seen:
         runner.controller(
             "Concurrent AddDatabase request is blocked during AddShard",
@@ -140,12 +149,18 @@ def run(runner: HarnessRunner) -> None:
             "was not observed.",
         )
 
+    # TEST 36 - Wait for the background AddShard operation to finish.
+    # WHY: Proves the protected topology operation still completes normally after the concurrency check.
+    # PASS: The asynchronous AddShard operation reaches Succeeded.
     runner.wait_async(
         "Background AddShard completes",
         operation,
         timeout=2400,
     )
 
+    # TEST 37 - Verify the cluster is healthy after the locked operation.
+    # WHY: Proves the lock is not left active and the cluster returns to normal readable service.
+    # PASS: ListShards reports no active managed change.
     runner.controller(
         "Lock-test cluster returns to readable status",
         "ListShards",
@@ -153,6 +168,9 @@ def run(runner: HarnessRunner) -> None:
         expected_text="Active change:   None",
     )
 
+    # TEST 38 - Delete the locking-test ShardedCluster.
+    # WHY: Proves the concurrency scenario leaves a deployment that can still be torn down cleanly.
+    # PASS: The asynchronous DeleteShardedCluster operation completes successfully.
     runner.controller_async(
         "Delete lock-test ShardedCluster",
         "DeleteShardedCluster",
