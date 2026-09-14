@@ -1,5 +1,11 @@
 """Unit tests for privateWorkerReplacement configuration validation."""
 
+# MAINTAINER READING GUIDE
+# Protects dev.config parsing, defaults, validation, path normalization, and invalid-configuration errors.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import tempfile

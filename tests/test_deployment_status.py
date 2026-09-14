@@ -1,5 +1,11 @@
 """Unit tests for read-only deployment and shard status presentation."""
 
+# MAINTAINER READING GUIDE
+# Protects public deployment/shard status formatting and interpretation of live Kubernetes component readiness.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import io

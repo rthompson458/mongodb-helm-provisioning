@@ -1,5 +1,11 @@
 """Regression tests for selective canonical live-harness execution."""
 
+# MAINTAINER READING GUIDE
+# Protects which live scenarios run for each harness profile so profiles neither skip coverage nor perform unintended work.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import inspect

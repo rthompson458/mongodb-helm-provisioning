@@ -9,6 +9,15 @@ The status helpers translate raw Kubernetes fields into terms the CLI can show
 clearly: Running, Online, Creating, Degraded, Failed, and Absent.
 """
 
+# MAINTAINER READING GUIDE
+# This module is the controller's Kubernetes observation/wait layer.
+# Higher-level modules ask simple questions here: current phase, object absent,
+# MongoDBUser Updated, ShardedCluster component readiness, and controller-user
+# connection Secret names.
+# Keep business policy out of these helpers. A caller decides what "ready" means;
+# this file gathers and normalizes the live Kubernetes facts.
+
+
 from __future__ import annotations
 
 import json

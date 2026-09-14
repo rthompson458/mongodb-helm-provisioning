@@ -1,5 +1,11 @@
 """Unit tests for administrator inventory, Reconcile, and recovery safety."""
 
+# MAINTAINER READING GUIDE
+# Protects reconcile and exceptional recovery preconditions so repair paths cannot become unsafe mutation shortcuts.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import unittest

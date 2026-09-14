@@ -20,6 +20,17 @@ This module coordinates execution only. It never performs MongoDB, Kubernetes,
 Vault, storage, or topology mutations itself.
 """
 
+# MAINTAINER READING GUIDE
+# This module separates the fast foreground CLI from long-running work.
+# Foreground path:
+#   create journal record -> start detached Python process -> print acknowledgement.
+# Worker path:
+#   mark In Progress -> run normal controller action -> mark Succeeded/Failed.
+# Worker stdout/stderr goes to a private temporary transcript, not the user's
+# returned shell. The transcript is appended to the daily operations log when
+# the worker reaches a terminal result.
+
+
 from __future__ import annotations
 
 import json
@@ -205,6 +216,9 @@ def launch_operation(
     # Controller-wide stale-inventory safety is enforced by mutation_lock.py,
     # while ShardedCluster-specific business conflicts still use the
     # Terraform-created deployment lock.
+    # STEP 1 - Reject an obvious same-deployment double-submit before creating
+    # another worker. This is a user-experience guard, not the authoritative
+    # stale-inventory lock; mutation_lock.py provides that broader protection.
     for existing in list_operation_records(config_path):
         if (
             deployment
@@ -218,6 +232,8 @@ def launch_operation(
                 "mutation. Use the normal resource status commands to monitor progress."
             )
 
+    # STEP 2 - Persist the operation before process creation. If process launch
+    # fails, there is still a durable record explaining what happened.
     state = create_operation(
         config_path,
         command=command,
@@ -232,6 +248,9 @@ def launch_operation(
     # The detached worker receives an absolute config path on purpose. A
     # background process must not depend on the user's shell directory after
     # the foreground command has returned.
+    # STEP 3 - Re-run the normal entry point with an internal operation ID.
+    # This keeps one code path for validation/business logic instead of creating
+    # a second implementation just for background work.
     worker_command = [
         sys.executable,
         str(entrypoint),
@@ -251,6 +270,9 @@ def launch_operation(
 
     try:
         with work_path.open("a", encoding="utf-8") as work_handle:
+            # STEP 4 - Detach from the caller's terminal.
+            # stdout/stderr intentionally go to the private transcript file.
+            # The customer already gets the shell back after acknowledgement.
             process = subprocess.Popen(
                 worker_command,
                 cwd=repo_root,
@@ -271,6 +293,9 @@ def launch_operation(
 
     # A very fast worker can finish before the parent records its PID. Reload so
     # the parent never overwrites a Succeeded/Failed result written by the child.
+    # STEP 5 - Close a small race: a very fast worker can finish before the
+    # parent records its PID. Reload first so we never overwrite Succeeded/Failed
+    # with the older Queued state.
     latest = load_operation(config_path, operation_id)
     latest["pid"] = process.pid
     if latest.get("result") == "Queued":

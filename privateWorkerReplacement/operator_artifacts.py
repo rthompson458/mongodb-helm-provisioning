@@ -14,6 +14,13 @@ workflows from reporting success while deployment-specific Kubernetes artifacts
 are still present.
 """
 
+# MAINTAINER READING GUIDE
+# MongoDB Operator and Helm can leave secondary Kubernetes artifacts that are not
+# the primary MongoDB custom resource. This module names, discovers, and safely
+# classifies those artifacts for cleanup/recovery.
+# Resource-name logic here must stay deterministic and in sync with Terraform/Helm.
+
+
 from __future__ import annotations
 
 from typing import Any

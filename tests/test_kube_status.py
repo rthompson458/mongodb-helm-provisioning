@@ -1,5 +1,11 @@
 """Unit tests for Kubernetes status interpretation helpers."""
 
+# MAINTAINER READING GUIDE
+# Protects normalization of Kubernetes/MongoDB phases and ShardedCluster component readiness calculations.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import unittest

@@ -14,6 +14,13 @@ infrastructure is different: that is an actionable mismatch and must raise
 ATTENTION REQUIRED.
 """
 
+# MAINTAINER READING GUIDE
+# Administrator status is broader than customer status.
+# It summarizes desired inventory plus live platform/operator artifacts so drift
+# and recovery conditions are visible without mutating anything.
+# Keep this module read-only. Recovery decisions belong in maintenance.py.
+
+
 from __future__ import annotations
 
 import textwrap

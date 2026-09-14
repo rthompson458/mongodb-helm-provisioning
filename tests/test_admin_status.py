@@ -1,5 +1,11 @@
 """Regression tests for administrator managed-resource status presentation."""
 
+# MAINTAINER READING GUIDE
+# Protects read-only administrator status and the distinction between desired inventory and live platform artifacts.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import io

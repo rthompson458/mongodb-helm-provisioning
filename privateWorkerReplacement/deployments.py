@@ -11,6 +11,14 @@ persistent volumes directly. Every managed change is expressed as desired state
 and passed to apply_inventory().
 """
 
+# MAINTAINER READING GUIDE
+# This module owns ReplicaSet/ShardedCluster lifecycle policy.
+# Readiness is intentionally stricter for ShardedClusters: the MongoDB CR must
+# be Running AND every shard, config server, and mongos component must be Online.
+# Add/delete workflows update desired state through Terraform and then verify the
+# live service. Database lifecycle is deliberately kept in databases.py.
+
+
 from __future__ import annotations
 
 from typing import Any
@@ -100,6 +108,8 @@ def require_running(
     stricter: overall Running plus every shard, config server, and mongos Online.
     """
 
+    # CHECK 1 - The Operator's top-level MongoDB phase must be Running for both
+    # deployment types. A Pending/Failed deployment is never safe for DB work.
     label = deployment_type_label(deployment)
     current = kube.phase(config, deployment_key)
     if current != "Running":
@@ -110,6 +120,9 @@ def require_running(
             + (f" Operator message: {message}" if message else "")
         )
 
+    # CHECK 2 - Running alone is not sufficient for a ShardedCluster. A shard,
+    # config server, or mongos can still be unavailable while the overall CR
+    # reports Running, so inspect each component before permitting work.
     if label == "ShardedCluster":
         status = kube.sharded_cluster_status(
             config,

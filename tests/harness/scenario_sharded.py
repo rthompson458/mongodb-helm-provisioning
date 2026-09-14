@@ -19,6 +19,12 @@ Canonical full-suite test intent:
 32. Delete the temporary ShardedCluster and complete cleanup.
 """
 
+# MAINTAINER READING GUIDE
+# End-to-end ShardedCluster lifecycle scenario, including topology, database/account work, readiness, and cleanup.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 from privateWorkerReplacement.config import load_config
@@ -28,6 +34,8 @@ from .runner import HarnessRunner
 TEST_COUNT = 16
 
 
+# Read in lifecycle order: create cluster -> wait for all components -> topology
+# changes -> database/account checks -> cleanup.
 def run(runner: HarnessRunner) -> None:
     """Exercise count-based shard operations, stopping on prerequisite failure."""
 

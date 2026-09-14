@@ -16,6 +16,21 @@ separate makes this file easier to review and prevents old status behavior from
 drifting alongside lifecycle code.
 """
 
+# MAINTAINER READING GUIDE
+# Database mutations are multi-stage workflows. Do not read apply_inventory()
+# calls as independent commands; each call is one stage of a larger transaction.
+#
+# AddDatabase on a ShardedCluster:
+#   load Vault inventory -> validate health -> acquire cluster lock ->
+#   Terraform/Helm materializes DB -> add DB to desired inventory ->
+#   Terraform creates metadata/credentials/MongoDBUsers -> reload Vault ->
+#   wait for MongoDBUser Updated -> Terraform verifies real authentication ->
+#   release cluster lock -> report success.
+#
+# Delete/rotate/enable/disable follow the same rule: Terraform owns managed
+# mutations, Python coordinates ordering, waits, retries, and final verification.
+
+
 from __future__ import annotations
 
 from typing import Any
@@ -170,10 +185,15 @@ def add_database(
     synchronous so the worker can report success only after verification.
     """
 
+    # STEP 1 - Rebuild current desired state from Vault before making any
+    # decision. The caller already holds the controller mutation lock, so this
+    # snapshot cannot become stale behind another successful mutation.
     inventory = vault.load_inventory()
     deployment_key, deployment, db_name = _resolve_database_args(
         config, inventory, deployment_or_database, database
     )
+    # STEP 2 - Refuse work on a busy or unhealthy deployment. For a
+    # ShardedCluster, require_running() checks every shard/config/mongos component.
     require_no_active_change(config, deployment_key, deployment)
     require_running(config, deployment_key, deployment)
 
@@ -193,6 +213,9 @@ def add_database(
         database=display,
     )
 
+    # STEP 3 - ShardedClusters get a deployment-specific lock around the entire
+    # DB change so shard topology cannot change underneath this workflow.
+    # ReplicaSets pass through this context manager without that extra lock.
     with protected_database_change(
         config,
         vault,
@@ -202,17 +225,20 @@ def add_database(
         "AddDatabase",
         display,
     ):
-        # Stage 1: materialize the database before adding account/credential
-        # desired state. This prevents credentials from being created for a
-        # database that never successfully came into existence.
+        # STEP 4 - Materialize the MongoDB database FIRST.
+        # MongoDB does not persist a truly empty DB, so Terraform drives the Helm
+        # provisioner Job that creates the internal placeholder collection.
+        # Credentials are intentionally NOT in desired state yet. If this stage
+        # fails, users/passwords are not created for a database that never existed.
         apply_inventory(
             config,
             inventory,
             _operation("create_database", deployment_key, deployment, display),
         )
 
-        # Stage 2: record managed database lifecycle state and let Terraform
-        # create the three fixed accounts plus Vault credentials.
+        # STEP 5 - Add the database to the in-memory desired inventory only
+        # after materialization succeeded. The next Terraform apply persists the
+        # metadata and creates all three managed credentials/users.
         now = iso_utc(utc_now())
         deployment["databases"][db_key] = {
             "display_name": display,
@@ -224,14 +250,16 @@ def add_database(
         }
         apply_inventory(config, inventory)
 
-        # Reload from Vault instead of trusting our in-memory dictionary. This
-        # verifies that Terraform persisted the desired metadata that future
-        # controller processes will use to reconstruct state.
+        # STEP 6 - Throw away our assumption that the write succeeded.
+        # Reload Vault and prove Terraform persisted the durable metadata that a
+        # future, separate controller process will use as its source of truth.
         updated_inventory = vault.load_inventory()
         updated_key, updated_deployment, updated_db_key, updated_db = require_db(
             updated_inventory, deployment["display_name"], display
         )
         require_running(config, updated_key, updated_deployment)
+        # STEP 7 - Wait for MongoDBUser CRs to reach Updated, then run a final
+        # Terraform lifecycle verification that performs REAL mongosh logins.
         _verify_database_accounts(
             config,
             updated_inventory,
@@ -241,6 +269,9 @@ def add_database(
             updated_db,
         )
 
+    # STEP 8 - Reaching here means materialization, durable desired state,
+    # Operator reconciliation, real authentication, and (for SCs) lock cleanup
+    # all completed. Only now is a success message justified.
     dtype = deployment_type_label(updated_deployment)
     log_event(
         "database.create.succeeded",

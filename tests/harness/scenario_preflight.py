@@ -8,6 +8,12 @@ Canonical full-suite test intent:
 5. Prove kubectl is available for Kubernetes status and lifecycle checks.
 """
 
+# MAINTAINER READING GUIDE
+# Read-only environment checks that prove required tools, config, cluster access, and dependencies exist before mutation scenarios run.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 from .runner import HarnessRunner

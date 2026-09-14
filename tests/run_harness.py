@@ -8,6 +8,12 @@ Run this program with no arguments, or use -h/--help, to show the full help
 screen. No live tests run when no arguments are supplied.
 """
 
+# MAINTAINER READING GUIDE
+# User-facing live-harness entry point. It parses profile/change flags, selects scenarios, and delegates execution to the harness runner.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import argparse
@@ -407,6 +413,9 @@ def _normal_scenario_plan(
     return selected
 
 
+# ENTRY FLOW: parse profile -> validate safety flags -> build the runner ->
+# execute selected scenarios -> print a final pass/fail/skip summary.
+# Scenario modules contain domain steps; keep orchestration here.
 def main(argv: list[str] | None = None) -> int:
     """Run the requested scenarios and return zero only when all checks pass."""
 

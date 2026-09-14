@@ -9,6 +9,12 @@ Canonical full-suite test intent:
 38. Delete the lock-test ShardedCluster and clean up its resources.
 """
 
+# MAINTAINER READING GUIDE
+# Live concurrency/locking scenarios. These prove overlapping operations are serialized or rejected instead of corrupting desired state.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import subprocess
@@ -69,6 +75,9 @@ def _wait_for_lock(
     return False
 
 
+# This scenario intentionally creates overlap. Preserve the timing/order being
+# tested: a second mutation must never replay stale desired state over a newer
+# successful change.
 def run(runner: HarnessRunner) -> None:
     """Prove concurrent customer mutation is blocked while AddShard is active.
 

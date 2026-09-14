@@ -1,5 +1,11 @@
 """Small data objects shared by the live test harness."""
 
+# MAINTAINER READING GUIDE
+# Small data models shared by the live harness. Keep these as passive data containers; execution belongs in runner/scenario modules.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

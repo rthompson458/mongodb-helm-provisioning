@@ -6,6 +6,12 @@ be committed. .gitignore prevents ordinary accidental adds; this test also
 catches a forced add so CI can reject it before merge.
 """
 
+# MAINTAINER READING GUIDE
+# Enforces repository-level cleanup rules so retired names, runtime files, and other unwanted artifacts do not return.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import re

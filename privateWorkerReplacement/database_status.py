@@ -15,6 +15,15 @@ This module never mutates DBaaS state. Shared Vault path/URL presentation lives
 in credential_display.py so status code does not depend on lifecycle internals.
 """
 
+# MAINTAINER READING GUIDE
+# Database status intentionally combines TWO sources:
+# 1. Vault inventory for durable managed databases.
+# 2. Async operation records for a DB that is still Creating/Deleting before or
+#    after its Vault entry exists.
+# This prevents the public CLI from saying "not found" while background work is
+# legitimately in progress. Account/credential detail is a separate command.
+
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -208,6 +217,9 @@ def list_database(
         config, inventory, deployment_or_database, database
     )
     db_key, _ = normalize_database(db_name)
+    # Async operation records bridge the timing gap around Vault metadata:
+    # AddDatabase can be Creating before its metadata exists; DeleteDatabase can
+    # still be Deleting briefly after metadata is removed.
     active_changes = _active_database_changes(config, inventory)
 
     db = deployment["databases"].get(db_key)

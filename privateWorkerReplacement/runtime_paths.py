@@ -15,6 +15,13 @@ state, not human logs.  They live under ``logs/operations/state`` so an operator
 can still find everything related to controller execution in one place.
 """
 
+# MAINTAINER READING GUIDE
+# This module owns predictable runtime file locations only.
+# All paths are derived from the selected config file so a controller instance
+# keeps its logs, operation state, and temporary worker transcripts together.
+# No file content is interpreted here.
+
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

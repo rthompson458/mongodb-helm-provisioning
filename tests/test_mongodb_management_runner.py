@@ -5,6 +5,12 @@ for the integrated MongoDB management Helm chart without requiring a live
 Kubernetes, MongoDB, Vault, or Helm environment.
 """
 
+# MAINTAINER READING GUIDE
+# Protects the Terraform/Helm logical-database management contract and values/operations passed to the integrated chart.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import json

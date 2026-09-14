@@ -1,5 +1,11 @@
 """Unit tests for detached asynchronous operation state."""
 
+# MAINTAINER READING GUIDE
+# Protects detached-worker journaling, result transitions, transcript handling, and acknowledgement text.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import tempfile

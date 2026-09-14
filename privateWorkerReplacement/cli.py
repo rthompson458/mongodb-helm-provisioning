@@ -17,6 +17,18 @@ Maintainer note:
   Section comments below separate deployment, topology, and database commands.
 """
 
+# MAINTAINER READING GUIDE
+# Customer command flow:
+# 1. build_parser() defines the public command syntax and help text.
+# 2. main() parses arguments, loads dev.config, and starts logging.
+# 3. Long-running lifecycle commands are handed to async_operations.py.
+# 4. The detached worker re-enters this same main() with --_operation-worker.
+# 5. The worker creates VaultClient, selects the business action, and runs it.
+# 6. Mutating actions are wrapped by the controller-wide mutation lock.
+# 7. Business logic lives in deployments.py, shards.py, and databases.py.
+# Read main() from top to bottom first. Then follow only the selected action.
+
+
 from __future__ import annotations
 
 import argparse
@@ -716,6 +728,9 @@ def _run_action(
 def main(argv: list[str] | None = None) -> int:
     """Parse and execute one customer command; no command prints full help."""
 
+    # PHASE 1 - Parse the foreground request or detached-worker request.
+    # The same main() handles both. --_operation-worker is what distinguishes
+    # a detached worker from the command the customer typed.
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser(_config_path_from_argv(raw_argv))
     if not raw_argv:
@@ -736,6 +751,10 @@ def main(argv: list[str] | None = None) -> int:
         logging_ready = True
         log_event("command.started", command=args.command)
 
+        # PHASE 2 - Foreground handoff for long-running work.
+        # Do not execute the lifecycle action in the customer's process. Create
+        # an operation record, start a detached copy of this program, print the
+        # acknowledgement/status command, and return the shell promptly.
         if args.command in ASYNC_COMMANDS and not operation_id:
             _validate_async_submission(args, config)
             state = launch_operation(
@@ -764,9 +783,15 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
 
+        # PHASE 3 - Detached worker re-entry.
+        # A worker skips the foreground handoff above. Mark it running before
+        # touching desired state so ListOperation/status code can report progress.
         if operation_id:
             mark_running(config_path, operation_id)
 
+        # PHASE 4 - Build shared service clients, then select exactly one action.
+        # VaultClient reads the durable desired-state inventory. Terraform owns
+        # normal managed writes; the client is not a second mutation engine.
         vault = VaultClient(config)
         actions = {
             "AddReplicaSet": lambda: add_replica_set(config, vault, args.deployment),
@@ -791,8 +816,14 @@ def main(argv: list[str] | None = None) -> int:
             "DisableOwner": lambda: disable_owner(config, vault, args.deployment_or_database, args.database, args.confirm),
             "EnableOwner": lambda: enable_owner(config, vault, args.deployment_or_database, args.database),
         }
+        # PHASE 5 - Execute the selected command.
+        # _run_action() adds the controller-wide mutation lock for write commands
+        # before the business function is allowed to load/modify desired state.
         _run_action(config, args.command, actions[args.command])
 
+        # PHASE 6 - Only the detached worker has an operation journal entry.
+        # Mark success after the business function has completed all waits and
+        # verification. A successful Terraform apply alone is not enough.
         if operation_id:
             mark_succeeded(config_path, operation_id)
         log_event("command.succeeded", command=args.command)

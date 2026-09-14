@@ -83,6 +83,12 @@ available for inspection. In --testList mode, only requested numbered tests run;
 prerequisite tests are not added automatically.
 """
 
+# MAINTAINER READING GUIDE
+# Live administrator/recovery scenarios. These deliberately exercise guarded diagnostics, reconcile, and recovery paths against real infrastructure.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import base64

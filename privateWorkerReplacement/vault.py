@@ -13,6 +13,16 @@ A legacy ReplicaSet hierarchy is still readable so older POC state can migrate
 without being silently lost.
 """
 
+# MAINTAINER READING GUIDE
+# Vault has two distinct roles in this design:
+# 1. Terraform WRITES managed metadata and credentials.
+# 2. This Python client READS metadata to reconstruct desired state for the next
+#    controller command.
+# load_inventory() is therefore the starting point for most mutations. It walks
+# the current Deployment/Database hierarchy, then merges legacy layout records
+# only as a migration fallback. Do not add normal secret writes to this client.
+
+
 from __future__ import annotations
 
 import json
@@ -324,7 +334,12 @@ class VaultClient:
         Current-layout records take precedence if both exist.
         """
 
+        # STEP 1 - Prefer the current human-facing hierarchy. This is the
+        # authoritative desired-state view for new controller versions.
         current = self._load_current_layout()
+
+        # STEP 2 - Read old ReplicaSet-only metadata only for migration support.
+        # setdefault() below guarantees a current-layout record always wins.
         legacy = self._load_legacy_layout()
         for key, value in legacy.items():
             current.setdefault(key, value)

@@ -1,5 +1,11 @@
 """Regression tests for Terraform serialization, source refresh, and diagnostics."""
 
+# MAINTAINER READING GUIDE
+# Protects the Python-to-Terraform bridge: tools, cache sync, TF_VAR inputs, temporary var files, locks, and execution.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import subprocess

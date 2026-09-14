@@ -1,5 +1,11 @@
 """Unit tests for the end-user command-line interface."""
 
+# MAINTAINER READING GUIDE
+# Protects customer CLI parsing, dispatch, and foreground-vs-worker behavior.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import unittest

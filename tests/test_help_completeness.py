@@ -6,6 +6,12 @@ multi-word description plus at least one runnable example. Command-specific
 tests in test_cli.py/test_admin_cli.py cover important safety/default wording.
 """
 
+# MAINTAINER READING GUIDE
+# Checks that every supported public/admin command appears in help with usable descriptions and examples.
+# Treat these tests as executable design documentation. A failing assertion
+# should identify which controller contract changed, not merely that text moved.
+
+
 from __future__ import annotations
 
 import unittest
