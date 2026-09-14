@@ -213,10 +213,6 @@ def run(runner: HarnessRunner) -> None:
     """Hammer the live administrator interface and prove cleanup/recovery behavior."""
 
     ctx = runner.context
-    config = load_config(ctx.config_path)
-    vault = VaultClient(config)
-    kubectl = kube.base(config)
-    namespace = str(config["mongodb_namespace"])
 
     admin_rs = f"AdminRSTest-{ctx.run_id}"
     admin_db = f"AdminDB_{ctx.run_id}"
@@ -269,6 +265,15 @@ def run(runner: HarnessRunner) -> None:
             "managed deployments."
         ).strip()
         return
+
+    # ListManagedResources just proved the selected configuration, Vault
+    # credentials, Kubernetes access, and Ops Manager inventory path are usable.
+    # Load those values in-process only after that guarded live check succeeds so
+    # a bad environment becomes a normal harness failure instead of a traceback.
+    config = load_config(ctx.config_path)
+    vault = VaultClient(config)
+    kubectl = kube.base(config)
+    namespace = str(config["mongodb_namespace"])
 
     if not runner.admin(
         "Reconcile is a no-op when desired-state inventory is empty",
