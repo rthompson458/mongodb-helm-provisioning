@@ -59,6 +59,39 @@ class DocumentationConsistencyTests(unittest.TestCase):
         )
         self.assertEqual(missing, [])
 
+    def test_primary_guides_link_to_maintainer_guide(self) -> None:
+        """Keep the reviewer-oriented architecture map discoverable."""
+
+        for relative in (
+            "README.md",
+            "README-privateWorkerReplacement.md",
+            "README-privateWorkerReplacementAdmin.md",
+            "tests/README.md",
+            "terraform-dbaas/README.md",
+        ):
+            with self.subTest(document=relative):
+                text = (REPO_ROOT / relative).read_text(encoding="utf-8")
+                self.assertIn("docs/MAINTAINER-GUIDE.md", text)
+
+    def test_maintainer_guide_mentions_every_production_module(self) -> None:
+        """Every production Python module must have an ownership breadcrumb."""
+
+        guide = (REPO_ROOT / "docs" / "MAINTAINER-GUIDE.md").read_text(
+            encoding="utf-8"
+        )
+        production_modules = sorted(
+            path.name
+            for path in (REPO_ROOT / "privateWorkerReplacement").glob("*.py")
+            if path.name != "__init__.py"
+        )
+        missing = [name for name in production_modules if f"`{name}`" not in guide]
+        self.assertEqual(
+            missing,
+            [],
+            "Production modules missing from maintainer guide: "
+            + ", ".join(missing),
+        )
+
     def test_testing_readme_matches_live_profile_counts(self) -> None:
         """Profile totals in tests/README.md must match executable scenario counts."""
 
