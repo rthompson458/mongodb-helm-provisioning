@@ -311,7 +311,7 @@ An orphan Ops Manager project, orphan `<PROJECT_ID>-group-secret`, a managed dep
 
 ## 9. Recommended validation workflow after changes
 
-Do not run the complete 38-check harness after every small change.
+Do not run the complete 95-check harness after every small change.
 
 Use this approach:
 
