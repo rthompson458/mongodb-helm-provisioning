@@ -95,7 +95,12 @@ HouseInfo_read       -> read
 
 The public CLI deliberately hides operation IDs, worker PIDs, Terraform plans, raw implementation diagnostics, Kubernetes implementation details used only for troubleshooting, and recovery mechanics.
 
-The administrator CLI exposes the diagnostics needed to operate and recover the service, but detailed Terraform/external-command stdout and stderr are still written to the operations log instead of flooding the terminal.
+The administrator CLI exposes the diagnostics needed to operate and recover the
+service. Long-running administrator mutations (`Reconcile`,
+`RecoverDeploymentLock`, and `RecoverOrphanedResources`) start detached
+workers and return an Operation ID for monitoring. Detailed
+Terraform/external-command stdout and stderr are still written to the operations
+log instead of flooding the terminal.
 
 The executable split is an interface boundary, not an authorization boundary. Production must still restrict administrator host, Kubernetes, Vault, and Terraform access.
 
