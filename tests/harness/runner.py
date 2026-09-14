@@ -21,6 +21,8 @@ from .models import AsyncOperation, HarnessContext, StepResult
 
 
 def _duration(seconds: float) -> str:
+    """Format elapsed seconds as a stable HH:MM:SS harness duration."""
+
     total = max(0, int(seconds))
     hours, remainder = divmod(total, 3600)
     minutes, secs = divmod(remainder, 60)
@@ -31,6 +33,8 @@ class HarnessRunner:
     """Run commands and collect results without hiding useful diagnostics."""
 
     def __init__(self, context: HarnessContext):
+        """Initialize result collection, timing, and canonical numbering state."""
+
         self.context = context
         self.results: list[StepResult] = []
         self.started_at = time.monotonic()
