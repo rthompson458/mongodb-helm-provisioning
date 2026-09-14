@@ -15,26 +15,33 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def _production_python_files() -> list[Path]:
-    """Return controller Python sources while excluding tests and generated files."""
+def _maintainer_facing_python_files() -> list[Path]:
+    """Return production and live-harness sources that require docstrings.
+
+    Ordinary unit tests are intentionally excluded. The live harness is included
+    because it is operational engineering code that maintainers read and run
+    directly against the real environment.
+    """
 
     files = [
         REPO_ROOT / "privateWorkerReplacement.py",
         REPO_ROOT / "privateWorkerReplacementAdmin.py",
+        REPO_ROOT / "tests" / "run_harness.py",
     ]
     files.extend(sorted((REPO_ROOT / "privateWorkerReplacement").glob("*.py")))
+    files.extend(sorted((REPO_ROOT / "tests" / "harness").glob("*.py")))
     return files
 
 
 class SourceDocumentationTests(unittest.TestCase):
-    """Require docstrings on every production class and function definition."""
+    """Require docstrings on maintainer-facing classes and functions."""
 
-    def test_production_functions_and_classes_have_docstrings(self) -> None:
+    def test_maintainer_facing_functions_and_classes_have_docstrings(self) -> None:
         """Fail with exact file/line locations when maintainability regresses."""
 
         missing: list[str] = []
 
-        for path in _production_python_files():
+        for path in _maintainer_facing_python_files():
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             for node in ast.walk(tree):
                 if not isinstance(
@@ -50,7 +57,7 @@ class SourceDocumentationTests(unittest.TestCase):
         self.assertEqual(
             missing,
             [],
-            "Production functions/classes missing docstrings:\n"
+            "Maintainer-facing functions/classes missing docstrings:\n"
             + "\n".join(missing),
         )
 
