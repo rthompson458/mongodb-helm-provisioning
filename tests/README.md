@@ -3,7 +3,7 @@
 The privateWorkerReplacement test suite has two jobs:
 
 1. **Fast unit/regression tests** validate controller logic without touching a live MongoDB environment.
-2. **The live end-to-end harness** drives the real customer CLI against Kubernetes, Ops Manager, Vault, Terraform, and MongoDB.
+2. **The live end-to-end harness** drives the real customer and administrator CLIs against Kubernetes, Ops Manager, Vault, Terraform, and MongoDB.
 
 The live harness is intended for a development environment such as the local k3d environment. Do not point lifecycle profiles at production.
 
@@ -47,7 +47,7 @@ This is intentionally equivalent to:
 python3 tests/run_harness.py --help
 ```
 
-No live tests run when no arguments are supplied. An actual harness run requires an explicit `--profile`.
+No live tests run when no arguments are supplied. An actual harness run requires an explicit `--profile`, `--admin`, or both.
 
 `--help` is global harness help. For example, this is safe and does not run the locking profile:
 
@@ -66,6 +66,8 @@ Harness
   -> lifecycle.sh where required
   -> Kubernetes / MongoDB Operator / Ops Manager / Vault / MongoDB
 ```
+
+The administrator suite also drives `privateWorkerReplacementAdmin.py` directly. It deliberately creates recoverable drift, invalid/valid stranded deployment locks, and orphaned Terraform state so the real recovery paths are exercised instead of only mocked.
 
 The harness does not treat an asynchronous request acknowledgement as success. It correlates the private operation-state record and polls `privateWorkerReplacementAdmin.py ListOperation` until the operation reports a terminal result.
 
@@ -119,7 +121,44 @@ python3 tests/run_harness.py --profile locking --allow-changes
 
 The locking scenario adds 6 checks after preflight. It verifies that the Terraform-created ShardedCluster deployment lock appears during an active topology change, blocks conflicting work, disappears after completion, and leaves the cluster readable before cleanup.
 
-### Complete acceptance run — 38 total checks
+### Administrator recovery suite — 62 total checks
+
+The administrator suite is selected with a flag rather than a normal lifecycle profile:
+
+```bash
+python3 tests/run_harness.py --admin --allow-changes
+```
+
+It runs the 5 read-only preflight checks plus 57 administrator checks. The suite requires a **clean DBaaS starting inventory** because it intentionally damages and repairs the test environment. It verifies:
+
+- administrator help, operation-journal reads, and unknown-operation handling;
+- zero-state `ListManagedResources` and no-op `Reconcile`;
+- required confirmation on destructive recovery commands;
+- live ReplicaSet/database creation for Reconcile testing;
+- detection of a manually deleted `MongoDBUser`;
+- `Reconcile` recreation of the missing user;
+- preservation of the existing Vault and Kubernetes passwords;
+- real MongoDB authentication after Reconcile;
+- `ListManagedResources` reporting `ATTENTION REQUIRED` for runtime drift;
+- Reconcile refusal while a ShardedCluster deployment lock exists;
+- refusal to recover a lock whose recorded target does not match desired state;
+- successful recovery of a validated stranded topology lock;
+- a manufactured partial-destroy condition with empty Vault inventory but Terraform-tracked leftovers;
+- `RecoverOrphanedResources` refusal while managed inventory still exists;
+- successful asynchronous orphan recovery after its independent safety checks pass;
+- final Kubernetes/Vault cleanup and a final `Status: CLEAN` inventory.
+
+The suite stops on the first failure. A failed destructive test may intentionally leave its broken state available for diagnosis. A **passing** administrator run finishes clean.
+
+`--admin` may also be added to a specific lifecycle profile. For example:
+
+```bash
+python3 tests/run_harness.py --profile replicaset --admin --allow-changes
+```
+
+The `all` profile already includes the full administrator suite, so adding `--admin` to `--profile all` does not duplicate the tests.
+
+### Complete acceptance run — 95 total checks
 
 Run the full gauntlet only when broad end-to-end acceptance is needed:
 
@@ -127,23 +166,23 @@ Run the full gauntlet only when broad end-to-end acceptance is needed:
 python3 tests/run_harness.py --profile all --allow-changes
 ```
 
-This runs preflight, ReplicaSet, ShardedCluster, and locking scenarios.
+This runs preflight, ReplicaSet, ShardedCluster, locking, and the complete administrator recovery suite.
 
-The harness help derives these displayed totals from the scenario `TEST_COUNT` constants, and the CLI regression suite verifies the current 5/16/21/11/38 profile totals so documentation drift is caught quickly.
+The harness help derives displayed totals from the scenario `TEST_COUNT` constants. The CLI regression suite verifies the current 5/16/21/11/62/95 totals so documentation drift is caught quickly.
 
 ---
 
 ## 4. Safety flag
 
-Every lifecycle profile (`replicaset`, `sharded`, `locking`, `all`) requires:
+Every mutating lifecycle selection and the administrator suite require:
 
 ```text
 --allow-changes
 ```
 
-`--allow-changes` explicitly acknowledges that the harness may create, modify, and delete temporary test resources in the configured environment.
+`--allow-changes` explicitly acknowledges that the harness may create, modify, deliberately damage, recover, and delete temporary test resources in the configured environment.
 
-The flag is a deliberate safety gate. Naming a lifecycle profile by itself does **not** start that profile; the harness refuses to proceed until `--allow-changes` is present.
+The flag is a deliberate safety gate. A mutating profile or `--admin` does **not** start until `--allow-changes` is present.
 
 The read-only `preflight` profile does not require `--allow-changes`.
 
@@ -182,6 +221,10 @@ RSTest-0910145230
 SCTest-0910145230
 LockTest-0910145230
 DBTest_0910145230
+AdminRSTest-0910145230
+AdminSCTest-0910145230
+AdminDB_0910145230
+OrphanRSTest-0910145230
 ```
 
 The numeric portion is generated automatically for each run so interrupted-test leftovers do not collide with later runs.
@@ -205,7 +248,7 @@ At the end, the harness reports pass/fail totals plus elapsed time for each prof
 A successful complete run ends with:
 
 ```text
-HARNESS SUMMARY: 38 passed / 0 failed
+HARNESS SUMMARY: 95 passed / 0 failed
 ```
 
 ---
@@ -242,9 +285,11 @@ The daily files are append-only and use a UTC date. The harness reads the state 
 
 ## 8. Cleanup and failed runs
 
-Successful lifecycle profiles delete the temporary resources they create.
+Successful lifecycle profiles delete the temporary resources they create. A successful administrator suite additionally proves its test resources are absent from Kubernetes and Vault and finishes with `ListManagedResources` reporting `Status: CLEAN`.
 
-After a failed run, temporary managed resources may intentionally remain so the failed state can be inspected. Do not manually delete controller-managed MongoDB/Vault/Kubernetes resources merely to make the next test start clean.
+The administrator suite requires a clean DBaaS inventory before it starts. This prevents its destructive recovery tests from adopting or deleting unrelated managed deployments.
+
+After a failed run, temporary or deliberately damaged resources may intentionally remain so the failed state can be inspected. Do not manually delete controller-managed MongoDB/Vault/Kubernetes resources merely to make the next test start clean.
 
 Use the normal Terraform-driven lifecycle/recovery path. An administrator can inspect managed resource state with:
 
@@ -275,6 +320,7 @@ Use this approach:
 3. For narrow ReplicaSet/database lifecycle changes, run `--profile replicaset --allow-changes`.
 4. For ShardedCluster/shard changes, run `--profile sharded --allow-changes`.
 5. For deployment-lock/concurrency changes, run `--profile locking --allow-changes`.
-6. Reserve `--profile all --allow-changes` for broad cross-cutting lifecycle changes, release/demo baselines, or other true acceptance milestones.
+6. For administrator inventory, Reconcile, recovery, or cross-plane consistency changes, run `--admin --allow-changes` from a clean DBaaS starting inventory.
+7. Reserve `--profile all --allow-changes` for broad cross-cutting lifecycle changes, release/demo baselines, or other true acceptance milestones.
 
-This keeps normal feedback fast while preserving the full 38-check run for the occasions when its broad coverage is actually valuable.
+This keeps normal feedback fast while preserving the full 95-check run for the occasions when its broad coverage is actually valuable.
