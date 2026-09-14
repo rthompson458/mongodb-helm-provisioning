@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import io
 import re
 import tempfile
@@ -96,6 +97,28 @@ class HarnessRunnerSelectionTests(unittest.TestCase):
                     scenario.__doc__ or "",
                 )
             )
+
+        self.assertEqual(documented, list(range(1, 101)))
+
+    def test_all_100_live_tests_have_inline_test_why_pass_comments(self) -> None:
+        """Keep every canonical live test defensible at its implementation site."""
+
+        documented: list[int] = []
+        for scenario in (
+            scenario_preflight,
+            scenario_replicaset,
+            scenario_sharded,
+            scenario_locking,
+            scenario_admin,
+        ):
+            source = inspect.getsource(scenario)
+            matches = re.findall(
+                r"(?m)^\s*# TEST (\d+) - .+\n"
+                r"\s*# WHY: .+\n"
+                r"\s*# PASS: .+$",
+                source,
+            )
+            documented.extend(int(number) for number in matches)
 
         self.assertEqual(documented, list(range(1, 101)))
 
