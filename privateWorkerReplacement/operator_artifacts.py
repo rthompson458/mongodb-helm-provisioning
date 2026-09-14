@@ -83,6 +83,7 @@ def cleanup_deployment_operator_artifacts(
                     name,
                     "--ignore-not-found=true",
                     "--wait=true",
+                    *(["--cascade=foreground"] if resource == "job" else []),
                 ],
                 capture=True,
                 check=False,
@@ -101,6 +102,22 @@ def cleanup_deployment_operator_artifacts(
                 raise ControllerError(
                     f"Kubernetes {resource} '{name}' still exists after cleanup."
                 )
+
+            if resource == "job":
+                pods = kube.list_json(
+                    config,
+                    "pod",
+                    label_selector=f"job-name={name}",
+                )
+                if pods:
+                    pod_names = ", ".join(
+                        str(item.get("metadata", {}).get("name", "<unknown>"))
+                        for item in pods
+                    )
+                    raise ControllerError(
+                        f"Pod(s) for Kubernetes job '{name}' still exist after "
+                        f"cleanup: {pod_names}."
+                    )
 
             log_event(
                 "operator_artifact.cleanup.checked",
