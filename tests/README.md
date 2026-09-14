@@ -35,6 +35,28 @@ GitHub Actions runs the unit suite as part of the repository validation workflow
 
 ## 2. Live harness
 
+### Prepare the local Vault environment
+
+The supplied `dev.config` expects Vault at `http://127.0.0.1:8200` and expects
+the token in the current shell as `VAULT_TOKEN`. Do not put the token in
+`dev.config`.
+
+For the current local k3d/Vault development environment, set the token without
+printing it:
+
+```bash
+export VAULT_TOKEN="$(kubectl exec -n vault vault-0 -- sh -c 'printf %s "$VAULT_DEV_ROOT_TOKEN_ID"')"
+```
+
+Verify that the shell variable is populated without displaying the secret:
+
+```bash
+test -n "$VAULT_TOKEN" && echo "VAULT_TOKEN is set"
+```
+
+Run the harness from that **same shell**. If the variable is missing, the
+controller stops before lifecycle work and prints these exact recovery commands.
+
 Run the harness with no arguments to show its complete help screen:
 
 ```bash
