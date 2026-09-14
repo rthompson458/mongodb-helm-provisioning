@@ -1,4 +1,11 @@
-"""Command execution, async polling, timing, and PASS/FAIL reporting."""
+"""Command execution, async polling, timing, and PASS/FAIL reporting.
+
+HarnessRunner is deliberately infrastructure-agnostic. Scenario files describe
+*what* to test; this class owns *how* a numbered test executes, how asynchronous
+controller/admin operations are correlated and polled, and how evidence is
+rendered. Keeping command mechanics here prevents each scenario from inventing
+its own subprocess, timeout, numbering, and failure-reporting behavior.
+"""
 
 from __future__ import annotations
 
