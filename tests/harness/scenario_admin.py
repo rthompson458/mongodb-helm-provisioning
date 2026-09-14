@@ -156,7 +156,16 @@ def _harness_kubernetes_leftovers(
     """Return named Kubernetes artifacts still owned by this admin test run."""
 
     leftovers: list[str] = []
-    namespaced_resources = ("mongodb", "mongodbuser", "pvc", "secret", "configmap")
+    namespaced_resources = (
+        "mongodb",
+        "mongodbuser",
+        "statefulset",
+        "pod",
+        "job",
+        "pvc",
+        "secret",
+        "configmap",
+    )
 
     for resource in namespaced_resources:
         for item in kube.list_json(config, resource):
@@ -166,6 +175,7 @@ def _harness_kubernetes_leftovers(
             owner = str(labels.get("dbaas.deployment", ""))
             if owner in deployment_keys or any(
                 name == key
+                or name.startswith(f"{key}-")
                 or name.startswith(f"tc-{key}-")
                 or name.startswith(f"data-{key}-")
                 or name == f"tc-deployment-lock-{key}"
