@@ -357,7 +357,7 @@ def _normal_scenario_plan(
     return selected
 
 
-# ENTRY FLOW: parse profile -> validate safety flags -> build the runner ->
+# ENTRY FLOW: parse selection -> validate configuration -> build the runner ->
 # execute selected scenarios -> print a final pass/fail/skip summary.
 # Scenario modules contain domain steps; keep orchestration here.
 def main(argv: list[str] | None = None) -> int:
