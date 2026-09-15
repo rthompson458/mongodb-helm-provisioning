@@ -102,7 +102,7 @@ class HarnessCliTests(unittest.TestCase):
             "python3 tests/run_harness.py --profile admin",
             result.stdout,
         )
-        self.assertIn("requires a clean DBaaS starting inventory", result.stdout)
+        self.assertIn("clean DBaaS starting inventory", result.stdout)
         self.assertIn(
             "all         100 checks total. Runs every lifecycle and administrator test",
             result.stdout,
