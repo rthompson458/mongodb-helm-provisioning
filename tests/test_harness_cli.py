@@ -40,7 +40,8 @@ class HarnessCliTests(unittest.TestCase):
         self.assertIn("usage:", result.stdout)
         self.assertIn("FULL GAUNTLET", result.stdout)
         self.assertIn("--profile", result.stdout)
-        self.assertIn("--admin", result.stdout)
+        self.assertIn("admin", result.stdout)
+        self.assertNotIn("--admin", result.stdout)
         self.assertIn("--testList", result.stdout)
         self.assertEqual(result.stderr, "")
         self.assertNotIn("privateWorkerReplacement Live Test Harness\n=", result.stdout)
@@ -53,7 +54,7 @@ class HarnessCliTests(unittest.TestCase):
         self.assertIn("replicaset  16 checks total", result.stdout)
         self.assertIn("sharded     21 checks total", result.stdout)
         self.assertIn("locking     11 checks total", result.stdout)
-        self.assertIn("--admin     67 checks total when run alone", result.stdout)
+        self.assertIn("admin       67 checks total", result.stdout)
         self.assertIn("all         100 checks total", result.stdout)
         self.assertIn("FULL GAUNTLET - all 100 live acceptance checks", result.stdout)
         self.assertIn("--allow-changes", result.stdout)
@@ -78,12 +79,12 @@ class HarnessCliTests(unittest.TestCase):
         self.assertNotIn("--python", result.stdout)
         self.assertNotIn("--suffix", result.stdout)
 
-    def test_profile_or_admin_selection_is_required_for_an_actual_run(self) -> None:
+    def test_profile_or_test_list_selection_is_required_for_an_actual_run(self) -> None:
         result = self._run("--verbose")
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Choose --profile", result.stderr)
-        self.assertIn("--admin", result.stderr)
+        self.assertIn("admin", result.stderr)
         self.assertIn("--testList", result.stderr)
 
     def test_lifecycle_profile_requires_allow_changes(self) -> None:
@@ -94,7 +95,7 @@ class HarnessCliTests(unittest.TestCase):
         self.assertIn("--allow-changes", result.stderr)
 
     def test_admin_suite_requires_allow_changes(self) -> None:
-        result = self._run("--admin")
+        result = self._run("--profile", "admin")
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("deliberately damage", result.stderr)
@@ -105,7 +106,7 @@ class HarnessCliTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0)
         self.assertIn(
-            "python3 tests/run_harness.py --admin --allow-changes",
+            "python3 tests/run_harness.py --profile admin --allow-changes",
             result.stdout,
         )
         self.assertIn("requires a clean DBaaS starting inventory", result.stdout)
@@ -192,16 +193,23 @@ class HarnessCliTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("not allowed with argument", result.stderr)
 
-    def test_admin_and_test_list_are_rejected_together(self) -> None:
+    def test_admin_profile_and_test_list_are_mutually_exclusive(self) -> None:
         result = self._run(
+            "--profile",
+            "admin",
             "--testList",
             "97-100",
-            "--admin",
             "--allow-changes",
         )
 
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("--testList cannot be combined with --admin", result.stderr)
+        self.assertIn("not allowed with argument", result.stderr)
+
+    def test_removed_admin_flag_is_rejected(self) -> None:
+        result = self._run("--admin", "--allow-changes")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unrecognized arguments: --admin", result.stderr)
 
     def test_test_list_requires_allow_changes(self) -> None:
         result = self._run("--testList", "97-100")
