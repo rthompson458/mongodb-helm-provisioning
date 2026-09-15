@@ -194,7 +194,7 @@ It creates, changes, and deletes nothing.
 ### ReplicaSet — 16 total checks
 
 ```bash
-python3 tests/run_harness.py --profile replicaset --allow-changes
+python3 tests/run_harness.py --profile replicaset
 ```
 
 The ReplicaSet scenario adds 11 lifecycle checks after preflight. It creates a temporary ReplicaSet and database, verifies database/account status, verifies blocked deletion while the database exists, rotates credentials, disables and re-enables Owner, deletes the database, and deletes the temporary ReplicaSet.
@@ -202,7 +202,7 @@ The ReplicaSet scenario adds 11 lifecycle checks after preflight. It creates a t
 ### ShardedCluster — 21 total checks
 
 ```bash
-python3 tests/run_harness.py --profile sharded --allow-changes
+python3 tests/run_harness.py --profile sharded
 ```
 
 The ShardedCluster scenario adds 16 lifecycle checks after preflight. It also verifies the configured `max_shards_per_cluster` safety ceiling: cluster creation above the maximum is refused, and `AddShard` is refused when the resulting shard count would exceed the maximum. The remaining checks exercise cluster creation, shard status, allowed shard expansion, database creation, shard contraction, password rotation, Owner disable/re-enable, database deletion, final-shard protection, and cluster deletion.
@@ -210,7 +210,7 @@ The ShardedCluster scenario adds 16 lifecycle checks after preflight. It also ve
 ### Locking — 11 total checks
 
 ```bash
-python3 tests/run_harness.py --profile locking --allow-changes
+python3 tests/run_harness.py --profile locking
 ```
 
 The locking scenario adds 6 checks after preflight. It verifies that the Terraform-created ShardedCluster deployment lock appears during an active topology change, blocks conflicting work, disappears after completion, and leaves the cluster readable before cleanup.
@@ -220,7 +220,7 @@ The locking scenario adds 6 checks after preflight. It verifies that the Terrafo
 The administrator recovery suite is a normal harness profile:
 
 ```bash
-python3 tests/run_harness.py --profile admin --allow-changes
+python3 tests/run_harness.py --profile admin
 ```
 
 It runs the 5 read-only preflight checks plus 62 administrator checks. The suite requires a **clean DBaaS starting inventory** because it intentionally damages and repairs the test environment. It verifies:
@@ -254,8 +254,8 @@ Use `--testList` when a narrow change needs only specific tests from the
 canonical 100-test full-suite numbering:
 
 ```bash
-python3 tests/run_harness.py --testList 97-100 --allow-changes
-python3 tests/run_harness.py --testList 56,58-67 --allow-changes
+python3 tests/run_harness.py --testList 97-100
+python3 tests/run_harness.py --testList 56,58-67
 ```
 
 Rules:
@@ -267,7 +267,6 @@ Rules:
 - valid test numbers are 1 through 100;
 - duplicate selections are harmless and are normalized;
 - `--profile` and `--testList` are mutually exclusive;
-- every `--testList` run requires `--allow-changes`;
 - **only** the requested tests run. Prerequisite tests are not added automatically;
 - when possible, selective mode reuses the newest prior harness Run ID from the
   operation journal so surviving resources from a failed run retain the names
@@ -298,7 +297,7 @@ check defensible without requiring a maintainer to reverse-engineer the test cod
 Run the full gauntlet only when broad end-to-end acceptance is needed:
 
 ```bash
-python3 tests/run_harness.py --profile all --allow-changes
+python3 tests/run_harness.py --profile all
 ```
 
 This runs preflight, ReplicaSet, ShardedCluster, locking, and the complete administrator recovery suite.
@@ -307,22 +306,21 @@ The harness help derives displayed totals from the scenario `TEST_COUNT` constan
 
 ---
 
-## 4. Safety flag
+## 4. Harness safety model
 
-Every mutating profile and every `--testList` selection require:
+The harness is intentionally a live environment test tool. Selecting a mutating
+profile or an exact `--testList` is itself the instruction to run those checks;
+there is no separate change-acknowledgement flag.
 
-```text
---allow-changes
-```
+The `replicaset`, `sharded`, `locking`, `admin`, and `all` profiles may
+create, modify, deliberately damage, recover, and delete temporary test
+resources in the configured environment. Selective `--testList` execution may
+also target mutating or destructive checks directly and does not add missing
+prerequisites automatically.
 
-`--allow-changes` explicitly acknowledges that the harness may create, modify, deliberately damage, recover, and delete temporary test resources in the configured environment.
-
-The flag is a deliberate safety gate. A mutating profile or `--testList` does
-**not** start until `--allow-changes` is present. Selective
-mode always requires the flag because it intentionally skips normal scenario
-prerequisites and may target destructive tests directly.
-
-The read-only `preflight` profile does not require `--allow-changes`.
+The `preflight` profile remains read-only. The administrator profile still
+requires a clean DBaaS starting inventory because its recovery checks
+intentionally manufacture drift, stranded locks, and orphaned state.
 
 ---
 
@@ -458,14 +456,14 @@ Use this approach:
 
 1. For documentation, display text, help text, or other presentation-only changes, rely on GitHub Actions/unit tests unless the change affects live behavior.
 2. For a quick environment sanity check, run `--profile preflight`.
-3. For narrow ReplicaSet/database lifecycle changes, run `--profile replicaset --allow-changes`.
-4. For ShardedCluster/shard changes, run `--profile sharded --allow-changes`.
-5. For deployment-lock/concurrency changes, run `--profile locking --allow-changes`.
+3. For narrow ReplicaSet/database lifecycle changes, run `--profile replicaset`.
+4. For ShardedCluster/shard changes, run `--profile sharded`.
+5. For deployment-lock/concurrency changes, run `--profile locking`.
 6. For a narrow regression where the required fixture/state already exists, use
    `--testList` to rerun only the affected canonical tests.
 7. For administrator inventory, Reconcile, recovery, or cross-plane consistency
-   changes, run `--profile admin --allow-changes` from a clean DBaaS starting inventory.
-8. Reserve `--profile all --allow-changes` for broad cross-cutting lifecycle
+   changes, run `--profile admin` from a clean DBaaS starting inventory.
+8. Reserve `--profile all` for broad cross-cutting lifecycle
    changes, release/demo baselines, or other true acceptance milestones.
 
 This keeps normal feedback fast while preserving the full 100-check run for the occasions when its broad coverage is actually valuable.
