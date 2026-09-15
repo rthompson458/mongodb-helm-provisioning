@@ -477,7 +477,7 @@ Normal managed DBaaS desired-state mutations remain Terraform-driven. The Python
 The live engineering harness includes a destructive administrator suite:
 
 ```bash
-python3 tests/run_harness.py --profile admin --allow-changes
+python3 tests/run_harness.py --profile admin
 ```
 
 The administrator profile runs 5 read-only preflight checks plus 62 live
@@ -508,7 +508,7 @@ the 100-test full-suite order. For example, the final administrator cleanup
 checks are 97 through 100:
 
 ```bash
-python3 tests/run_harness.py --testList 97-100 --allow-changes
+python3 tests/run_harness.py --testList 97-100
 ```
 
 Selective mode runs only the requested tests and does not add their normal
@@ -518,7 +518,7 @@ required starting state is already known.
 The complete lifecycle gauntlet automatically includes all administrator tests:
 
 ```bash
-python3 tests/run_harness.py --profile all --allow-changes
+python3 tests/run_harness.py --profile all
 ```
 
 A passing full run currently contains 100 live checks. A failed destructive
