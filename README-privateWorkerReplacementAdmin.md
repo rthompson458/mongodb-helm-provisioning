@@ -477,11 +477,11 @@ Normal managed DBaaS desired-state mutations remain Terraform-driven. The Python
 The live engineering harness includes a destructive administrator suite:
 
 ```bash
-python3 tests/run_harness.py --admin --allow-changes
+python3 tests/run_harness.py --profile admin --allow-changes
 ```
 
-The standalone administrator selection runs 5 read-only preflight checks plus
-62 live administrator checks, for 67 checks total.
+The administrator profile runs 5 read-only preflight checks plus 62 live
+administrator checks, for 67 checks total.
 
 The suite requires a **clean DBaaS starting inventory**. It also verifies that
 all long-running administrator mutations use the detached-worker operation
