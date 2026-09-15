@@ -228,7 +228,7 @@ Detached administrator worker
 The same harness has a destructive administrator selection:
 
 ```bash
-python3 tests/run_harness.py --profile admin --allow-changes
+python3 tests/run_harness.py --profile admin
 ```
 
 That suite starts from a clean DBaaS inventory, deliberately creates runtime
