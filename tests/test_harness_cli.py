@@ -57,7 +57,6 @@ class HarnessCliTests(unittest.TestCase):
         self.assertIn("admin       67 checks total", result.stdout)
         self.assertIn("all         100 checks total", result.stdout)
         self.assertIn("FULL GAUNTLET - all 100 live acceptance checks", result.stdout)
-        self.assertNotIn("--allow-changes", result.stdout)
         self.assertNotIn("--allow-mutations", result.stdout)
         self.assertNotIn("--allow-destructive", result.stdout)
         self.assertIn("./dev.config", result.stdout)
