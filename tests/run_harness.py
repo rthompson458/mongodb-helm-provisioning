@@ -9,7 +9,7 @@ screen. No live tests run when no arguments are supplied.
 """
 
 # MAINTAINER READING GUIDE
-# User-facing live-harness entry point. It parses profile/change flags, selects scenarios, and delegates execution to the harness runner.
+# User-facing live-harness entry point. It parses the requested profile or exact test list, selects scenarios, and delegates execution to the harness runner.
 # Treat these tests as executable design documentation. A failing assertion
 # should identify which controller contract changed, not merely that text moved.
 
@@ -55,7 +55,7 @@ SCENARIO_PLAN = (
 def _profile_totals() -> dict[str, int]:
     """Return the displayed check count for every live-test profile.
 
-    Every lifecycle profile includes the read-only preflight checks. Deriving
+    Every profile includes the read-only preflight checks. Deriving
     these values from each scenario's TEST_COUNT keeps --help synchronized with
     the checks the harness actually executes when scenarios are added or removed.
     """
@@ -200,54 +200,53 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Live end-to-end test harness for privateWorkerReplacement. "
-            "Choose a profile, administrator suite, or exact test list explicitly."
+            "Choose a profile or exact test list explicitly."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
-Profiles and administrator suite:
+Profiles:
   preflight   {totals['preflight']:2d} read-only checks. Creates, changes, and deletes nothing.
   replicaset  {totals['replicaset']:2d} checks total. Tests ReplicaSet + database lifecycle.
   sharded     {totals['sharded']:2d} checks total. Tests ShardedCluster + shard + database lifecycle.
   locking     {totals['locking']:2d} checks total. Tests ShardedCluster mutation locking.
-  --admin     {totals['admin']:2d} checks total when run alone. Tests administrator diagnostics/recovery.
+  admin       {totals['admin']:2d} checks total. Tests administrator diagnostics/recovery.
   all         {totals['all']:2d} checks total. Runs every lifecycle and administrator test.
 
 Safety:
-  Lifecycle profiles, --admin, and every --testList selection require --allow-changes.
-  The administrator suite deliberately creates drift, stranded locks, and
-  orphaned Terraform state, then proves supported recovery returns the
-  environment to CLEAN. It requires a clean DBaaS starting inventory.
-  Preflight is read-only and does not require --allow-changes.
+  The harness is a live test tool. Selecting a mutating profile or --testList
+  may create, modify, deliberately damage, recover, and delete temporary test
+  resources in the configured environment. The administrator profile requires
+  a clean DBaaS starting inventory. Preflight is read-only.
 
 Common commands:
   Read-only preflight:
     python3 tests/run_harness.py --profile preflight
 
   ReplicaSet lifecycle only:
-    python3 tests/run_harness.py --profile replicaset --allow-changes
+    python3 tests/run_harness.py --profile replicaset
 
   ShardedCluster lifecycle only:
-    python3 tests/run_harness.py --profile sharded --allow-changes
+    python3 tests/run_harness.py --profile sharded
 
   Locking/concurrency only:
-    python3 tests/run_harness.py --profile locking --allow-changes
+    python3 tests/run_harness.py --profile locking
 
-  Full administrator diagnostics/recovery suite:
-    python3 tests/run_harness.py --admin --allow-changes
+  Administrator diagnostics/recovery profile:
+    python3 tests/run_harness.py --profile admin
 
   Run only exact full-suite test numbers:
-    python3 tests/run_harness.py --testList 97-100 --allow-changes
-    python3 tests/run_harness.py --testList 56,58-67 --allow-changes
+    python3 tests/run_harness.py --testList 97-100
+    python3 tests/run_harness.py --testList 56,58-67
 
   --testList uses the canonical numbering from the full {totals['all']}-test run.
   It runs ONLY the requested checks and does not automatically run prerequisite
   tests. When possible, it reuses the newest prior harness Run ID so surviving
   fixtures from a failed run keep the same generated names. The value must contain
   no spaces, and range end must be >= range start. --profile and --testList are
-  mutually exclusive. --admin cannot be combined with --testList.
+  mutually exclusive.
 
   FULL GAUNTLET - all {totals['all']} live acceptance checks:
-    python3 tests/run_harness.py --profile all --allow-changes
+    python3 tests/run_harness.py --profile all
 
 Configuration:
   ./dev.config is used by default. Use --config FILE only when
@@ -257,12 +256,11 @@ Configuration:
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument(
         "--profile",
-        choices=("preflight", "replicaset", "sharded", "locking", "all"),
+        choices=("preflight", "replicaset", "sharded", "locking", "admin", "all"),
         required=False,
         help=(
-            "Optional customer/lifecycle test group. Every profile run starts with "
-            "the read-only preflight checks. 'all' also runs the complete "
-            "administrator suite."
+            "Optional live-test group. Every profile run starts with the read-only "
+            "preflight checks. 'all' also runs the complete administrator suite."
         ),
     )
     selection.add_argument(
@@ -277,30 +275,12 @@ Configuration:
         ),
     )
     parser.add_argument(
-        "--admin",
-        action="store_true",
-        help=(
-            "Run the complete destructive administrator diagnostics/recovery suite. "
-            "May be used alone or added to a non-'all' profile. The 'all' profile "
-            "already includes every administrator test."
-        ),
-    )
-    parser.add_argument(
         "--config",
         default="./dev.config",
         metavar="FILE",
         help=(
             "Optional controller configuration file. "
             "Default: ./dev.config"
-        ),
-    )
-    parser.add_argument(
-        "--allow-changes",
-        action="store_true",
-        help=(
-            "Required for every mutating selection, --admin, and --testList. "
-            "Allows the harness to create, modify, deliberately damage, recover, "
-            "and delete temporary test resources in the configured environment."
         ),
     )
     parser.add_argument(
@@ -315,46 +295,18 @@ Configuration:
 
 
 def _require_selection(args: argparse.Namespace) -> None:
-    """Require one explicit live-test selection and reject ambiguous combinations."""
+    """Require one explicit live-test selection."""
 
-    if args.test_list is not None and args.admin:
-        raise SystemExit(
-            "ERROR: --testList cannot be combined with --admin. "
-            "Use canonical full-suite test numbers instead."
-        )
-
-    if args.profile or args.admin or args.test_list is not None:
+    if args.profile or args.test_list is not None:
         return
     raise SystemExit(
-        "ERROR: Choose --profile {preflight,replicaset,sharded,locking,all}, "
-        "--admin, or --testList LIST."
+        "ERROR: Choose --profile {preflight,replicaset,sharded,locking,admin,all} "
+        "or --testList LIST."
     )
 
 
-def _require_live_opt_in(args: argparse.Namespace) -> None:
-    """Reject every mutating selection unless the change acknowledgement is supplied."""
-
-    # Selective execution intentionally skips normal scenario prerequisites.
-    # Require the explicit change acknowledgement for every --testList request,
-    # even when a particular chosen test happens to be read-only.
-    mutating = args.test_list is not None or args.admin or args.profile in {
-        "replicaset",
-        "sharded",
-        "locking",
-        "all",
-    }
-    if not mutating:
-        return
-
-    if not args.allow_changes:
-        raise SystemExit(
-            "ERROR: Selected live tests create, modify, deliberately damage, and "
-            "delete temporary test resources. Re-run with --allow-changes."
-        )
-
-
-def _total_tests(profile: str | None, admin: bool) -> int:
-    """Return the exact number of PASS/FAIL checks for this combined selection."""
+def _total_tests(profile: str | None) -> int:
+    """Return the exact number of PASS/FAIL checks for one profile."""
 
     total = scenario_preflight.TEST_COUNT
     if profile in {"replicaset", "all"}:
@@ -363,27 +315,20 @@ def _total_tests(profile: str | None, admin: bool) -> int:
         total += scenario_sharded.TEST_COUNT
     if profile in {"locking", "all"}:
         total += scenario_locking.TEST_COUNT
-    if admin or profile == "all":
+    if profile in {"admin", "all"}:
         total += scenario_admin.TEST_COUNT
     return total
 
 
 def _selection_label(
     profile: str | None,
-    admin: bool,
     test_list: tuple[int, ...] | None = None,
 ) -> str:
     """Return a concise label for the requested harness work."""
 
     if test_list is not None:
         return f"testList {_format_test_list(test_list)}"
-
-    parts: list[str] = []
-    if profile:
-        parts.append(profile)
-    if admin and profile != "all":
-        parts.append("admin")
-    return " + ".join(parts)
+    return profile or ""
 
 
 def _run_scenario(runner: HarnessRunner, label: str, scenario) -> bool:
@@ -397,7 +342,6 @@ def _run_scenario(runner: HarnessRunner, label: str, scenario) -> bool:
 
 def _normal_scenario_plan(
     profile: str | None,
-    admin: bool,
 ) -> list[tuple[str, object]]:
     """Return scenarios selected for a normal non---testList invocation."""
 
@@ -408,12 +352,12 @@ def _normal_scenario_plan(
         selected.append(("ShardedCluster", scenario_sharded))
     if profile in {"locking", "all"}:
         selected.append(("Locking", scenario_locking))
-    if admin or profile == "all":
+    if profile in {"admin", "all"}:
         selected.append(("Admin", scenario_admin))
     return selected
 
 
-# ENTRY FLOW: parse profile -> validate safety flags -> build the runner ->
+# ENTRY FLOW: parse selection -> validate configuration -> build the runner ->
 # execute selected scenarios -> print a final pass/fail/skip summary.
 # Scenario modules contain domain steps; keep orchestration here.
 def main(argv: list[str] | None = None) -> int:
@@ -427,7 +371,6 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(raw_argv)
     _require_selection(args)
-    _require_live_opt_in(args)
 
     config_display = args.config
     config_path = Path(args.config).expanduser().resolve()
@@ -454,7 +397,7 @@ def main(argv: list[str] | None = None) -> int:
         total_tests=(
             canonical_total
             if selected_tests is not None
-            else _total_tests(args.profile, args.admin)
+            else _total_tests(args.profile)
         ),
         selected_tests=selected_tests,
         canonical_total_tests=canonical_total,
@@ -465,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
     print("=" * 68)
     print(
         f"Selection: "
-        f"{_selection_label(args.profile, args.admin, args.test_list)}"
+        f"{_selection_label(args.profile, args.test_list)}"
     )
     print(f"Config:  {config_display}")
     print(
@@ -504,10 +447,10 @@ def main(argv: list[str] | None = None) -> int:
 
         return runner.summary()
 
-    # Normal profile/admin runs keep compact numbering and always begin with
-    # preflight. One shared execution helper keeps timing/fail-fast behavior
-    # identical across every scenario.
-    for label, scenario in _normal_scenario_plan(args.profile, args.admin):
+    # Normal profile runs keep compact numbering and always begin with preflight.
+    # One shared execution helper keeps timing/fail-fast behavior identical across
+    # every scenario.
+    for label, scenario in _normal_scenario_plan(args.profile):
         if not _run_scenario(runner, label, scenario):
             return runner.summary()
 
