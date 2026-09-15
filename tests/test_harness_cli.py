@@ -1,7 +1,7 @@
 """Regression tests for the live-harness command-line interface."""
 
 # MAINTAINER READING GUIDE
-# Protects live-harness command-line parsing and the safety semantics of --allow-changes.
+# Protects live-harness command-line parsing, profile selection, and explicit test-list behavior.
 # Treat these tests as executable design documentation. A failing assertion
 # should identify which controller contract changed, not merely that text moved.
 
@@ -57,16 +57,16 @@ class HarnessCliTests(unittest.TestCase):
         self.assertIn("admin       67 checks total", result.stdout)
         self.assertIn("all         100 checks total", result.stdout)
         self.assertIn("FULL GAUNTLET - all 100 live acceptance checks", result.stdout)
-        self.assertIn("--allow-changes", result.stdout)
+        self.assertNotIn("--allow-changes", result.stdout)
         self.assertNotIn("--allow-mutations", result.stdout)
         self.assertNotIn("--allow-destructive", result.stdout)
         self.assertIn("./dev.config", result.stdout)
         self.assertIn(
-            "python3 tests/run_harness.py --profile all --allow-changes",
+            "python3 tests/run_harness.py --profile all",
             result.stdout,
         )
         self.assertIn(
-            "python3 tests/run_harness.py --testList 97-100 --allow-changes",
+            "python3 tests/run_harness.py --testList 97-100",
             result.stdout,
         )
         self.assertIn("56,58-67", result.stdout)
@@ -87,26 +87,20 @@ class HarnessCliTests(unittest.TestCase):
         self.assertIn("admin", result.stderr)
         self.assertIn("--testList", result.stderr)
 
-    def test_lifecycle_profile_requires_allow_changes(self) -> None:
-        result = self._run("--profile", "replicaset")
+    def test_mutating_profiles_parse_without_extra_change_acknowledgement(self) -> None:
+        parser = harness_cli.build_parser()
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("create, modify, deliberately damage", result.stderr)
-        self.assertIn("--allow-changes", result.stderr)
-
-    def test_admin_suite_requires_allow_changes(self) -> None:
-        result = self._run("--profile", "admin")
-
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("deliberately damage", result.stderr)
-        self.assertIn("--allow-changes", result.stderr)
+        for profile in ("replicaset", "sharded", "locking", "admin", "all"):
+            with self.subTest(profile=profile):
+                args = parser.parse_args(["--profile", profile])
+                self.assertEqual(args.profile, profile)
 
     def test_help_documents_admin_command_and_clean_start_requirement(self) -> None:
         result = self._run("--help")
 
         self.assertEqual(result.returncode, 0)
         self.assertIn(
-            "python3 tests/run_harness.py --profile admin --allow-changes",
+            "python3 tests/run_harness.py --profile admin",
             result.stdout,
         )
         self.assertIn("requires a clean DBaaS starting inventory", result.stdout)
@@ -187,7 +181,6 @@ class HarnessCliTests(unittest.TestCase):
             "all",
             "--testList",
             "97-100",
-            "--allow-changes",
         )
 
         self.assertNotEqual(result.returncode, 0)
@@ -199,23 +192,22 @@ class HarnessCliTests(unittest.TestCase):
             "admin",
             "--testList",
             "97-100",
-            "--allow-changes",
         )
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("not allowed with argument", result.stderr)
 
     def test_removed_admin_flag_is_rejected(self) -> None:
-        result = self._run("--admin", "--allow-changes")
+        result = self._run("--admin")
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unrecognized arguments: --admin", result.stderr)
 
-    def test_test_list_requires_allow_changes(self) -> None:
-        result = self._run("--testList", "97-100")
+    def test_test_list_parses_without_extra_change_acknowledgement(self) -> None:
+        parser = harness_cli.build_parser()
+        args = parser.parse_args(["--testList", "97-100"])
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("--allow-changes", result.stderr)
+        self.assertEqual(args.test_list, (97, 98, 99, 100))
 
     def test_old_dual_safety_flags_are_rejected(self) -> None:
         result = self._run(
