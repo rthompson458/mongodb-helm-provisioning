@@ -9,7 +9,7 @@ screen. No live tests run when no arguments are supplied.
 """
 
 # MAINTAINER READING GUIDE
-# User-facing live-harness entry point. It parses profile/change flags, selects scenarios, and delegates execution to the harness runner.
+# User-facing live-harness entry point. It parses the requested profile or exact test list, selects scenarios, and delegates execution to the harness runner.
 # Treat these tests as executable design documentation. A failing assertion
 # should identify which controller contract changed, not merely that text moved.
 
@@ -213,31 +213,30 @@ Profiles:
   all         {totals['all']:2d} checks total. Runs every lifecycle and administrator test.
 
 Safety:
-  Mutating profiles and every --testList selection require --allow-changes.
-  The administrator suite deliberately creates drift, stranded locks, and
-  orphaned Terraform state, then proves supported recovery returns the
-  environment to CLEAN. It requires a clean DBaaS starting inventory.
-  Preflight is read-only and does not require --allow-changes.
+  The harness is a live test tool. Selecting a mutating profile or --testList
+  may create, modify, deliberately damage, recover, and delete temporary test
+  resources in the configured environment. The administrator profile requires
+  a clean DBaaS starting inventory. Preflight is read-only.
 
 Common commands:
   Read-only preflight:
     python3 tests/run_harness.py --profile preflight
 
   ReplicaSet lifecycle only:
-    python3 tests/run_harness.py --profile replicaset --allow-changes
+    python3 tests/run_harness.py --profile replicaset
 
   ShardedCluster lifecycle only:
-    python3 tests/run_harness.py --profile sharded --allow-changes
+    python3 tests/run_harness.py --profile sharded
 
   Locking/concurrency only:
-    python3 tests/run_harness.py --profile locking --allow-changes
+    python3 tests/run_harness.py --profile locking
 
   Administrator diagnostics/recovery profile:
-    python3 tests/run_harness.py --profile admin --allow-changes
+    python3 tests/run_harness.py --profile admin
 
   Run only exact full-suite test numbers:
-    python3 tests/run_harness.py --testList 97-100 --allow-changes
-    python3 tests/run_harness.py --testList 56,58-67 --allow-changes
+    python3 tests/run_harness.py --testList 97-100
+    python3 tests/run_harness.py --testList 56,58-67
 
   --testList uses the canonical numbering from the full {totals['all']}-test run.
   It runs ONLY the requested checks and does not automatically run prerequisite
@@ -247,7 +246,7 @@ Common commands:
   mutually exclusive.
 
   FULL GAUNTLET - all {totals['all']} live acceptance checks:
-    python3 tests/run_harness.py --profile all --allow-changes
+    python3 tests/run_harness.py --profile all
 
 Configuration:
   ./dev.config is used by default. Use --config FILE only when
@@ -285,15 +284,6 @@ Configuration:
         ),
     )
     parser.add_argument(
-        "--allow-changes",
-        action="store_true",
-        help=(
-            "Required for every mutating profile and --testList. Allows the harness "
-            "to create, modify, deliberately damage, recover, and delete temporary "
-            "test resources in the configured environment."
-        ),
-    )
-    parser.add_argument(
         "--verbose",
         action="store_true",
         help=(
@@ -313,29 +303,6 @@ def _require_selection(args: argparse.Namespace) -> None:
         "ERROR: Choose --profile {preflight,replicaset,sharded,locking,admin,all} "
         "or --testList LIST."
     )
-
-
-def _require_live_opt_in(args: argparse.Namespace) -> None:
-    """Reject every mutating selection unless the change acknowledgement is supplied."""
-
-    # Selective execution intentionally skips normal scenario prerequisites.
-    # Require the explicit change acknowledgement for every --testList request,
-    # even when a particular chosen test happens to be read-only.
-    mutating = args.test_list is not None or args.profile in {
-        "replicaset",
-        "sharded",
-        "locking",
-        "admin",
-        "all",
-    }
-    if not mutating:
-        return
-
-    if not args.allow_changes:
-        raise SystemExit(
-            "ERROR: Selected live tests create, modify, deliberately damage, and "
-            "delete temporary test resources. Re-run with --allow-changes."
-        )
 
 
 def _total_tests(profile: str | None) -> int:
@@ -404,7 +371,6 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(raw_argv)
     _require_selection(args)
-    _require_live_opt_in(args)
 
     config_display = args.config
     config_path = Path(args.config).expanduser().resolve()
