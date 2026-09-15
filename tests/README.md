@@ -136,7 +136,7 @@ This is intentionally equivalent to:
 python3 tests/run_harness.py --help
 ```
 
-No live tests run when no arguments are supplied. An actual harness run requires an explicit `--profile`, `--admin`, or `--testList`.
+No live tests run when no arguments are supplied. An actual harness run requires an explicit `--profile` or `--testList`.
 
 `--help` is global harness help. For example, this is safe and does not run the locking profile:
 
@@ -217,10 +217,10 @@ The locking scenario adds 6 checks after preflight. It verifies that the Terrafo
 
 ### Administrator recovery suite — 67 total checks
 
-The administrator suite is selected with a flag rather than a normal lifecycle profile:
+The administrator recovery suite is a normal harness profile:
 
 ```bash
-python3 tests/run_harness.py --admin --allow-changes
+python3 tests/run_harness.py --profile admin --allow-changes
 ```
 
 It runs the 5 read-only preflight checks plus 62 administrator checks. The suite requires a **clean DBaaS starting inventory** because it intentionally damages and repairs the test environment. It verifies:
@@ -246,13 +246,7 @@ It runs the 5 read-only preflight checks plus 62 administrator checks. The suite
 
 The suite stops on the first failure. A failed destructive test may intentionally leave its broken state available for diagnosis. A **passing** administrator run finishes clean.
 
-`--admin` may also be added to a specific lifecycle profile. For example:
-
-```bash
-python3 tests/run_harness.py --profile replicaset --admin --allow-changes
-```
-
-The `all` profile already includes the full administrator suite, so adding `--admin` to `--profile all` does not duplicate the tests.
+`admin` is selected the same way as every other profile. It is not combined with another profile. Use `--profile all` when the complete lifecycle and administrator suite is required.
 
 ### Targeted test-list execution
 
@@ -273,7 +267,6 @@ Rules:
 - valid test numbers are 1 through 100;
 - duplicate selections are harmless and are normalized;
 - `--profile` and `--testList` are mutually exclusive;
-- `--admin` cannot be combined with `--testList`;
 - every `--testList` run requires `--allow-changes`;
 - **only** the requested tests run. Prerequisite tests are not added automatically;
 - when possible, selective mode reuses the newest prior harness Run ID from the
@@ -316,8 +309,7 @@ The harness help derives displayed totals from the scenario `TEST_COUNT` constan
 
 ## 4. Safety flag
 
-Every mutating lifecycle selection, the administrator suite, and every
-`--testList` selection require:
+Every mutating profile and every `--testList` selection require:
 
 ```text
 --allow-changes
@@ -325,8 +317,8 @@ Every mutating lifecycle selection, the administrator suite, and every
 
 `--allow-changes` explicitly acknowledges that the harness may create, modify, deliberately damage, recover, and delete temporary test resources in the configured environment.
 
-The flag is a deliberate safety gate. A mutating profile, `--admin`, or
-`--testList` does **not** start until `--allow-changes` is present. Selective
+The flag is a deliberate safety gate. A mutating profile or `--testList` does
+**not** start until `--allow-changes` is present. Selective
 mode always requires the flag because it intentionally skips normal scenario
 prerequisites and may target destructive tests directly.
 
@@ -472,7 +464,7 @@ Use this approach:
 6. For a narrow regression where the required fixture/state already exists, use
    `--testList` to rerun only the affected canonical tests.
 7. For administrator inventory, Reconcile, recovery, or cross-plane consistency
-   changes, run `--admin --allow-changes` from a clean DBaaS starting inventory.
+   changes, run `--profile admin --allow-changes` from a clean DBaaS starting inventory.
 8. Reserve `--profile all --allow-changes` for broad cross-cutting lifecycle
    changes, release/demo baselines, or other true acceptance milestones.
 
